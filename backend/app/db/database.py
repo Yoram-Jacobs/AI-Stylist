@@ -46,8 +46,18 @@ async def ensure_indexes() -> None:
 
     await db.transactions.create_index([("buyer_id", 1), ("created_at", -1)])
     await db.transactions.create_index([("seller_id", 1), ("created_at", -1)])
+    # Partial-filter unique index: only enforce uniqueness when the Stripe
+    # checkout session id is actually a non-empty string. This avoids the
+    # classic "duplicate key on null" problem that breaks pre-payment writes.
+    try:
+        await db.transactions.drop_index("stripe.checkout_session_id_1")
+    except Exception:  # noqa: BLE001
+        pass
     await db.transactions.create_index(
-        "stripe.checkout_session_id", unique=True, sparse=True
+        [("stripe.checkout_session_id", 1)],
+        unique=True,
+        partialFilterExpression={"stripe.checkout_session_id": {"$type": "string"}},
+        name="stripe_checkout_session_id_unique_partial",
     )
 
     await db.stylist_sessions.create_index("user_id", unique=True)

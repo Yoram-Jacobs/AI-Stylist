@@ -289,7 +289,7 @@ class DressAppAPITester:
         
         if success and status == 200:
             expected = {
-                "stripe_fee_cents": 102,  # 2.9% + $0.30
+                "stripe_fee_cents": 102,  # 2.9% + $0.30 with banker's rounding
                 "net_after_stripe_cents": 2398,
                 "platform_fee_cents": 168,  # 7% of net_after_stripe
                 "seller_net_cents": 2230
@@ -298,6 +298,11 @@ class DressAppAPITester:
             all_correct = all(data.get(k) == v for k, v in expected.items())
             self.log_test("Listings Fee Preview", all_correct, 
                          f"Expected: {expected}, Got: {data}")
+            
+            # Specifically verify banker's rounding (102.5 → 102)
+            stripe_fee_correct = data.get('stripe_fee_cents') == 102
+            self.log_test("Listings Fee Preview - Banker's Rounding", stripe_fee_correct,
+                         f"Stripe fee: {data.get('stripe_fee_cents')} (should be 102 from 102.5)")
         else:
             self.log_test("Listings Fee Preview", False, f"Status: {status}, Data: {data}")
 
@@ -427,6 +432,85 @@ class DressAppAPITester:
             self.log_test("Transactions Create", False, f"Status: {status}, Data: {data}")
             return None
 
+    def test_multiple_pending_transactions(self):
+        """REGRESSION TEST: Test creating multiple pending transactions in sequence"""
+        if not self.dev_token or not self.buyer_token:
+            self.log_test("Multiple Pending Transactions", False, "Missing required tokens")
+            return
+        
+        print("🔄 Testing multiple pending transactions regression...")
+        
+        # Create two different listings
+        listing_ids = []
+        for i in range(2):
+            # Create closet item
+            item_data = {
+                "title": f"Test Item {i+1} for Transaction",
+                "category": "tops",
+                "sub_category": "shirt",
+                "brand": f"Brand{i+1}",
+                "color": "blue",
+                "formality": "casual"
+            }
+            
+            success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+            if not (success and status == 201):
+                self.log_test(f"Multiple Transactions - Create Item {i+1}", False, f"Status: {status}")
+                return
+                
+            closet_item_id = data.get('id')
+            
+            # Create listing
+            listing_data = {
+                "closet_item_id": closet_item_id,
+                "title": f"Test Listing {i+1}",
+                "description": f"Test listing {i+1} for multiple transactions",
+                "category": "tops",
+                "size": "M",
+                "condition": "like_new",
+                "list_price_cents": 2500 + (i * 500),  # Different prices
+                "ships_to": ["US"]
+            }
+            
+            success, data, status = self.make_request('POST', '/listings', listing_data, token=self.dev_token)
+            if not (success and status == 201):
+                self.log_test(f"Multiple Transactions - Create Listing {i+1}", False, f"Status: {status}")
+                return
+                
+            listing_ids.append(data.get('id'))
+        
+        # Now create multiple pending transactions
+        transaction_ids = []
+        for i, listing_id in enumerate(listing_ids):
+            transaction_data = {"listing_id": listing_id}
+            
+            success, data, status = self.make_request('POST', '/transactions', transaction_data, token=self.buyer_token)
+            
+            if success and status == 201:
+                transaction_id = data.get('id')
+                transaction_ids.append(transaction_id)
+                
+                # Verify full financial ledger
+                financial = data.get('financial', {})
+                has_full_ledger = all(k in financial for k in [
+                    'gross_cents', 'stripe_fee_cents', 'net_after_stripe_cents', 
+                    'platform_fee_cents', 'seller_net_cents'
+                ])
+                
+                self.log_test(f"Multiple Pending Transaction {i+1}", has_full_ledger, 
+                             f"Transaction: {transaction_id}, Financial: {financial}")
+            else:
+                self.log_test(f"Multiple Pending Transaction {i+1}", False, 
+                             f"Status: {status}, Data: {data}")
+                return
+        
+        # Verify both transactions were created successfully
+        all_created = len(transaction_ids) == 2
+        self.log_test("Multiple Pending Transactions - Both Created", all_created, 
+                     f"Created {len(transaction_ids)} transactions: {transaction_ids}")
+        
+        return transaction_ids
+
     def test_transactions_filters(self):
         """Test transaction filtering by role"""
         if not self.dev_token:
@@ -516,17 +600,73 @@ class DressAppAPITester:
         success, data, status = self.make_request('GET', '/stylist/history', token=self.dev_token)
         
         if success and status == 200:
-            has_messages = isinstance(data, list) and len(data) > 0
+            messages = data.get('messages', [])
+            has_messages = isinstance(messages, list) and len(messages) > 0
             if has_messages:
                 # Check for both user and assistant messages
-                roles = [msg.get('role') for msg in data]
+                roles = [msg.get('role') for msg in messages]
                 has_user_and_assistant = 'user' in roles and 'assistant' in roles
                 self.log_test("Stylist History", has_user_and_assistant, 
-                             f"Found {len(data)} messages with roles: {set(roles)}")
+                             f"Found {len(messages)} messages with roles: {set(roles)}")
+                
+                # Return the messages for further verification
+                return messages
             else:
                 self.log_test("Stylist History", True, "No conversation history yet (expected)")
+                return []
         else:
             self.log_test("Stylist History", False, f"Status: {status}, Data: {data}")
+            return []
+
+    def test_stylist_history_persistence(self):
+        """Test that stylist history persists both user and assistant roles after each call"""
+        if not self.dev_token:
+            self.log_test("Stylist History Persistence", False, "No dev token available")
+            return
+            
+        print("🔄 Testing stylist history persistence...")
+        
+        # Make a stylist call first to ensure we have history
+        data = {'text': 'Quick styling question for history test'}
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            if response.status_code != 200:
+                self.log_test("Stylist History Persistence - Setup", False, 
+                             f"Stylist call failed: {response.status_code}")
+                return
+        except Exception as e:
+            self.log_test("Stylist History Persistence - Setup", False, f"Error: {e}")
+            return
+        
+        # Now check history
+        success, data, status = self.make_request('GET', '/stylist/history', token=self.dev_token)
+        
+        if success and status == 200:
+            messages = data.get('messages', [])
+            if len(messages) >= 2:  # Should have at least user + assistant
+                roles = [msg.get('role') for msg in messages]
+                has_user = 'user' in roles
+                has_assistant = 'assistant' in roles
+                
+                # Check that messages are properly structured
+                user_messages = [m for m in messages if m.get('role') == 'user']
+                assistant_messages = [m for m in messages if m.get('role') == 'assistant']
+                
+                user_has_transcript = any(m.get('transcript') for m in user_messages)
+                assistant_has_payload = any(m.get('assistant_payload') for m in assistant_messages)
+                
+                all_checks = has_user and has_assistant and user_has_transcript and assistant_has_payload
+                details = f"Messages: {len(messages)}, User: {len(user_messages)}, Assistant: {len(assistant_messages)}"
+                
+                self.log_test("Stylist History Persistence", all_checks, details)
+            else:
+                self.log_test("Stylist History Persistence", False, 
+                             f"Expected at least 2 messages, got {len(messages)}")
+        else:
+            self.log_test("Stylist History Persistence", False, f"Status: {status}, Data: {data}")
 
     def test_multipart_stylist(self):
         """Test stylist with multipart data (text + image)"""
@@ -562,6 +702,66 @@ class DressAppAPITester:
                          f"Reasoning provided: {has_reasoning}")
         else:
             self.log_test("Stylist Multipart", False, f"Status: {status}, Data: {response_data}")
+
+    def test_multipart_stylist_with_real_image(self):
+        """REGRESSION TEST: Test stylist with real clothing image from Unsplash"""
+        if not self.dev_token:
+            self.log_test("Stylist Multipart Real Image", False, "No dev token available")
+            return
+            
+        print("🔄 Downloading real clothing image from Unsplash...")
+        
+        # Download real clothing image from Unsplash
+        try:
+            image_response = requests.get(
+                "https://images.unsplash.com/photo-1603252109303-2751441dd157?w=900&q=80&auto=format&fit=crop",
+                timeout=30
+            )
+            if image_response.status_code != 200:
+                self.log_test("Stylist Multipart Real Image", False, 
+                             f"Failed to download image: {image_response.status_code}")
+                return
+                
+            image_bytes = image_response.content
+            print(f"✅ Downloaded image ({len(image_bytes)} bytes)")
+            
+        except Exception as e:
+            self.log_test("Stylist Multipart Real Image", False, f"Image download error: {e}")
+            return
+        
+        # Submit to stylist endpoint
+        files = {'image': ('clothing.jpg', image_bytes, 'image/jpeg')}
+        data = {'text': 'What do you think of this outfit? Any styling advice?'}
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with real image (this may take 15-25 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, files=files, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            has_reasoning = bool(advice.get('reasoning_summary'))
+            has_tts = bool(advice.get('tts_audio_base64'))
+            
+            # Check that reasoning is non-empty
+            reasoning_non_empty = len(advice.get('reasoning_summary', '').strip()) > 0
+            tts_non_empty = len(advice.get('tts_audio_base64', '').strip()) > 0
+            
+            all_components = has_reasoning and has_tts and reasoning_non_empty and tts_non_empty
+            details = f"Reasoning: {reasoning_non_empty} ({len(advice.get('reasoning_summary', ''))} chars), TTS: {tts_non_empty} ({len(advice.get('tts_audio_base64', ''))} chars)"
+            
+            self.log_test("Stylist Multipart Real Image", all_components, details)
+        else:
+            self.log_test("Stylist Multipart Real Image", False, f"Status: {status}, Data: {response_data}")
 
     def run_all_tests(self):
         """Run all test suites"""
@@ -601,6 +801,12 @@ class DressAppAPITester:
         self.test_stylist_with_calendar()
         self.test_stylist_history()
         self.test_multipart_stylist()
+        
+        # REGRESSION TESTS for Phase 2
+        print("\n🔄 Running Phase 2 Regression Tests...")
+        self.test_multiple_pending_transactions()
+        self.test_multipart_stylist_with_real_image()
+        self.test_stylist_history_persistence()
         
         return self.generate_report()
 
