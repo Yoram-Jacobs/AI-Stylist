@@ -1,50 +1,42 @@
 [
   {
-    "content": "Phase 1: Collect API keys from user (fal.ai, Groq, ElevenLabs→Deepgram, OpenWeatherMap)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Get Emergent LLM key + integration playbooks (fal.ai, Groq, Deepgram, Gemini 2.5 Pro)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Write Technical Architecture Document (FARM adaptation of Cloudflare design)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Write MongoDB Schema with Source Tags + Financial Metadata",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Write wrangler.toml reference artifact",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Scaffold backend with secrets template + provider client wrappers",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Implement /api/v1/stylist multimodal endpoint (image+text, image+voice)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: Write POC script scripts/poc_stylist_pipeline.py and run until passing",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1: User stories coverage (image+text advice ✅, image+voice advice ✅, garment edit ⚠️fal.ai balance, TTS audio response ✅, POC script end-to-end ✅)",
-    "status": "completed"
-  },
-  {
-    "content": "BLOCKER: fal.ai balance exhausted — user must top up or provide a new FAL_KEY before SAM-2 / Stable Diffusion segmentation + infill can be validated",
-    "status": "in_progress"
-  },
-  {
-    "content": "Phase 2: Full backend CRUD (users, closet, marketplace) + vector search + auth + stylist memory persistence",
+    "content": "BLOCKER: fal.ai balance exhausted (user action — non-blocking for Phase 2 code)",
     "status": "pending"
   },
   {
-    "content": "Phase 3: React frontend (closet, camera, stylist chat, marketplace, admin)",
+    "content": "Phase 2.1: Auth (register, login, /me, dev-bypass) + JWT middleware + password hashing",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.2: Users service (GET/PATCH /users/me)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.3: Closet service (CRUD with Source Tags enforcement + best-effort fal segmentation + variant edit endpoint)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.4: Listings service (CRUD + fee preview + source transition Private→Shared/Retail)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.5: Transactions service (create pending with financial ledger)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.6: Stylist memory persistence + closet_summary hydration",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.7: All routers wired into /api/v1",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2.8: Smoke test green; now hand off to testing_agent_v3 for comprehensive Phase 2 validation",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 3: React frontend (closet, camera, stylist chat with streaming audio, marketplace, admin)",
     "status": "pending"
   },
   {
