@@ -1,0 +1,162 @@
+# ============================================================
+# DressApp — wrangler.toml (REFERENCE ARTIFACT)
+# ============================================================
+# This file is NOT deployed from /app. It is shipped as a
+# canonical description of how DressApp's Cloudflare Workers
+# deployment would be configured if/when we migrate back off
+# the Emergent FARM runtime.
+#
+# Every binding here has a 1-to-1 equivalent in the FARM
+# implementation (see /app/docs/ARCHITECTURE.md §3).
+# ============================================================
+
+name = "dressapp"
+main = "src/worker.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Enable the 2026 Agents SDK
+[agents]
+enabled = true
+sdk_version = "2026-01"
+
+# ------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------
+[[routes]]
+pattern  = "api.dressapp.com/*"
+zone_name = "dressapp.com"
+
+# ------------------------------------------------------------
+# Environment variables (non-secret)
+# ------------------------------------------------------------
+[vars]
+ENVIRONMENT = "production"
+PLATFORM_FEE_PERCENT = "7"
+PLATFORM_FEE_APPLIED_AFTER = "stripe_processing_fee"
+STRIPE_PROCESSING_FEE_PERCENT = "2.9"
+STRIPE_PROCESSING_FEE_FIXED_CENTS = "30"
+DEFAULT_TTS_MODEL = "aura-2-thalia-en"
+DEFAULT_STYLIST_MODEL = "gemini-2.5-pro"
+DEFAULT_SEGMENTATION_MODEL = "fal-ai/sam2/auto-segment"
+DEFAULT_INFILL_MODEL = "fal-ai/fast-sdxl/image-to-image"
+WHISPER_MODEL = "whisper-large-v3"
+
+# ------------------------------------------------------------
+# Secrets (set via `wrangler secret put ...`)
+# ------------------------------------------------------------
+# wrangler secret put FAL_KEY
+# wrangler secret put GROQ_API_KEY
+# wrangler secret put DEEPGRAM_API_KEY
+# wrangler secret put OPENWEATHER_API_KEY
+# wrangler secret put EMERGENT_LLM_KEY
+# wrangler secret put JWT_SECRET
+# wrangler secret put STRIPE_SECRET_KEY
+# wrangler secret put STRIPE_WEBHOOK_SECRET
+# wrangler secret put GOOGLE_OAUTH_CLIENT_ID
+# wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
+
+# ------------------------------------------------------------
+# Durable Objects — persistent per-user agent memory
+# (= MongoDB `stylist_sessions` collection in FARM)
+# ------------------------------------------------------------
+[[durable_objects.bindings]]
+name       = "STYLIST_AGENT"
+class_name = "StylistAgent"
+script_name = "dressapp"
+
+[[durable_objects.bindings]]
+name       = "USER_SESSION"
+class_name = "UserSession"
+script_name = "dressapp"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["StylistAgent", "UserSession"]
+
+# ------------------------------------------------------------
+# Vectorize — clothing / outfit embedding index
+# (= MongoDB Atlas Vector Search in FARM)
+# ------------------------------------------------------------
+[[vectorize]]
+binding = "DRESSAPP_VECTORS"
+index_name = "dressapp-wardrobe-v1"
+
+# create-once (outside wrangler.toml):
+#   wrangler vectorize create dressapp-wardrobe-v1 \
+#       --dimensions=512 --metric=cosine
+
+# ------------------------------------------------------------
+# Workers KV — feature flags, cultural rules cache
+# (= MongoDB `config` + in-process LRU cache in FARM)
+# ------------------------------------------------------------
+[[kv_namespaces]]
+binding = "DRESSAPP_KV"
+id = "REPLACE_WITH_KV_ID"
+
+# ------------------------------------------------------------
+# R2 — object storage for images + TTS audio
+# (= S3-compatible object storage in FARM — Phase 2)
+# ------------------------------------------------------------
+[[r2_buckets]]
+binding = "DRESSAPP_MEDIA"
+bucket_name = "dressapp-media"
+
+# ------------------------------------------------------------
+# D1 / Hyperdrive — relational/transactional SQL for Stripe
+# (= MongoDB `transactions` collection in FARM; switch to
+#   Postgres + Hyperdrive for stronger ACID guarantees if
+#   marketplace volume demands it)
+# ------------------------------------------------------------
+# [[hyperdrive]]
+# binding = "DRESSAPP_DB"
+# id = "REPLACE_WITH_HYPERDRIVE_ID"
+
+# ------------------------------------------------------------
+# AI bindings — Workers AI + AI Gateway
+# (= direct provider SDK calls in FARM:
+#    fal.ai, Groq, Deepgram, Gemini)
+# ------------------------------------------------------------
+[ai]
+binding = "AI"
+
+[ai_gateway]
+binding = "AI_GATEWAY"
+account_id = "REPLACE_WITH_ACCOUNT_ID"
+gateway = "dressapp-gateway"
+
+# ------------------------------------------------------------
+# Queues — async job fan-out (Trend-Scout, embedding backfills)
+# (= MongoDB `jobs` + APScheduler in FARM)
+# ------------------------------------------------------------
+[[queues.producers]]
+binding = "TRENDSCOUT_QUEUE"
+queue   = "dressapp-trendscout"
+
+[[queues.consumers]]
+queue = "dressapp-trendscout"
+max_batch_size = 10
+max_batch_timeout = 30
+
+[[queues.producers]]
+binding = "EMBED_QUEUE"
+queue   = "dressapp-embed"
+
+[[queues.consumers]]
+queue = "dressapp-embed"
+max_batch_size = 50
+max_batch_timeout = 10
+
+# ------------------------------------------------------------
+# Cron Triggers — Trend-Scout daily job
+# (= APScheduler CronTrigger in FARM)
+# ------------------------------------------------------------
+[triggers]
+crons = ["0 6 * * *"]   # daily at 06:00 UTC
+
+# ------------------------------------------------------------
+# Observability
+# ------------------------------------------------------------
+[observability]
+enabled = true
+head_sampling_rate = 1.0

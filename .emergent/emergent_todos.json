@@ -1,0 +1,58 @@
+[
+  {
+    "content": "Phase 1: Collect API keys from user (fal.ai, Groq, ElevenLabs→Deepgram, OpenWeatherMap)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Get Emergent LLM key + integration playbooks (fal.ai, Groq, Deepgram, Gemini 2.5 Pro)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Write Technical Architecture Document (FARM adaptation of Cloudflare design)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Write MongoDB Schema with Source Tags + Financial Metadata",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Write wrangler.toml reference artifact",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Scaffold backend with secrets template + provider client wrappers",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Implement /api/v1/stylist multimodal endpoint (image+text, image+voice)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: Write POC script scripts/poc_stylist_pipeline.py and run until passing",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: User stories coverage (image+text advice ✅, image+voice advice ✅, garment edit ⚠️fal.ai balance, TTS audio response ✅, POC script end-to-end ✅)",
+    "status": "completed"
+  },
+  {
+    "content": "BLOCKER: fal.ai balance exhausted — user must top up or provide a new FAL_KEY before SAM-2 / Stable Diffusion segmentation + infill can be validated",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Full backend CRUD (users, closet, marketplace) + vector search + auth + stylist memory persistence",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 3: React frontend (closet, camera, stylist chat, marketplace, admin)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 4: Stripe Connect Express + Google Calendar OAuth + Trend-Scout background agent",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 5: Admin dashboard + polish + comprehensive E2E testing",
+    "status": "pending"
+  }
+]

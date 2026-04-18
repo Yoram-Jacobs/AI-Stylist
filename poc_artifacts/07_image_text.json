@@ -1,0 +1,63 @@
+{
+  "transcript": "I have a client pitch at 10am tomorrow in NYC. I'm thinking about wearing this oxford shirt. Build me a complete outfit and tell me if it's right for the weather.",
+  "segmented_image_url": null,
+  "infilled_image_url": null,
+  "weather_summary": "19.54°C Clouds in Weehawken",
+  "calendar_summary": "Client pitch [formal]",
+  "outfit_recommendations": [
+    {
+      "name": "The Classic Pitch",
+      "items": [
+        {
+          "role": "top",
+          "description": "Your crisp white oxford shirt will be the perfect base.",
+          "closet_item_id": "a4"
+        },
+        {
+          "role": "bottom",
+          "description": "Grey wool trousers provide a sharp, professional foundation.",
+          "closet_item_id": "a2"
+        },
+        {
+          "role": "outerwear",
+          "description": "Layer with the navy wool blazer to create a timeless and authoritative business look.",
+          "closet_item_id": "a1"
+        },
+        {
+          "role": "shoes",
+          "description": "Brown leather derby shoes will complete the polished, classic aesthetic.",
+          "closet_item_id": "a3"
+        },
+        {
+          "role": "outerwear",
+          "description": "For your commute, the beige trench coat is essential. It's stylish and will protect you from the cool air and potential rain.",
+          "closet_item_id": "a5"
+        },
+        {
+          "role": "accessory",
+          "description": "A brown leather belt to match your shoes.",
+          "closet_item_id": null
+        }
+      ],
+      "why": "This outfit is a masterclass in smart-casual and minimalist style. The navy blazer and grey trousers are a can't-miss combination for a formal pitch, and the trench coat ensures you'll arrive looking unflustered, regardless of the April weather.",
+      "confidence": 0.95
+    }
+  ],
+  "reasoning_summary": "For your formal client pitch, we'll build a classic, professional look using your existing pieces that's also perfectly layered for NYC's cool, overcast weather with a chance of rain.",
+  "shopping_suggestions": [
+    "A quality brown leather belt to match your derby shoes is a must-have for tying this formal look together."
+  ],
+  "do_dont": [
+    "Do make sure your shirt is impeccably ironed. Details matter!",
+    "Do add a classic, understated watch to complete the look.",
+    "Don't forget an umbrella; rain becomes very likely in the afternoon.",
+    "Don't wear the trench coat during the pitch itself; check it when you arrive."
+  ],
+  "spoken_reply": "That white oxford shirt is a perfect choice for your pitch tomorrow. I'd pair it with your grey wool trousers and navy blazer for a sharp, confident look. The forecast is cool with a chance of rain, so your trench coat is the ideal top layer for navigating the city—you'll arrive looking polished and ready to win them over.",
+  "latency_ms": {
+    "segmentation_ms": 10,
+    "weather_ms": 227,
+    "gemini_ms": 15979,
+    "tts_ms": 8340
+  }
+}

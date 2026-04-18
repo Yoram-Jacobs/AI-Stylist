@@ -1,0 +1,59 @@
+{
+  "transcript": " What should I wear to a casual brunch this Sunday? The weather is chilly and I want layered, minimalist vibes.",
+  "segmented_image_url": null,
+  "infilled_image_url": null,
+  "weather_summary": "19.54°C Clouds in Weehawken",
+  "calendar_summary": null,
+  "outfit_recommendations": [
+    {
+      "name": "The Minimalist Brunch",
+      "items": [
+        {
+          "role": "top",
+          "description": "Your cream cashmere crewneck is the perfect cozy, luxe base layer.",
+          "closet_item_id": "b1"
+        },
+        {
+          "role": "bottom",
+          "description": "The dark indigo straight jeans offer a classic, clean silhouette.",
+          "closet_item_id": "b2"
+        },
+        {
+          "role": "outerwear",
+          "description": "Your charcoal wool overcoat provides necessary warmth and a sharp, structured top layer.",
+          "closet_item_id": "b4"
+        },
+        {
+          "role": "shoes",
+          "description": "White leather trainers will keep the look fresh, modern, and comfortable.",
+          "closet_item_id": "b3"
+        },
+        {
+          "role": "accessory",
+          "description": "A simple, dark-colored tote bag.",
+          "closet_item_id": null
+        }
+      ],
+      "why": "This outfit is the epitome of effortless minimalist style. The luxurious cashmere, classic dark denim, and structured wool coat create a comfortable yet sophisticated layered look, while the trainers keep it casual enough for brunch. It directly addresses your request for layers and aligns perfectly with the chilly weather.",
+      "confidence": 0.98
+    }
+  ],
+  "reasoning_summary": "Your closet contains the perfect items for a chic, layered minimalist brunch outfit. This recommendation combines your classic pieces for a look that is both stylish and practical for the chilly, overcast day.",
+  "shopping_suggestions": [
+    "A sturdy, minimalist umbrella. The forecast calls for rain, and a good umbrella is both a functional and stylish accessory."
+  ],
+  "do_dont": [
+    "Do enjoy the simple, effective color palette; the cream, indigo, and charcoal create a timeless combination.",
+    "Don't over-accessorize. The strength of this look is its clean simplicity.",
+    "Do check the rain forecast right before you leave; your leather trainers can handle a light drizzle, but not a downpour.",
+    "Do make sure your jeans have a clean break or cuff over the trainers for a polished finish."
+  ],
+  "spoken_reply": "For your layered, minimalist brunch this Sunday, let's pair your cozy cream cashmere sweater with your dark indigo jeans. Add the charcoal wool overcoat for warmth against the chill, and finish with your white leather trainers. It’s a classic, comfortable look that’s perfect for the occasion and the weather—just don't forget an umbrella!",
+  "latency_ms": {
+    "whisper_ms": 364,
+    "segmentation_ms": 47,
+    "weather_ms": 242,
+    "gemini_ms": 17709,
+    "tts_ms": 9102
+  }
+}
