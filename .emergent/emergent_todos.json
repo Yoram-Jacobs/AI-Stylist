@@ -17,10 +17,10 @@
   },
   {
     "content": "Run frontend testing agent (dev-login -> closet -> stylist -> marketplace -> transactions)",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Update plan.md and finish Phase 3",
-    "status": "pending"
+    "status": "completed"
   }
 ]
