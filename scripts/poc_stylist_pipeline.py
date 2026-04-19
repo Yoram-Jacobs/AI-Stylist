@@ -37,10 +37,11 @@ load_dotenv(BACKEND / ".env")
 
 from app.services.calendar_service import calendar_service  # noqa: E402
 from app.services.deepgram_service import deepgram_service  # noqa: E402
-from app.services.fal_service import fal_service  # noqa: E402
 from app.services.fees import compute_fees  # noqa: E402
+from app.services.gemini_image_service import gemini_image_service  # noqa: E402
 from app.services.gemini_stylist import gemini_stylist_service  # noqa: E402
 from app.services.groq_service import groq_whisper_service  # noqa: E402
+from app.services.hf_segmentation import hf_segmentation_service  # noqa: E402
 from app.services.logic import get_styling_advice  # noqa: E402
 from app.services.weather_service import weather_service  # noqa: E402
 
@@ -66,7 +67,7 @@ def section(title: str) -> None:
     print("=" * 72)
 
 
-FAL_SKIPPED = False
+FAL_SKIPPED = False  # retained for legacy prints; unused with HF/Nano Banana stack
 
 
 def require(condition: bool, message: str) -> None:
@@ -94,7 +95,7 @@ async def download_test_image() -> bytes:
 
 async def check_api_keys() -> None:
     section("1. Verifying API keys are configured")
-    require(os.getenv("FAL_KEY") is not None, "FAL_KEY present")
+    require(os.getenv("HF_TOKEN") is not None, "HF_TOKEN present")
     require(os.getenv("GROQ_API_KEY") is not None, "GROQ_API_KEY present")
     require(os.getenv("DEEPGRAM_API_KEY") is not None, "DEEPGRAM_API_KEY present")
     require(os.getenv("OPENWEATHER_API_KEY") is not None, "OPENWEATHER_API_KEY present")
@@ -138,57 +139,40 @@ async def test_groq_whisper() -> str:
     return transcript
 
 
-async def test_fal_segment(image_bytes: bytes) -> str | None:
-    section("4. fal.ai segmentation (SAM-2 \u2192 rembg fallback)")
-    global FAL_SKIPPED
+async def test_hf_segment(image_bytes: bytes) -> str | None:
+    section("4. Hugging Face SAM segmentation (SAM \u2192 RMBG fallback)")
     try:
-        seg = await fal_service.segment_garment(image_bytes)
+        seg = await hf_segmentation_service.segment_garment(image_bytes)
     except Exception as exc:  # noqa: BLE001
-        msg = str(exc)
-        if "Exhausted balance" in msg or "User is locked" in msg:
-            FAL_SKIPPED = True
-            warn(f"fal.ai balance exhausted \u2014 skipping segmentation. ({msg[:120]})")
-            return None
-        raise
-    print("   model_used:", seg["model_used"])
-    print("   image_url :", seg["image_url"])
-    require(bool(seg["image_url"]), "Segmentation produced an image URL")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(seg["image_url"], follow_redirects=True)
-        resp.raise_for_status()
-    (ARTIFACTS / "04_segmented.png").write_bytes(resp.content)
-    require(len(resp.content) > 2_000, "Segmented image has real content")
-    return seg["image_url"]
-
-
-async def test_fal_infill(image_bytes: bytes) -> str | None:
-    section("5. fal.ai Stable Diffusion image-to-image edit")
-    global FAL_SKIPPED
-    if FAL_SKIPPED:
-        warn("skipping infill (fal.ai balance exhausted)")
+        warn(f"HF segmentation failed: {str(exc)[:160]}")
         return None
+    print("   model_used:", seg.get("model_used"))
+    require(bool(seg.get("image_b64")), "Segmentation produced image bytes")
+    raw = base64.b64decode(seg["image_b64"])
+    (ARTIFACTS / "04_segmented.png").write_bytes(raw)
+    require(len(raw) > 2_000, "Segmented image has real content")
+    return f"data:{seg.get('mime_type', 'image/png')};base64,{seg['image_b64']}"
+
+
+async def test_nano_banana_edit(image_bytes: bytes) -> str | None:
+    section("5. Gemini Nano Banana image-to-image edit")
     try:
-        edit = await fal_service.edit_garment(
+        edit = await gemini_image_service.edit(
             image_bytes,
-            prompt="same shirt but in deep navy blue, studio photo, high detail",
-            strength=0.55,
+            prompt=(
+                "Same garment, but in deep navy blue. Clean studio backdrop, "
+                "high detail photograph."
+            ),
         )
     except Exception as exc:  # noqa: BLE001
-        msg = str(exc)
-        if "Exhausted balance" in msg or "User is locked" in msg:
-            FAL_SKIPPED = True
-            warn(f"fal.ai balance exhausted \u2014 skipping infill. ({msg[:120]})")
-            return None
-        raise
-    print("   model_used:", edit["model_used"])
-    print("   image_url :", edit["image_url"])
-    require(bool(edit["image_url"]), "Infill produced an image URL")
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.get(edit["image_url"], follow_redirects=True)
-        resp.raise_for_status()
-    (ARTIFACTS / "05_infill_navy.png").write_bytes(resp.content)
-    require(len(resp.content) > 5_000, "Infilled image has real content")
-    return edit["image_url"]
+        warn(f"Nano Banana edit failed: {str(exc)[:160]}")
+        return None
+    print("   model_used:", edit.get("model_used"))
+    require(bool(edit.get("image_b64")), "Edit produced image bytes")
+    raw = base64.b64decode(edit["image_b64"])
+    (ARTIFACTS / "05_edit_navy.png").write_bytes(raw)
+    require(len(raw) > 5_000, "Edited image has real content")
+    return f"data:{edit.get('mime_type', 'image/png')};base64,{edit['image_b64']}"
 
 
 async def test_openweather() -> dict[str, Any]:
@@ -329,8 +313,8 @@ async def main() -> None:
     transcript = await test_groq_whisper()
     print("   (Whisper transcript preserved for reference) \u2192", transcript[:80], "\u2026")
 
-    await test_fal_segment(image_bytes)
-    await test_fal_infill(image_bytes)
+    await test_hf_segment(image_bytes)
+    await test_nano_banana_edit(image_bytes)
     await test_openweather()
 
     # Orchestrated end-to-end runs (the core path)
@@ -341,18 +325,7 @@ async def main() -> None:
     test_fee_math()
 
     section("PHASE 1 POC RESULTS")
-    if FAL_SKIPPED:
-        warn(
-            "fal.ai (SAM-2 + Stable Diffusion) was SKIPPED because the "
-            "provided FAL_KEY's account balance is exhausted. Every other "
-            "provider + the Gemini multimodal pipeline is fully green."
-        )
-        print(
-            "   \u2192 Top up at https://fal.ai/dashboard/billing and rerun "
-            "`python scripts/poc_stylist_pipeline.py`."
-        )
-    else:
-        print("   \u2705 ALL providers (including fal.ai) are green.")
+    print("   \u2705 ALL providers (HF SAM + Nano Banana + Groq + Deepgram + Gemini) are green.")
     print(f"   all artifacts \u2192 {ARTIFACTS}")
 
 

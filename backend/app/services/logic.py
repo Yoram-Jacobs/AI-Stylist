@@ -14,9 +14,10 @@ from typing import Any
 import httpx
 
 from app.services.deepgram_service import deepgram_service
-from app.services.fal_service import fal_service
+from app.services.gemini_image_service import gemini_image_service
 from app.services.gemini_stylist import gemini_stylist_service, image_bytes_to_base64
 from app.services.groq_service import groq_whisper_service
+from app.services.hf_segmentation import hf_segmentation_service
 from app.services.weather_service import weather_service
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,6 @@ async def get_styling_advice(
     """Run the full multimodal stylist pipeline and return a combined payload."""
     if not (user_text or voice_audio):
         raise ValueError("user_text or voice_audio is required")
-    if fal_service is None:
-        raise RuntimeError("fal.ai service not configured (FAL_KEY missing)")
     if gemini_stylist_service is None:
         raise RuntimeError("Gemini service not configured (EMERGENT_LLM_KEY missing)")
 
@@ -94,22 +93,30 @@ async def get_styling_advice(
     if not final_user_text:
         raise ValueError("No user text available after transcription")
 
-    # --- 2. Segment the garment if an image was supplied
-    if image_bytes:
+    # --- 2. Segment the garment if an image was supplied (Hugging Face SAM)
+    if image_bytes and hf_segmentation_service is not None:
         t0 = time.perf_counter()
         try:
-            seg = await fal_service.segment_garment(image_bytes)
-            result["segmented_image_url"] = seg["image_url"]
+            seg = await hf_segmentation_service.segment_garment(image_bytes)
+            if seg.get("image_b64"):
+                result["segmented_image_url"] = (
+                    f"data:{seg.get('mime_type', 'image/png')};base64,"
+                    f"{seg['image_b64']}"
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Segmentation failed: %s", exc)
         latency["segmentation_ms"] = int((time.perf_counter() - t0) * 1000)
 
-    # --- 3. Optional infill / edit
-    if image_bytes and do_infill and infill_prompt:
+    # --- 3. Optional infill / edit (Gemini Nano Banana)
+    if image_bytes and do_infill and infill_prompt and gemini_image_service is not None:
         t0 = time.perf_counter()
         try:
-            edit = await fal_service.edit_garment(image_bytes, infill_prompt)
-            result["infilled_image_url"] = edit["image_url"]
+            edit = await gemini_image_service.edit(image_bytes, infill_prompt)
+            if edit.get("image_b64"):
+                result["infilled_image_url"] = (
+                    f"data:{edit.get('mime_type', 'image/png')};base64,"
+                    f"{edit['image_b64']}"
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Infill failed: %s", exc)
         latency["infill_ms"] = int((time.perf_counter() - t0) * 1000)

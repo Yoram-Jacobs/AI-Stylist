@@ -1,26 +1,26 @@
 [
   {
-    "content": "BLOCKER: fal.ai balance exhausted (user action — non-blocking for Phase 2 code)",
-    "status": "pending"
-  },
-  {
-    "content": "Phase 2.1–2.7 backend build (auth, users, closet, listings, transactions, stylist memory)",
+    "content": "Swap vision stack: remove fal.ai, add Nano Banana + HF segformer_b2_clothes segmentation",
     "status": "completed"
   },
   {
-    "content": "Phase 2.8: Comprehensive testing_agent_v3 pass — 35/35 functional tests green, 0 critical/minor bugs",
+    "content": "Create Transactions.jsx page and wire route",
     "status": "completed"
   },
   {
-    "content": "Phase 3: React frontend (closet, camera, stylist chat with streaming audio, marketplace, admin)",
-    "status": "pending"
+    "content": "Fix 3 eslint useEffect warnings",
+    "status": "completed"
   },
   {
-    "content": "Phase 4: Stripe Connect Express + Google Calendar OAuth + Trend-Scout background agent",
-    "status": "pending"
+    "content": "Take screenshots across flows to verify UI against design_guidelines",
+    "status": "completed"
   },
   {
-    "content": "Phase 5: Admin dashboard + polish + comprehensive E2E testing",
+    "content": "Run frontend testing agent (dev-login -> closet -> stylist -> marketplace -> transactions)",
+    "status": "in_progress"
+  },
+  {
+    "content": "Update plan.md and finish Phase 3",
     "status": "pending"
   }
 ]

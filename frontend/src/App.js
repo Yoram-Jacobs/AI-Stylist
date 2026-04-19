@@ -16,6 +16,7 @@ import Marketplace from '@/pages/Marketplace';
 import CreateListing from '@/pages/CreateListing';
 import ListingDetail from '@/pages/ListingDetail';
 import Profile from '@/pages/Profile';
+import Transactions from '@/pages/Transactions';
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
             <Route path="/market" element={<Marketplace />} />
             <Route path="/market/create" element={<CreateListing />} />
             <Route path="/market/:id" element={<ListingDetail />} />
+            <Route path="/transactions" element={<Transactions />} />
             <Route path="/me" element={<Profile />} />
             <Route path="/" element={<Navigate to="/home" replace />} />
           </Route>

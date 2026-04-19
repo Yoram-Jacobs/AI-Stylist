@@ -7,8 +7,8 @@ template at runtime). This file is committed; the real `.env` is not.
 REQUIRED_FOR_POC = [
     # LLM — the universal Emergent key
     "EMERGENT_LLM_KEY",
-    # Vision (fal.ai SAM-2 + Stable Diffusion)
-    "FAL_KEY",
+    # Vision (Hugging Face SAM segmentation + Gemini Nano Banana image gen/edit)
+    "HF_TOKEN",
     # Voice input (Groq Whisper-v3)
     "GROQ_API_KEY",
     # Voice output (Deepgram Aura-2 with WebSocket streaming)

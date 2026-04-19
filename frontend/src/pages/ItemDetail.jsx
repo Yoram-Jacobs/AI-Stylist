@@ -29,7 +29,8 @@ export default function ItemDetail() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [id]);
 
   const onEdit = async () => {
     if (!editPrompt.trim()) return;

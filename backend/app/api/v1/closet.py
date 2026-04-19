@@ -1,8 +1,8 @@
 """Closet CRUD — honours Source Tags (Private/Shared/Retail).
 
 Items default to `source=Private`. Uploading an image triggers a best-effort
-fal.ai segmentation in the background; failures are swallowed (visible in
-logs) and the original image URL is retained.
+Hugging Face SAM segmentation in the background; failures are swallowed
+(visible in logs) and the original image URL is retained.
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from app.db.database import get_db
 from app.models.schemas import ClosetItem, Formality, RetailMetadata, Source
 from app.services import repos
 from app.services.auth import get_current_user
-from app.services.fal_service import fal_service
+from app.services.gemini_image_service import gemini_image_service
+from app.services.hf_segmentation import hf_segmentation_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
@@ -107,10 +108,15 @@ async def create_item(
     doc = item.model_dump()
 
     # Best-effort segmentation (non-blocking for POC latency): try once, soft-fail.
-    if raw_bytes and fal_service is not None:
+    if raw_bytes and hf_segmentation_service is not None:
         try:
-            seg = await fal_service.segment_garment(raw_bytes)
-            doc["segmented_image_url"] = seg.get("image_url")
+            seg = await hf_segmentation_service.segment_garment(raw_bytes)
+            if seg.get("image_b64"):
+                doc["segmented_image_url"] = (
+                    f"data:{seg.get('mime_type', 'image/png')};base64,"
+                    f"{seg['image_b64']}"
+                )
+                doc["segmentation_model"] = seg.get("model_used")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Segmentation skipped for item %s: %s", item.id, exc)
 
@@ -186,9 +192,11 @@ async def edit_item_image(
     prompt: str,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Trigger fal.ai img2img to generate a variant (e.g. 'in navy blue').
+    """Trigger Gemini Nano Banana image-to-image to generate a variant
+    (e.g. 'in navy blue' or 'with short sleeves').
 
-    Stores the variant URL in `variants[]` so the client can preview.
+    Stores the variant (as a data URL) in `variants[]` so the client can
+    preview it alongside the original.
     """
     db = get_db()
     item = await repos.find_one(
@@ -199,14 +207,24 @@ async def edit_item_image(
     source_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not source_url:
         raise HTTPException(400, "No source image on this item")
-    if fal_service is None:
-        raise HTTPException(503, "fal.ai service not configured")
-    edit = await fal_service.edit_garment(source_url, prompt)
+    if gemini_image_service is None:
+        raise HTTPException(503, "Gemini image service not configured")
+    try:
+        edit = await gemini_image_service.edit(source_url, prompt)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Nano Banana edit failed for item %s: %s", item_id, exc)
+        raise HTTPException(
+            503,
+            "Image generation is temporarily unavailable. Please try again shortly.",
+        ) from exc
+    variant_url = (
+        f"data:{edit.get('mime_type', 'image/png')};base64,{edit['image_b64']}"
+    )
     variants = list(item.get("variants") or [])
     variants.append(
         {
             "prompt": prompt,
-            "url": edit["image_url"],
+            "url": variant_url,
             "model": edit["model_used"],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -214,4 +232,4 @@ async def edit_item_image(
     await db.closet_items.update_one(
         {"id": item_id, "user_id": user["id"]}, {"$set": {"variants": variants}}
     )
-    return {"variant_url": edit["image_url"], "variants": variants}
+    return {"variant_url": variant_url, "variants": variants}

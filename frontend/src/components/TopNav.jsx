@@ -4,7 +4,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Home, Shirt, Sparkles, Store, LogOut, Settings } from 'lucide-react';
+import { Home, Shirt, Sparkles, Store, LogOut, Settings, Receipt } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
@@ -64,6 +64,9 @@ export const TopNav = () => {
                 <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
               </div>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => nav('/transactions')} data-testid="topnav-menu-transactions">
+                <Receipt className="h-4 w-4 mr-2" /> Transactions
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => nav('/me')} data-testid="topnav-menu-settings">
                 <Settings className="h-4 w-4 mr-2" /> Settings
               </DropdownMenuItem>

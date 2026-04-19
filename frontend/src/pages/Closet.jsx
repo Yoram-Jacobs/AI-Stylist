@@ -35,7 +35,8 @@ export default function Closet() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchItems(); /* eslint-disable-next-line */ }, [filters.category, filters.source]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchItems(); }, [filters.category, filters.source]);
 
   const onSearch = (e) => {
     e.preventDefault();

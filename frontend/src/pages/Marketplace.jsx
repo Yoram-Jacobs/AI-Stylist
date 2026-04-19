@@ -35,7 +35,8 @@ export default function Marketplace() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filters.source, filters.category]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [filters.source, filters.category]);
 
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
@@ -123,7 +124,7 @@ function MyListings() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: me } = await (await fetch((process.env.REACT_APP_BACKEND_URL + '/api/v1/auth/me'), { headers: { Authorization: `Bearer ${localStorage.getItem('dressapp.token')}` } })).json().then((d) => ({ data: d }));
+        const me = await api.me();
         const res = await api.listListings({ seller_id: me.id, limit: 50 });
         setItems(res.items || []);
       } catch { /* ignore */ }

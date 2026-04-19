@@ -33,16 +33,17 @@ class Settings:
     DEFAULT_STYLIST_MODEL: str = os.environ.get("DEFAULT_STYLIST_MODEL", "gemini-2.5-pro")
     DEFAULT_STYLIST_PROVIDER: str = os.environ.get("DEFAULT_STYLIST_PROVIDER", "gemini")
 
-    # --- fal.ai (vision) ---
-    FAL_KEY: str | None = os.environ.get("FAL_KEY")
-    FAL_SEGMENTATION_MODEL: str = os.environ.get(
-        "FAL_SEGMENTATION_MODEL", "fal-ai/sam2/auto-segment"
+    # --- Hugging Face (garment segmentation) ---
+    HF_TOKEN: str | None = os.environ.get("HF_TOKEN") or None
+    # Defaults to a purpose-built clothing segmenter. SAM is kept as a config
+    # surface but is not reachable on the serverless tier as of 2026.
+    HF_SAM_MODEL: str = os.environ.get(
+        "HF_SAM_MODEL", "mattmdjaga/segformer_b2_clothes"
     )
-    FAL_SEGMENTATION_FALLBACK_MODEL: str = os.environ.get(
-        "FAL_SEGMENTATION_FALLBACK_MODEL", "fal-ai/imageutils/rembg"
-    )
-    FAL_INFILL_MODEL: str = os.environ.get(
-        "FAL_INFILL_MODEL", "fal-ai/fast-sdxl/image-to-image"
+
+    # --- Gemini Nano Banana (image generation + edit) ---
+    GEMINI_IMAGE_MODEL: str = os.environ.get(
+        "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"
     )
 
     # --- Groq (Whisper-v3) ---
