@@ -13,10 +13,10 @@
   },
   {
     "content": "Phase 4 — Run backend+frontend testing agent over Calendar OAuth + Trend-Scout",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
-    "content": "Phase 4 — Update plan.md; PayPlus remains deferred pending user API key",
-    "status": "pending"
+    "content": "Phase 4 — Update plan.md; PayPlus deferred pending user API key",
+    "status": "completed"
   }
 ]
