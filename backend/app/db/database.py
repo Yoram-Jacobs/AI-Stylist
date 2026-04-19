@@ -70,7 +70,10 @@ async def ensure_indexes() -> None:
     await db.cultural_rules.create_index(
         [("region", 1), ("religion", 1), ("occasion", 1)]
     )
-    await db.trend_reports.create_index([("date", -1), ("category", 1)])
+    await db.trend_reports.create_index([("date", -1), ("bucket", 1)])
+    await db.trend_reports.create_index(
+        [("bucket", 1), ("date", 1)], unique=True
+    )
     logger.info("MongoDB indexes ensured")
 
 

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useNavigate } from 'react-router-dom';
+import { CalendarConnect } from '@/components/CalendarConnect';
 
 const VOICES = [
   'aura-2-thalia-en', 'aura-2-hermes-en', 'aura-2-electra-en',
@@ -75,6 +76,10 @@ export default function Profile() {
           <div className="caps-label text-muted-foreground">Account</div>
           <h1 className="font-display text-3xl sm:text-4xl mt-1">Profile & settings</h1>
         </div>
+      </div>
+
+      <div className="mb-6">
+        <CalendarConnect />
       </div>
 
       <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">

@@ -80,9 +80,25 @@ class Settings:
     GOOGLE_OAUTH_REDIRECT_URI: str | None = (
         os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or None
     )
+    GOOGLE_OAUTH_POST_LOGIN_REDIRECT: str | None = (
+        os.environ.get("GOOGLE_OAUTH_POST_LOGIN_REDIRECT") or None
+    )
 
     # --- Dev toggles ---
     ALLOW_DEV_BYPASS: bool = os.environ.get("ALLOW_DEV_BYPASS", "true").lower() == "true"
+
+    # --- Trend-Scout scheduler ---
+    TREND_SCOUT_ENABLED: bool = (
+        os.environ.get("TREND_SCOUT_ENABLED", "true").lower() == "true"
+    )
+    # Daily cron expressed as "HH:MM" in UTC.
+    TREND_SCOUT_SCHEDULE_UTC: str = os.environ.get(
+        "TREND_SCOUT_SCHEDULE_UTC", "07:00"
+    )
+    # If True, attempt a run on server startup (best-effort, non-blocking).
+    TREND_SCOUT_RUN_ON_STARTUP: bool = (
+        os.environ.get("TREND_SCOUT_RUN_ON_STARTUP", "false").lower() == "true"
+    )
 
     def require(self, *keys: str) -> None:
         missing = [k for k in keys if not getattr(self, k, None)]

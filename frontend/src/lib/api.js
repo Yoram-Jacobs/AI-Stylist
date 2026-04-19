@@ -95,6 +95,20 @@ export const api = {
     }).then((r) => r.data),
   stylistHistory: (limit = 20) =>
     client.get('/stylist/history', { params: { limit } }).then((r) => r.data),
+
+  // google calendar
+  calendarStatus: () => client.get('/calendar/status').then((r) => r.data),
+  calendarUpcoming: (hours = 48) =>
+    client.get('/calendar/upcoming', { params: { hours_ahead: hours } }).then((r) => r.data),
+  googleOAuthStart: () => client.get('/auth/google/start').then((r) => r.data),
+  googleOAuthDisconnect: () =>
+    client.post('/auth/google/disconnect').then((r) => r.data),
+
+  // trend-scout
+  trendsLatest: (perBucket = 1) =>
+    client.get('/trends/latest', { params: { per_bucket: perBucket } }).then((r) => r.data),
+  trendsRunNowDev: (force = true) =>
+    client.post('/trends/run-now-dev', null, { params: { force } }).then((r) => r.data),
 };
 
 export default client;

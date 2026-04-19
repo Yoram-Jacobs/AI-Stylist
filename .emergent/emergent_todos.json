@@ -1,26 +1,22 @@
 [
   {
-    "content": "Swap vision stack: remove fal.ai, add Nano Banana + HF segformer_b2_clothes segmentation",
+    "content": "Phase 4 — Google Calendar OAuth backend (start, callback, disconnect, status, upcoming) + real-event hydration in stylist",
     "status": "completed"
   },
   {
-    "content": "Create Transactions.jsx page and wire route",
+    "content": "Phase 4 — Google Calendar UI (CalendarConnect card on Profile + Live badge in Stylist)",
     "status": "completed"
   },
   {
-    "content": "Fix 3 eslint useEffect warnings",
+    "content": "Phase 4 — Trend-Scout background agent (APScheduler + Gemini synthesis + trend_reports collection + Home feed)",
     "status": "completed"
   },
   {
-    "content": "Take screenshots across flows to verify UI against design_guidelines",
-    "status": "completed"
+    "content": "Phase 4 — Run backend+frontend testing agent over Calendar OAuth + Trend-Scout",
+    "status": "in_progress"
   },
   {
-    "content": "Run frontend testing agent (dev-login -> closet -> stylist -> marketplace -> transactions)",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md and finish Phase 3",
-    "status": "completed"
+    "content": "Phase 4 — Update plan.md; PayPlus remains deferred pending user API key",
+    "status": "pending"
   }
 ]

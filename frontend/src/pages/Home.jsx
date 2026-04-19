@@ -9,15 +9,18 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 
-const TRENDS = [
-  { tag: 'SS26 Runway', title: 'Butter yellow rules Milan', blurb: 'Tailored blazers in soft butter-yellow replace ivory as the spring neutral.' },
-  { tag: 'Street', title: 'The quiet-luxe swap', blurb: 'Logos out, fabric in: cashmere crewnecks over merino roll-necks dominate weekends.' },
-  { tag: 'Sustainability', title: 'Swap before you shop', blurb: 'Community swap rooms grew 3x year-over-year; retailers are finally listening.' },
+// Fallback cards used only if the Trend-Scout endpoint fails or returns empty.
+const FALLBACK_TRENDS = [
+  { tag: 'SS26 Runway', headline: 'Butter yellow rules Milan', body: 'Tailored blazers in soft butter-yellow replace ivory as the spring neutral.' },
+  { tag: 'Street', headline: 'The quiet-luxe swap', body: 'Logos out, fabric in: cashmere crewnecks over merino roll-necks dominate weekends.' },
+  { tag: 'Sustainability', headline: 'Swap before you shop', body: 'Community swap rooms grew 3x year-over-year; retailers are finally listening.' },
 ];
 
 export default function Home() {
   const { user } = useAuth();
   const [counts, setCounts] = useState(null);
+  const [trends, setTrends] = useState(null); // null = loading, [] = empty, [...]
+  const [trendDate, setTrendDate] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -26,6 +29,19 @@ export default function Home() {
         const market = await api.listListings({ limit: 1, status: 'active' });
         setCounts({ closet: closet.total || 0, market: market.total || 0 });
       } catch { setCounts({ closet: 0, market: 0 }); }
+    })();
+    (async () => {
+      try {
+        const res = await api.trendsLatest(1);
+        if (res?.cards?.length) {
+          setTrends(res.cards);
+          setTrendDate(res.cards[0]?.date || null);
+        } else {
+          setTrends([]);
+        }
+      } catch {
+        setTrends([]);
+      }
     })();
   }, []);
 
@@ -84,20 +100,36 @@ export default function Home() {
       <section className="mt-10">
         <div className="flex items-end justify-between mb-4">
           <h2 className="font-display text-2xl sm:text-3xl">Trend-Scout</h2>
-          <div className="caps-label text-muted-foreground">Daily edit</div>
+          <div className="caps-label text-muted-foreground">
+            {trendDate ? `Daily edit · ${trendDate}` : 'Daily edit'}
+          </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="home-trend-scout-feed">
-          {TRENDS.map((t, i) => (
-            <motion.div key={t.title} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-              <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial h-full">
-                <CardContent className="p-5">
-                  <div className="caps-label text-[hsl(var(--accent))]">{t.tag}</div>
-                  <h3 className="font-display text-xl mt-2 leading-tight">{t.title}</h3>
-                  <p className="text-sm text-muted-foreground mt-3">{t.blurb}</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
+          {trends === null
+            ? Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-40 w-full rounded-[calc(var(--radius)+6px)]" />
+              ))
+            : (trends.length > 0 ? trends : FALLBACK_TRENDS).map((t, i) => {
+                const headline = t.headline || t.title;
+                const body = t.body || t.blurb;
+                return (
+                  <motion.div
+                    key={`${t.tag}-${headline}`}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    data-testid="home-trend-scout-card"
+                  >
+                    <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial h-full">
+                      <CardContent className="p-5">
+                        <div className="caps-label text-[hsl(var(--accent))]">{t.tag}</div>
+                        <h3 className="font-display text-xl mt-2 leading-tight">{headline}</h3>
+                        <p className="text-sm text-muted-foreground mt-3">{body}</p>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                );
+              })}
         </div>
       </section>
 

@@ -28,6 +28,7 @@ export default function Stylist() {
   const [imageFile, setImageFile] = useState(null);
   const [includeCalendar, setIncludeCalendar] = useState(false);
   const [occasion, setOccasion] = useState('');
+  const [calendarConnected, setCalendarConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
@@ -42,6 +43,10 @@ export default function Stylist() {
           id: m.id, role: m.role, transcript: m.transcript, payload: m.assistant_payload,
         }));
         setMessages(hydrated);
+      } catch { /* silent */ }
+      try {
+        const s = await api.calendarStatus();
+        setCalendarConnected(!!s?.connected);
       } catch { /* silent */ }
     })();
   }, []);
@@ -196,8 +201,17 @@ export default function Stylist() {
               <label htmlFor="inc-cal" className="text-xs text-muted-foreground inline-flex items-center gap-1">
                 <CalIcon className="h-3.5 w-3.5" /> Include calendar
               </label>
+              {includeCalendar && calendarConnected && (
+                <Badge
+                  variant="outline"
+                  className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] py-0 h-5"
+                  data-testid="stylist-calendar-live-badge"
+                >
+                  Live Google Calendar
+                </Badge>
+              )}
             </div>
-            {includeCalendar && (
+            {includeCalendar && !calendarConnected && (
               <input value={occasion} onChange={(e) => setOccasion(e.target.value)}
                 placeholder="e.g. Client pitch"
                 className="text-xs bg-secondary border border-border rounded-lg px-2 py-1"

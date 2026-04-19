@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from app.api.v1.router import api_v1_router  # noqa: E402
 from app.db.database import ensure_indexes, get_client  # noqa: E402
+from app.services.scheduler import shutdown_scheduler, start_scheduler  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -100,8 +101,16 @@ async def on_startup() -> None:
         await ensure_indexes()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Index bootstrap skipped: %s", exc)
+    try:
+        start_scheduler()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Scheduler start skipped: %s", exc)
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client() -> None:
+    try:
+        shutdown_scheduler()
+    except Exception:  # noqa: BLE001
+        pass
     client.close()

@@ -61,7 +61,14 @@ async def stylist_endpoint(
 
     calendar_events: list[dict[str, Any]] | None = None
     if include_calendar:
-        calendar_events = [calendar_service.mock_event(occasion or "Work day")]
+        real_events = await calendar_service.get_events_for_user(user)
+        if real_events:
+            calendar_events = real_events
+        else:
+            # Fall back to a single mocked event so the stylist still has
+            # something to ground its reasoning when the user is not
+            # connected to Google Calendar.
+            calendar_events = [calendar_service.mock_event(occasion or "Work day")]
 
     # Determine / prefer the user's home location if lat/lng not supplied.
     if lat is None or lng is None:
