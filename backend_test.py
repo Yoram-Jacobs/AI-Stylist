@@ -1052,6 +1052,319 @@ class DressAppAPITester:
             else:
                 self.log_test("Image Edit Regression", False, f"Status: {status}, Data: {data}")
 
+    # ==================== ADD ITEM FEATURE TESTS ====================
+    
+    def test_analyze_item_image_base64(self):
+        """Test POST /closet/analyze with image_base64"""
+        if not self.dev_token:
+            self.log_test("Analyze Item Image Base64", False, "No dev token available")
+            return
+            
+        # Use a small test image (1x1 pixel PNG)
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        analyze_data = {
+            "image_base64": test_image_b64
+        }
+        
+        print("🔄 Testing garment analysis with base64 image (this may take 10-45 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Check required fields from GarmentAnalysis schema
+            has_title = bool(data.get('title'))
+            has_category = bool(data.get('category'))
+            has_colors = isinstance(data.get('colors', []), list)
+            has_fabric_materials = isinstance(data.get('fabric_materials', []), list)
+            has_model_used = bool(data.get('model_used'))
+            
+            # Check WeightedTag structure for colors and fabrics
+            colors_valid = True
+            if data.get('colors'):
+                for color in data['colors']:
+                    if not isinstance(color, dict) or 'name' not in color:
+                        colors_valid = False
+                        break
+            
+            fabrics_valid = True
+            if data.get('fabric_materials'):
+                for fabric in data['fabric_materials']:
+                    if not isinstance(fabric, dict) or 'name' not in fabric:
+                        fabrics_valid = False
+                        break
+            
+            all_valid = has_title and has_category and has_colors and has_fabric_materials and has_model_used and colors_valid and fabrics_valid
+            self.log_test("Analyze Item Image Base64", all_valid, 
+                         f"Title: {has_title}, Category: {has_category}, Colors: {len(data.get('colors', []))}, Fabrics: {len(data.get('fabric_materials', []))}, Model: {data.get('model_used')}")
+        else:
+            self.log_test("Analyze Item Image Base64", False, f"Status: {status}, Data: {data}")
+    
+    def test_analyze_item_image_url(self):
+        """Test POST /closet/analyze with image_url"""
+        if not self.dev_token:
+            self.log_test("Analyze Item Image URL", False, "No dev token available")
+            return
+            
+        # Use a real clothing image from Unsplash
+        analyze_data = {
+            "image_url": "https://images.unsplash.com/photo-1603252109303-2751441dd157?w=400&q=80&auto=format&fit=crop"
+        }
+        
+        print("🔄 Testing garment analysis with image URL (this may take 10-45 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            has_title = bool(data.get('title'))
+            has_category = bool(data.get('category'))
+            has_model_used = bool(data.get('model_used'))
+            
+            self.log_test("Analyze Item Image URL", has_title and has_category and has_model_used, 
+                         f"Title: {data.get('title')}, Category: {data.get('category')}, Model: {data.get('model_used')}")
+        else:
+            self.log_test("Analyze Item Image URL", False, f"Status: {status}, Data: {data}")
+    
+    def test_analyze_item_validation(self):
+        """Test POST /closet/analyze validation errors"""
+        if not self.dev_token:
+            self.log_test("Analyze Item Validation", False, "No dev token available")
+            return
+            
+        # Test with neither image_base64 nor image_url
+        success, data, status = self.make_request('POST', '/closet/analyze', {}, token=self.dev_token)
+        no_image_fails = status == 400
+        
+        # Test with invalid base64
+        invalid_data = {"image_base64": "invalid_base64_string"}
+        success, data, status = self.make_request('POST', '/closet/analyze', invalid_data, token=self.dev_token)
+        invalid_base64_fails = status == 400
+        
+        # Test without auth
+        success, data, status = self.make_request('POST', '/closet/analyze', {"image_base64": "test"})
+        no_auth_fails = status == 401
+        
+        all_validations = no_image_fails and invalid_base64_fails and no_auth_fails
+        self.log_test("Analyze Item Validation", all_validations, 
+                     f"No image: {status}, Invalid base64: {status}, No auth: {status}")
+    
+    def test_closet_marketplace_intent_own(self):
+        """Test POST /closet with marketplace_intent='own'"""
+        if not self.dev_token:
+            self.log_test("Closet Marketplace Intent Own", False, "No dev token available")
+            return
+            
+        item_data = {
+            "title": "Test Private Item",
+            "category": "Top",
+            "colors": [{"name": "black", "pct": 99}, {"name": "red", "pct": 1}],
+            "fabric_materials": [{"name": "cotton", "pct": 98}, {"name": "elastane", "pct": 2}],
+            "marketplace_intent": "own"
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        
+        if success and status == 201:
+            # Should create closet item only, no listing
+            source_private = data.get('source') == 'Private'
+            no_listing_id = data.get('listing_id') is None
+            colors_preserved = data.get('colors') == item_data['colors']
+            fabrics_preserved = data.get('fabric_materials') == item_data['fabric_materials']
+            
+            all_correct = source_private and no_listing_id and colors_preserved and fabrics_preserved
+            self.log_test("Closet Marketplace Intent Own", all_correct, 
+                         f"Source: {data.get('source')}, Listing ID: {data.get('listing_id')}, Colors preserved: {colors_preserved}")
+            return data.get('id')
+        else:
+            self.log_test("Closet Marketplace Intent Own", False, f"Status: {status}, Data: {data}")
+            return None
+    
+    def test_closet_marketplace_intent_for_sale(self):
+        """Test POST /closet with marketplace_intent='for_sale'"""
+        if not self.dev_token:
+            self.log_test("Closet Marketplace Intent For Sale", False, "No dev token available")
+            return
+            
+        item_data = {
+            "title": "Test For Sale Item",
+            "category": "Top",
+            "price_cents": 7500,
+            "marketplace_intent": "for_sale",
+            "condition": "excellent"
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        
+        if success and status == 201:
+            # Should create both closet item and listing
+            source_shared = data.get('source') == 'Shared'
+            has_listing_id = data.get('listing_id') is not None
+            
+            if has_listing_id:
+                # Check the listing was created
+                listing_id = data.get('listing_id')
+                success2, listing_data, status2 = self.make_request('GET', f'/listings/{listing_id}')
+                
+                if success2 and status2 == 200:
+                    listing_mode_sell = listing_data.get('mode') == 'sell'
+                    listing_price = listing_data.get('financial_metadata', {}).get('list_price_cents') == 7500
+                    platform_fee = listing_data.get('financial_metadata', {}).get('platform_fee_percent') == 7.0
+                    seller_net = listing_data.get('financial_metadata', {}).get('estimated_seller_net_cents', 0) > 0
+                    
+                    all_correct = source_shared and listing_mode_sell and listing_price and platform_fee and seller_net
+                    self.log_test("Closet Marketplace Intent For Sale", all_correct, 
+                                 f"Source: {data.get('source')}, Mode: {listing_data.get('mode')}, Price: {listing_price}, Fee: {platform_fee}%")
+                    return data.get('id'), listing_id
+                else:
+                    self.log_test("Closet Marketplace Intent For Sale", False, f"Could not retrieve listing: {status2}")
+            else:
+                self.log_test("Closet Marketplace Intent For Sale", False, "No listing ID created")
+        else:
+            self.log_test("Closet Marketplace Intent For Sale", False, f"Status: {status}, Data: {data}")
+        
+        return None, None
+    
+    def test_closet_marketplace_intent_donate(self):
+        """Test POST /closet with marketplace_intent='donate'"""
+        if not self.dev_token:
+            self.log_test("Closet Marketplace Intent Donate", False, "No dev token available")
+            return
+            
+        item_data = {
+            "title": "Test Donate Item",
+            "category": "Bottom",
+            "marketplace_intent": "donate"
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        
+        if success and status == 201:
+            has_listing_id = data.get('listing_id') is not None
+            
+            if has_listing_id:
+                listing_id = data.get('listing_id')
+                success2, listing_data, status2 = self.make_request('GET', f'/listings/{listing_id}')
+                
+                if success2 and status2 == 200:
+                    listing_mode_donate = listing_data.get('mode') == 'donate'
+                    listing_price_zero = listing_data.get('financial_metadata', {}).get('list_price_cents') == 0
+                    
+                    all_correct = listing_mode_donate and listing_price_zero
+                    self.log_test("Closet Marketplace Intent Donate", all_correct, 
+                                 f"Mode: {listing_data.get('mode')}, Price: {listing_data.get('financial_metadata', {}).get('list_price_cents')}")
+                else:
+                    self.log_test("Closet Marketplace Intent Donate", False, f"Could not retrieve listing: {status2}")
+            else:
+                self.log_test("Closet Marketplace Intent Donate", False, "No listing ID created")
+        else:
+            self.log_test("Closet Marketplace Intent Donate", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_marketplace_intent_swap(self):
+        """Test POST /closet with marketplace_intent='swap'"""
+        if not self.dev_token:
+            self.log_test("Closet Marketplace Intent Swap", False, "No dev token available")
+            return
+            
+        item_data = {
+            "title": "Test Swap Item",
+            "category": "Outerwear",
+            "marketplace_intent": "swap"
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        
+        if success and status == 201:
+            has_listing_id = data.get('listing_id') is not None
+            
+            if has_listing_id:
+                listing_id = data.get('listing_id')
+                success2, listing_data, status2 = self.make_request('GET', f'/listings/{listing_id}')
+                
+                if success2 and status2 == 200:
+                    listing_mode_swap = listing_data.get('mode') == 'swap'
+                    
+                    self.log_test("Closet Marketplace Intent Swap", listing_mode_swap, 
+                                 f"Mode: {listing_data.get('mode')}")
+                else:
+                    self.log_test("Closet Marketplace Intent Swap", False, f"Could not retrieve listing: {status2}")
+            else:
+                self.log_test("Closet Marketplace Intent Swap", False, "No listing ID created")
+        else:
+            self.log_test("Closet Marketplace Intent Swap", False, f"Status: {status}, Data: {data}")
+    
+    def test_schema_fields_roundtrip(self):
+        """Test that complex schema fields round-trip correctly"""
+        if not self.dev_token:
+            self.log_test("Schema Fields Roundtrip", False, "No dev token available")
+            return
+            
+        complex_data = {
+            "title": "Complex Schema Test Item",
+            "category": "Top",
+            "colors": [{"name": "black", "pct": 99}, {"name": "red", "pct": 1}],
+            "fabric_materials": [{"name": "cotton", "pct": 98}, {"name": "elastane", "pct": 2}],
+            "season": ["spring", "summer"],
+            "tags": ["casual", "comfortable", "everyday"]
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', complex_data, token=self.dev_token)
+        
+        if success and status == 201:
+            item_id = data.get('id')
+            
+            # Retrieve the item and check fields
+            success2, retrieved_data, status2 = self.make_request('GET', f'/closet/{item_id}', token=self.dev_token)
+            
+            if success2 and status2 == 200:
+                colors_match = retrieved_data.get('colors') == complex_data['colors']
+                fabrics_match = retrieved_data.get('fabric_materials') == complex_data['fabric_materials']
+                season_match = retrieved_data.get('season') == complex_data['season']
+                tags_match = retrieved_data.get('tags') == complex_data['tags']
+                
+                all_match = colors_match and fabrics_match and season_match and tags_match
+                self.log_test("Schema Fields Roundtrip", all_match, 
+                             f"Colors: {colors_match}, Fabrics: {fabrics_match}, Season: {season_match}, Tags: {tags_match}")
+            else:
+                self.log_test("Schema Fields Roundtrip", False, f"Could not retrieve item: {status2}")
+        else:
+            self.log_test("Schema Fields Roundtrip", False, f"Status: {status}, Data: {data}")
+    
+    def test_provider_activity_tracking(self):
+        """Test that provider activity is tracked for garment vision calls"""
+        if not self.dev_token:
+            self.log_test("Provider Activity Tracking", False, "No dev token available")
+            return
+            
+        # Make an analyze call first
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        analyze_data = {"image_base64": test_image_b64}
+        
+        print("🔄 Testing provider activity tracking...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Check admin providers endpoint for garment-vision activity
+            success2, providers_data, status2 = self.make_request('GET', '/admin/providers', token=self.dev_token)
+            
+            if success2 and status2 == 200:
+                providers = providers_data.get('summary', [])
+                garment_vision_found = False
+                
+                for provider in providers:
+                    if provider.get('provider') == 'garment-vision':
+                        garment_vision_found = True
+                        total_calls = provider.get('total', 0)
+                        has_calls = total_calls >= 1
+                        
+                        self.log_test("Provider Activity Tracking", has_calls, 
+                                     f"Garment-vision calls: {total_calls}")
+                        break
+                
+                if not garment_vision_found:
+                    self.log_test("Provider Activity Tracking", False, "Garment-vision provider not found in activity")
+            else:
+                self.log_test("Provider Activity Tracking", False, f"Could not get providers: {status2}")
+        else:
+            self.log_test("Provider Activity Tracking", False, f"Analyze call failed: {status}")
+
     def run_all_tests(self):
         """Run all test suites"""
         print("🚀 Starting DressApp Backend API Tests")
@@ -1114,6 +1427,18 @@ class DressAppAPITester:
         # PHASE 5 IMAGE EDIT REGRESSION
         print("\n🔄 Running Phase 5 Image Edit Regression Test...")
         self.test_image_edit_regression()
+        
+        # ADD ITEM FEATURE TESTS
+        print("\n🔄 Running Add Item Feature Tests...")
+        self.test_analyze_item_image_base64()
+        self.test_analyze_item_image_url()
+        self.test_analyze_item_validation()
+        self.test_closet_marketplace_intent_own()
+        self.test_closet_marketplace_intent_for_sale()
+        self.test_closet_marketplace_intent_donate()
+        self.test_closet_marketplace_intent_swap()
+        self.test_schema_fields_roundtrip()
+        self.test_provider_activity_tracking()
         
         return self.generate_report()
 

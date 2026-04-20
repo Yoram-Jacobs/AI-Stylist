@@ -15,9 +15,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
-from app.models.schemas import ClosetItem, Formality, RetailMetadata, Source
+from app.models.schemas import (
+    ClosetItem,
+    DressCode,
+    FinancialMetadata,
+    Formality,
+    GarmentAnalysis,
+    GarmentCondition,
+    GarmentGender,
+    GarmentQuality,
+    GarmentState,
+    Listing,
+    MarketplaceIntent,
+    RetailMetadata,
+    Source,
+    WeightedTag,
+)
 from app.services import repos
 from app.services.auth import get_current_user
+from app.services.fees import compute_fees
+from app.services.garment_vision import garment_vision_service
 from app.services.hf_image_service import hf_image_service
 from app.services.hf_segmentation import hf_segmentation_service
 
@@ -28,22 +45,44 @@ router = APIRouter(prefix="/closet", tags=["closet"])
 class CreateItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Source = "Private"
+    # Descriptive
+    name: str | None = None
+    title: str
+    caption: str | None = None
+    # Taxonomy
     category: str
     sub_category: str | None = None
-    title: str
+    item_type: str | None = None
     brand: str | None = None
+    gender: GarmentGender | None = None
+    dress_code: DressCode | None = None
+    season: list[str] = Field(default_factory=list)
+    tradition: str | None = None
+    # Composition
     size: str | None = None
     color: str | None = None
+    colors: list[WeightedTag] = Field(default_factory=list)
     material: str | None = None
+    fabric_materials: list[WeightedTag] = Field(default_factory=list)
     pattern: str | None = None
-    season: list[str] = Field(default_factory=list)
+    # Quality
+    state: GarmentState | None = None
+    condition: GarmentCondition | None = None
+    quality: GarmentQuality | None = None
+    repair_advice: str | None = None
+    # Pricing + marketplace intent
+    price_cents: int | None = None
+    currency: str = "USD"
+    marketplace_intent: MarketplaceIntent = "own"
+    # Legacy
     formality: Formality | None = None
     cultural_tags: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
-    # Accept EITHER a remote URL OR inline base64 bytes (for Phase 2 inline uploads).
+    # Media
     original_image_url: str | None = None
     image_base64: str | None = None
     image_mime: str = "image/jpeg"
+    # Purchase history (optional)
     purchase_price_cents: int | None = None
     purchase_currency: str = "USD"
     purchase_date: str | None = None
@@ -86,15 +125,30 @@ async def create_item(
     item = ClosetItem(
         user_id=user["id"],
         source=payload.source,
+        name=payload.name,
+        title=payload.title,
+        caption=payload.caption,
         category=payload.category,
         sub_category=payload.sub_category,
-        title=payload.title,
+        item_type=payload.item_type,
         brand=payload.brand,
+        gender=payload.gender,
+        dress_code=payload.dress_code,
+        season=payload.season,
+        tradition=payload.tradition,
         size=payload.size,
         color=payload.color,
+        colors=payload.colors,
         material=payload.material,
+        fabric_materials=payload.fabric_materials,
         pattern=payload.pattern,
-        season=payload.season,
+        state=payload.state,
+        condition=payload.condition,
+        quality=payload.quality,
+        repair_advice=payload.repair_advice,
+        price_cents=payload.price_cents,
+        currency=payload.currency,
+        marketplace_intent=payload.marketplace_intent,
         formality=payload.formality,
         cultural_tags=payload.cultural_tags,
         tags=payload.tags,
@@ -120,8 +174,93 @@ async def create_item(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Segmentation skipped for item %s: %s", item.id, exc)
 
+    # If the user tagged this item for the marketplace, auto-create a listing.
+    # Modes: for_sale -> sell, donate -> donate, swap -> swap. 'own' stays private.
+    listing_id: str | None = None
+    if payload.marketplace_intent in ("for_sale", "donate", "swap"):
+        mode_map = {"for_sale": "sell", "donate": "donate", "swap": "swap"}
+        mode = mode_map[payload.marketplace_intent]
+        list_price = (payload.price_cents or 0) if mode == "sell" else 0
+        fees = compute_fees(list_price)
+        financial = FinancialMetadata(
+            list_price_cents=list_price,
+            currency=payload.currency,
+            platform_fee_percent=7.0,
+            estimated_seller_net_cents=fees.seller_net_cents,
+        )
+        # Map our fine-grained GarmentCondition to the simpler Listing condition.
+        cond_map = {"excellent": "like_new", "good": "good", "fair": "fair", "bad": "fair"}
+        listing_condition = cond_map.get(payload.condition or "", "good")
+        cover_image = doc.get("original_image_url") or doc.get("segmented_image_url")
+        listing = Listing(
+            closet_item_id=doc["id"],
+            seller_id=user["id"],
+            source="Shared",
+            mode=mode,
+            title=payload.name or payload.title,
+            description=payload.caption,
+            category=payload.category,
+            size=payload.size,
+            condition=listing_condition,
+            images=[cover_image] if cover_image else [],
+            financial_metadata=financial,
+            status="active",
+        )
+        await repos.insert(db.listings, listing.model_dump())
+        listing_id = listing.id
+        doc["listing_id"] = listing_id
+        # Lift privacy so the stylist engine also sees it as Shared.
+        doc["source"] = "Shared"
+
     await repos.insert(db.closet_items, doc)
     return doc
+
+
+class AnalyzeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    image_base64: str | None = None
+    image_url: str | None = None
+
+
+@router.post("/analyze")
+async def analyze_item_image(
+    payload: AnalyzeIn,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo."""
+    if garment_vision_service is None:
+        raise HTTPException(503, "Garment analyzer not configured")
+    if not payload.image_base64 and not payload.image_url:
+        raise HTTPException(400, "image_base64 or image_url is required")
+
+    raw: bytes | None = None
+    if payload.image_base64:
+        try:
+            raw = base64.b64decode(payload.image_base64, validate=True)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, f"Invalid image_base64: {exc}") from exc
+    elif payload.image_url:
+        import httpx
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            resp = await c.get(payload.image_url, follow_redirects=True)
+            resp.raise_for_status()
+            raw = resp.content
+    if not raw:
+        raise HTTPException(400, "Could not load image bytes")
+
+    try:
+        parsed = await garment_vision_service.analyze(raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Garment analysis failed: %s", exc)
+        raise HTTPException(
+            503, "Garment analyzer is temporarily unavailable. Please try again."
+        ) from exc
+
+    try:
+        analysis = GarmentAnalysis(**parsed)
+    except Exception:  # noqa: BLE001
+        analysis = GarmentAnalysis(title=parsed.get("title") or "Unnamed garment")
+    return analysis.model_dump()
 
 
 @router.get("")

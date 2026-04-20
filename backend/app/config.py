@@ -46,6 +46,15 @@ class Settings:
         "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"
     )
 
+    # --- The Eyes (garment vision analyzer) ---
+    # Starts on Gemini 2.5 Pro; flip to fine-tuned Gemma 4 E4B when ready.
+    GARMENT_VISION_PROVIDER: str = os.environ.get(
+        "GARMENT_VISION_PROVIDER", "gemini"
+    )
+    GARMENT_VISION_MODEL: str = os.environ.get(
+        "GARMENT_VISION_MODEL", "gemini-2.5-pro"
+    )
+
     # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
     HF_IMAGE_MODEL: str = os.environ.get(
         "HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"

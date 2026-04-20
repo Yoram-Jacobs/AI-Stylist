@@ -437,7 +437,7 @@ function UsersSection() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : '\u2014'}
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -523,13 +523,13 @@ function ListingsSection() {
                   <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">No listings.</TableCell></TableRow>
                 ) : items.map((l) => (
                   <TableRow key={l.id} data-testid="admin-listings-row">
-                    <TableCell className="text-xs font-mono">{(l.id || '').slice(0, 8)}\u2026</TableCell>
-                    <TableCell className="text-xs font-mono">{(l.seller_id || '').slice(0, 8)}\u2026</TableCell>
+                    <TableCell className="text-xs font-mono">{(l.id || '').slice(0, 8)}…</TableCell>
+                    <TableCell className="text-xs font-mono">{(l.seller_id || '').slice(0, 8)}…</TableCell>
                     <TableCell className="text-right">{fmtCents(l.list_price_cents, l.currency)}</TableCell>
                     <TableCell><Badge variant="outline" className="capitalize text-[11px]">{l.status}</Badge></TableCell>
-                    <TableCell><Badge variant="outline" className="text-[11px]">{l.source_tag || '\u2014'}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className="text-[11px]">{l.source_tag || '—'}</Badge></TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {l.created_at ? new Date(l.created_at).toLocaleDateString() : '\u2014'}
+                      {l.created_at ? new Date(l.created_at).toLocaleDateString() : '—'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
@@ -642,14 +642,14 @@ function TransactionsSection() {
                   const f = t.financial || {};
                   return (
                     <TableRow key={t.id} data-testid="admin-transactions-row">
-                      <TableCell className="text-xs font-mono">{(t.id || '').slice(0, 8)}\u2026</TableCell>
+                      <TableCell className="text-xs font-mono">{(t.id || '').slice(0, 8)}…</TableCell>
                       <TableCell><Badge variant="outline" className="capitalize text-[11px]">{t.status}</Badge></TableCell>
                       <TableCell className="text-right">{fmtCents(f.gross_cents, t.currency)}</TableCell>
                       <TableCell className="text-right">{fmtCents(f.platform_fee_cents, t.currency)}</TableCell>
                       <TableCell className="text-right">{fmtCents(f.stripe_fee_cents, t.currency)}</TableCell>
                       <TableCell className="text-right">{fmtCents(f.seller_net_cents, t.currency)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {t.created_at ? new Date(t.created_at).toLocaleString() : '\u2014'}
+                        {t.created_at ? new Date(t.created_at).toLocaleString() : '—'}
                       </TableCell>
                     </TableRow>
                   );

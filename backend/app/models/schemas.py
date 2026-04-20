@@ -27,6 +27,21 @@ ListingStatus = Literal["draft", "active", "reserved", "sold", "removed"]
 TxStatus = Literal["pending", "paid", "refunded", "failed", "disputed"]
 Formality = Literal["casual", "smart-casual", "business", "formal"]
 Condition = Literal["new", "like_new", "good", "fair"]
+# Rich closet-item enums (used by AddItem flow + The Eyes analyzer)
+GarmentState = Literal["new", "used"]
+GarmentCondition = Literal["bad", "fair", "good", "excellent"]
+GarmentQuality = Literal["budget", "mid", "premium", "luxury"]
+GarmentGender = Literal["men", "women", "unisex", "kids"]
+MarketplaceIntent = Literal["own", "for_sale", "donate", "swap"]
+DressCode = Literal[
+    "casual", "smart-casual", "business", "formal", "athletic", "loungewear"
+]
+
+
+class WeightedTag(BaseModel):
+    """Generic ``{name, pct}`` pair used for colours and fabric composition."""
+    name: str
+    pct: int | None = None  # 0..100, optional (e.g. "red" without %)
 
 
 class BaseDoc(BaseModel):
@@ -88,21 +103,47 @@ class RetailMetadata(BaseModel):
 class ClosetItem(BaseDoc):
     user_id: str
     source: Source = "Private"
+    # Descriptive
+    name: str | None = None  # short, friendly — may differ from title
+    title: str
+    caption: str | None = None
+    # Taxonomy (rich, used by The Eyes)
     category: str
     sub_category: str | None = None
-    title: str
+    item_type: str | None = None
     brand: str | None = None
-    size: str | None = None
-    color: str | None = None
-    material: str | None = None
-    pattern: str | None = None
+    gender: GarmentGender | None = None
+    dress_code: DressCode | None = None
     season: list[str] = Field(default_factory=list)
+    tradition: str | None = None  # e.g. "arabic", "jewish"; free-form
+    # Structured composition
+    size: str | None = None
+    color: str | None = None  # keep for backward compat (dominant colour)
+    colors: list[WeightedTag] = Field(default_factory=list)
+    material: str | None = None
+    fabric_materials: list[WeightedTag] = Field(default_factory=list)
+    pattern: str | None = None
+    # Quality & state
+    state: GarmentState | None = None
+    condition: GarmentCondition | None = None
+    quality: GarmentQuality | None = None
+    repair_advice: str | None = None  # populated by The Eyes when condition == bad
+    # Pricing & marketplace intent
+    price_cents: int | None = None
+    currency: str = "USD"
+    marketplace_intent: MarketplaceIntent = "own"
+    listing_id: str | None = None  # set when auto-listed on save
+    # Legacy / compatibility
     formality: Formality | None = None
     cultural_tags: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    # Media + persistence
     original_image_url: str | None = None
     segmented_image_url: str | None = None
+    segmentation_model: str | None = None
+    variants: list[dict[str, Any]] = Field(default_factory=list)
     embedding_id: str | None = None
+    # Purchase history
     purchase_price_cents: int | None = None
     purchase_currency: str = "USD"
     purchase_date: str | None = None
@@ -110,6 +151,39 @@ class ClosetItem(BaseDoc):
     last_worn_at: str | None = None
     notes: str | None = None
     retail_metadata: RetailMetadata | None = None
+
+
+# ----------------- The Eyes: analyzer response payload -----------------
+class GarmentAnalysis(BaseModel):
+    """Structured output returned by ``POST /api/v1/closet/analyze``.
+
+    Every field is optional so the caller can show an editable form even
+    if the model is uncertain. ``model_used`` surfaces which AI provider
+    produced the analysis for telemetry.
+    """
+    name: str | None = None
+    title: str | None = None
+    caption: str | None = None
+    category: str | None = None
+    sub_category: str | None = None
+    item_type: str | None = None
+    brand: str | None = None
+    gender: str | None = None
+    dress_code: str | None = None
+    season: list[str] = Field(default_factory=list)
+    tradition: str | None = None
+    colors: list[WeightedTag] = Field(default_factory=list)
+    fabric_materials: list[WeightedTag] = Field(default_factory=list)
+    pattern: str | None = None
+    state: str | None = None
+    condition: str | None = None
+    quality: str | None = None
+    size: str | None = None
+    price_cents: int | None = None
+    repair_advice: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    model_used: str | None = None
+    raw: dict[str, Any] | None = None
 
 
 # -------------------------- Listings --------------------------

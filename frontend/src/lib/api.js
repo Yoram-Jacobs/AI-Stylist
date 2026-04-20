@@ -60,6 +60,8 @@ export const api = {
     client.get('/closet', { params }).then((r) => r.data),
   getItem: (id) => client.get(`/closet/${id}`).then((r) => r.data),
   createItem: (body) => client.post('/closet', body).then((r) => r.data),
+  analyzeItemImage: (body) =>
+    client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
   patchItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),
   deleteItem: (id) => client.delete(`/closet/${id}`).then((r) => r.data),
   editItemImage: (id, prompt) =>

@@ -1,27 +1,27 @@
 [
   {
     "content": "Extend ClosetItem schema + DB with all 17 new fields + marketplace_intent",
+    "status": "completed"
+  },
+  {
+    "content": "Backend: Gemini Vision 'The Eyes' analyzer (/api/v1/closet/analyze)",
+    "status": "completed"
+  },
+  {
+    "content": "Backend: Extended POST /api/v1/closet + auto-listing on For Sale/Donate/Swap",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Rewrote AddItem.jsx — multi-upload, scanning animation, editable cards, marketplace intent with fee preview, Save All",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: CSS scan-line + scan-shimmer + scan-pulse animation keyframes (reduced-motion safe)",
+    "status": "completed"
+  },
+  {
+    "content": "Testing: run frontend testing agent over the new Add Item flow",
     "status": "in_progress"
-  },
-  {
-    "content": "Backend: Gemini Vision 'The Eyes' analyzer service + POST /api/v1/closet/analyze endpoint (returns full auto-filled payload)",
-    "status": "pending"
-  },
-  {
-    "content": "Backend: Update POST /api/v1/closet to accept all new fields (+ auto-list creation when marketplace_intent=for_sale/donate/swap)",
-    "status": "pending"
-  },
-  {
-    "content": "Frontend: Rewrite AddItem.jsx — multi-file picker, thumbnail grid with scanning animation, editable cards per item, marketplace intent + 7% preview, Save All",
-    "status": "pending"
-  },
-  {
-    "content": "Frontend: CSS scanning animation keyframes (vertical sweep + shimmer)",
-    "status": "pending"
-  },
-  {
-    "content": "Testing: analyze endpoint + batch upload flow",
-    "status": "pending"
   },
   {
     "content": "Update plan.md & finish",

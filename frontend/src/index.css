@@ -179,3 +179,75 @@ img {
   background: hsl(var(--accent) / 0.25);
   color: hsl(var(--foreground));
 }
+
+/* ----- The Eyes scanning animation ----- */
+@keyframes scan-line {
+  0%   { top: 0; opacity: 0; }
+  10%  { opacity: 1; }
+  45%  { top: 100%; opacity: 1; }
+  55%  { top: 100%; opacity: 0; }
+  65%  { top: 0; opacity: 0; }
+  75%  { opacity: 1; }
+  100% { top: 100%; opacity: 1; }
+}
+@keyframes scan-shimmer {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  20%  { opacity: 0.45; }
+  70%  { opacity: 0.35; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+@keyframes scan-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--accent) / 0.4); }
+  50%      { box-shadow: 0 0 0 6px hsl(var(--accent) / 0); }
+}
+
+.scanning {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  animation: scan-pulse 2.2s ease-in-out infinite;
+}
+.scanning::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    hsl(var(--accent) / 0.12) 40%,
+    hsl(var(--accent) / 0.22) 50%,
+    hsl(var(--accent) / 0.12) 60%,
+    transparent 100%
+  );
+  animation: scan-shimmer 2.4s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+.scanning::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--accent) / 0.85) 20%,
+    hsl(var(--accent)) 50%,
+    hsl(var(--accent) / 0.85) 80%,
+    transparent 100%
+  );
+  box-shadow: 0 0 18px 2px hsl(var(--accent) / 0.5);
+  animation: scan-line 2.4s linear infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scanning, .scanning::before, .scanning::after {
+    animation: none;
+  }
+  .scanning::after {
+    top: 50%;
+    opacity: 0.75;
+  }
+}

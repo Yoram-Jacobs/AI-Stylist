@@ -8,9 +8,9 @@ const DEFAULT_DESCRIPTION =
 
 const ROUTE_META = {
   '/login': { title: 'Sign in', description: 'Sign in to DressApp to manage your closet, browse the marketplace, and chat with the AI stylist.' },
-  '/register': { title: 'Create account', description: 'Join DressApp \u2014 your closet, community marketplace, and AI stylist in one place.' },
+  '/register': { title: 'Create account', description: 'Join DressApp — your closet, community marketplace, and AI stylist in one place.' },
   '/home': { title: 'Today', description: 'Your daily DressApp brief: trends, closet stats, and the latest stylist reads.' },
-  '/closet': { title: 'My closet', description: 'Every piece you own \u2014 with smart segmentation, source tags, and one-tap edit-with-AI.' },
+  '/closet': { title: 'My closet', description: 'Every piece you own — with smart segmentation, source tags, and one-tap edit-with-AI.' },
   '/closet/add': { title: 'Add to closet', description: 'Add a new item to your DressApp closet from a photo or URL.' },
   '/stylist': { title: 'Stylist', description: 'Multimodal AI stylist that understands your closet, calendar, and the weather.' },
   '/market': { title: 'Marketplace', description: 'Buy, sell, swap, or donate community pieces with full fee transparency.' },
@@ -32,7 +32,7 @@ function metaFor(pathname) {
 export const SeoBase = () => {
   const { pathname } = useLocation();
   const { title, description } = metaFor(pathname);
-  const fullTitle = pathname === '/home' ? `${BRAND} \u2014 ${title}` : `${title} | ${BRAND}`;
+  const fullTitle = pathname === '/home' ? `${BRAND} — ${title}` : `${title} | ${BRAND}`;
   const canonical = `${SITE_URL}${pathname}`;
   return (
     <Helmet defaultTitle={BRAND} prioritizeSeoTags>
