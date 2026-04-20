@@ -12,19 +12,23 @@
     "status": "completed"
   },
   {
-    "content": "Frontend: Rewrote AddItem.jsx — multi-upload, scanning animation, editable cards, marketplace intent with fee preview, Save All",
+    "content": "Frontend: AddItem.jsx batch upload + scanning animation + editable cards + fee preview + Save All",
     "status": "completed"
   },
   {
-    "content": "Frontend: CSS scan-line + scan-shimmer + scan-pulse animation keyframes (reduced-motion safe)",
+    "content": "Frontend: CSS scan-line animation (reduced-motion safe)",
     "status": "completed"
   },
   {
-    "content": "Testing: run frontend testing agent over the new Add Item flow",
-    "status": "in_progress"
+    "content": "Testing iteration_6 (Backend 89.9%, Frontend 100%, Overall 95%)",
+    "status": "completed"
   },
   {
-    "content": "Update plan.md & finish",
-    "status": "pending"
+    "content": "Safety fallbacks for occasional missing Gemini fields",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md",
+    "status": "completed"
   }
 ]

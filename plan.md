@@ -1,19 +1,20 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Phase 5: Admin + A11y/SEO + HF FLUX vision ship)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Add-Item Overhaul + The Eyes + Batch Upload + Auto-Listing)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
 - ✅ **Phase 2 shipped**: Fully functional backend (auth, users, closet, listings, transactions w/ fee math, stylist pipeline).
 - ✅ **Vision stack migrated & stabilised** (fal.ai removed entirely):
   - **Segmentation (cutout)**: Hugging Face Inference (free tier) using **`mattmdjaga/segformer_b2_clothes`** via `huggingface_hub.InferenceClient`.
-  - **Image generate/edit (replacement for Nano Banana)**: Hugging Face **FLUX.1-schnell** via `InferenceClient.text_to_image(provider='hf-inference')`.
-    - Edit is implemented as **prompt-synthesised variant generation** using garment metadata (title/category/color/material/pattern/brand) + user instruction.
+  - **Image generate/edit**: Hugging Face **FLUX.1-schnell** via `InferenceClient.text_to_image(provider='hf-inference')`.
+    - Edit is implemented as **prompt‑synthesised variant generation** using garment metadata + user instruction.
     - Typical latency: ~5–10s; output: **1024×1024 PNG** stored in `closet_items.variants[]`.
 - ✅ **Phase 3 shipped**: React frontend compiles, screenshot‑verified, and passes integration testing.
-- ✅ **Phase 4 shipped (Part 1 & 2)**: Google Calendar OAuth (read-only) + Trend‑Scout autonomous agent.
+- ✅ **Phase 4 shipped (Part 1 & 2)**: Google Calendar OAuth (read‑only) + Trend‑Scout autonomous agent.
 - ✅ **Phase 5 shipped**: Admin dashboard (backend + UI) + provider activity monitoring + Accessibility + SEO hardening.
+- ✅ **Add Item overhaul shipped**: batch upload + animated scanning + “The Eyes” auto-fill + rich closet schema + one‑click auto‑listing to marketplace.
 - 🎯 **Current focus (next milestone)**: **PayPlus payments integration** (replacing Stripe) — *deferred until PayPlus API credentials are available*.
 
-> **Operational note:** The Emergent LLM Key budget issue is resolved (user topped up + enabled auto-recharge). Text LLM calls (Stylist + Trend‑Scout) are expected to be stable again.
+> **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Trend‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
 ---
 
@@ -30,7 +31,7 @@
 **Phase 1 artifacts**
 - ✅ `/app/docs/ARCHITECTURE.md`
 - ✅ `/app/docs/MONGODB_SCHEMA.md`
-- ✅ `/app/scripts/poc_stylist_pipeline.py` (updated to reflect HF segmentation + HF FLUX image variant generation)
+- ✅ `/app/scripts/poc_stylist_pipeline.py` (reflects HF segmentation + HF FLUX image variant generation)
 
 ---
 
@@ -42,7 +43,7 @@
 4. ✅ Public marketplace browse (filters) + seller-owned listing CRUD.
 5. ✅ Transaction ledger creation with **7% platform fee after processing fee math** (payments wiring deferred).
 
-**Phase 2 delivered (authoritative file list; updated for vision swap)**
+**Phase 2 delivered (authoritative file list; updated for vision + rich schema)**
 - ✅ Auth & security
   - `/app/backend/app/services/auth.py`
   - `/app/backend/app/api/v1/auth.py`
@@ -54,9 +55,12 @@
 - ✅ Closet
   - `/app/backend/app/api/v1/closet.py`
     - best‑effort segmentation via HF segmentation service
-    - `/closet/{id}/edit-image` now uses **HF FLUX** variant generation (prompt-synth) and returns **HTTP 503** on provider unavailability
+    - `/closet/{id}/edit-image` uses **HF FLUX** variant generation
+    - ✅ `POST /closet/analyze` (The Eyes)
+    - ✅ `POST /closet` extended for rich fields + auto-listing
   - `/app/backend/app/services/hf_segmentation.py`
   - `/app/backend/app/services/hf_image_service.py`
+  - ✅ `/app/backend/app/services/garment_vision.py` (The Eyes)
 
 - ✅ Marketplace
   - `/app/backend/app/api/v1/listings.py`
@@ -64,7 +68,7 @@
 
 - ✅ Stylist agent
   - `/app/backend/app/services/stylist_memory.py`
-  - `/app/backend/app/services/logic.py` (now uses `hf_image_service` for optional infill)
+  - `/app/backend/app/services/logic.py` (uses `hf_image_service` for optional infill)
   - `/app/backend/app/api/v1/stylist.py`
   - `/app/backend/app/services/gemini_stylist.py`
 
@@ -77,7 +81,7 @@
 
 ---
 
-### Phase 3 — Frontend V1 (React) **(COMPLETE)**
+### Phase 3 — Frontend V1 (React) **(COMPLETE + Add Item upgraded)**
 **User stories (Phase 3)**
 1. ✅ Register/login + one-tap dev login.
 2. ✅ Add and manage closet items.
@@ -91,13 +95,10 @@
 
 **Phase 3 delivered**
 - ✅ All pages compile and routes are valid.
-- ✅ Added `/transactions` page
+- ✅ `/transactions` page
   - `/app/frontend/src/pages/Transactions.jsx`
   - Routed in `/app/frontend/src/App.js`
   - Linked via TopNav dropdown
-
-**Phase 3 testing**
-- ✅ Frontend + backend integration testing: `/app/test_reports/iteration_3.json`
 
 ---
 
@@ -175,6 +176,7 @@
     - Groq Whisper (`groq-whisper`)
     - Deepgram TTS (`deepgram-tts`)
     - OpenWeather (`openweather`)
+    - ✅ The Eyes garment analyzer (`garment-vision`)
 
 - ✅ Admin Dashboard UI
   - `/app/frontend/src/pages/Admin.jsx` (7 tabs: Overview/Providers/Trend‑Scout/Users/Listings/Transactions/System)
@@ -199,9 +201,72 @@
 
 **Phase 5 testing**
 - ✅ Comprehensive testing: `/app/test_reports/iteration_5.json`
-  - Backend: **93.3%**, Frontend: **95%**, Overall: **94%**
-  - **0 critical bugs / UI bugs / integration issues / design issues**
-  - One LOW note: page title hydration latency (react-helmet-async updates after first paint; not a functional bug).
+
+---
+
+### Add Item Overhaul — Batch Upload + The Eyes + Auto‑Listing **(COMPLETE)**
+This feature spans Phases 2–3 (schema + backend + frontend UX) but is tracked separately because it materially upgrades the closet ingestion workflow.
+
+**User stories**
+1. ✅ User selects one or many images.
+2. ✅ Each image is previewed immediately.
+3. ✅ Animated “scanning” progress while The Eyes runs.
+4. ✅ Auto-fill all fields, including structured composition arrays.
+5. ✅ User can edit fields, set marketplace intent, then **Save All**.
+6. ✅ If intent is `for_sale/donate/swap`, the item is auto-listed in one click.
+
+**Delivered**
+- ✅ Rich closet schema
+  - `/app/backend/app/models/schemas.py`
+    - `WeightedTag` model
+    - extended `ClosetItem` fields:
+      - name/title/caption
+      - category/sub_category/item_type
+      - brand
+      - fabric_materials[{name,pct}], colors[{name,pct}]
+      - pattern, gender, dress_code, season, tradition
+      - state, condition, quality, size
+      - price_cents, marketplace_intent, repair_advice, tags
+      - listing_id back-reference
+
+- ✅ The Eyes analyzer (Gemini 2.5 Pro multimodal)
+  - `/app/backend/app/services/garment_vision.py`
+  - `POST /api/v1/closet/analyze`
+    - accepts `image_base64` OR `image_url`
+    - strict JSON contract
+    - emits provider activity: `garment-vision`
+    - includes server-side `setdefault(...)` fallbacks for occasional missing fields
+  - Swappable later to fine-tuned **Gemma 4 E4B** via env:
+    - `GARMENT_VISION_PROVIDER`
+    - `GARMENT_VISION_MODEL`
+
+- ✅ Extended closet create with auto-listing
+  - `POST /api/v1/closet` accepts all new fields
+  - If `marketplace_intent in {for_sale,donate,swap}`:
+    - creates closet item **and** creates active Listing
+    - sets `closet_items.source = Shared`
+    - sets `closet_items.listing_id`
+    - stores 7% fee metadata (`FinancialMetadata.estimated_seller_net_cents`)
+
+- ✅ Frontend batch upload + editing UX
+  - `/app/frontend/src/pages/AddItem.jsx`
+    - multi-file upload (`multiple`)
+    - **parallel** analysis of all images
+    - editable cards for every field
+    - marketplace intent selector:
+      - Own (default)
+      - For Sale (shows price + live fee preview)
+      - Donate / Swap
+    - Save All → creates items (and listings when relevant) → toast → navigate to /closet
+
+- ✅ Scanning animation
+  - `/app/frontend/src/index.css` includes `.scanning` + keyframes `scan-line`, `scan-shimmer`, `scan-pulse`
+  - disabled automatically under `prefers-reduced-motion`
+
+**Testing**
+- ✅ Add Item overhaul test pass: `/app/test_reports/iteration_6.json`
+  - Backend: **89.9%**, Frontend: **100%**, Overall: **95%**
+  - 0 critical bugs / UI bugs / integration issues
 
 ---
 
@@ -210,12 +275,14 @@
    - confirm sandbox/prod endpoints
    - confirm payout model
    - implement checkout + webhooks + DB field migration
-2. Optional production hardening (nice-to-have, not blocking):
+2. **Gemma migration (future)**: when your Gemma 4 E4B fine-tune is ready:
+   - set `GARMENT_VISION_PROVIDER` + `GARMENT_VISION_MODEL`
+   - validate JSON contract + field completeness vs Gemini
+3. Optional production hardening (nice-to-have, not blocking):
    - structured JSON logs + request IDs propagated through provider_activity
-   - rate limits on stylist endpoints
-   - deterministic E2E script (Playwright/Cypress) running the happy path:
-     dev login → add closet item → edit variant → create listing → create transaction → verify ledger
-3. (Optional) Add provider health “pings” (cheap GET probes) so Admin/Providers tab can show “configured but idle” vs “down”.
+   - rate limits on stylist + eyes endpoints
+   - deterministic E2E script (Playwright/Cypress):
+     dev login → add closet item (batch) → auto-list (for_sale) → create transaction → verify ledger
 
 ---
 
@@ -231,3 +298,8 @@
   - ✅ Admin dashboard + provider observability
   - ✅ Accessibility + SEO baseline shipped
   - ✅ Test report iteration_5 green
+- Add Item Overhaul:
+  - ✅ Batch upload + scanning animation
+  - ✅ The Eyes auto-fill with rich structured fields
+  - ✅ One-click auto-listing when marketplace_intent != own
+  - ✅ Test report iteration_6 green

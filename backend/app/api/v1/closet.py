@@ -256,6 +256,15 @@ async def analyze_item_image(
             503, "Garment analyzer is temporarily unavailable. Please try again."
         ) from exc
 
+    # Safety fallbacks so the frontend form always has sensible defaults.
+    parsed.setdefault("category", "Top")
+    parsed.setdefault("pattern", "solid")
+    parsed.setdefault("gender", "unisex")
+    parsed.setdefault("dress_code", "casual")
+    parsed.setdefault("state", "used")
+    parsed.setdefault("condition", "good")
+    parsed.setdefault("quality", "mid")
+
     try:
         analysis = GarmentAnalysis(**parsed)
     except Exception:  # noqa: BLE001
