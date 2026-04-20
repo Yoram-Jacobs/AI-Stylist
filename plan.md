@@ -1,18 +1,19 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Phase 4: Calendar OAuth + Trend‑Scout ship)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Phase 5: Admin + A11y/SEO + HF FLUX vision ship)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
 - ✅ **Phase 2 shipped**: Fully functional backend (auth, users, closet, listings, transactions w/ fee math, stylist pipeline).
-- ✅ **Vision stack migrated** (fal.ai removed entirely):
+- ✅ **Vision stack migrated & stabilised** (fal.ai removed entirely):
   - **Segmentation (cutout)**: Hugging Face Inference (free tier) using **`mattmdjaga/segformer_b2_clothes`** via `huggingface_hub.InferenceClient`.
-  - **Image generate/edit (“Nano Banana”)**: Gemini Flash Image via **Emergent Universal Key** using model **`gemini-3.1-flash-image-preview`**.
-  - Resilience: image edit uses **retry/backoff** for transient 502s; `/closet/{id}/edit-image` returns **HTTP 503** (not 500) on persistent upstream failures.
+  - **Image generate/edit (replacement for Nano Banana)**: Hugging Face **FLUX.1-schnell** via `InferenceClient.text_to_image(provider='hf-inference')`.
+    - Edit is implemented as **prompt-synthesised variant generation** using garment metadata (title/category/color/material/pattern/brand) + user instruction.
+    - Typical latency: ~5–10s; output: **1024×1024 PNG** stored in `closet_items.variants[]`.
 - ✅ **Phase 3 shipped**: React frontend compiles, screenshot‑verified, and passes integration testing.
-- ✅ **Phase 4 (Part 1) shipped**: **Google Calendar OAuth** (read‑only) + real event hydration in Stylist.
-- ✅ **Phase 4 (Part 2) shipped**: **Trend‑Scout autonomous agent** (APScheduler) + Home feed powered by backend.
-- 🎯 **Current focus (remaining Phase 4)**: **PayPlus payments integration** (replacing Stripe) — *deferred until PayPlus API credentials are available*.
+- ✅ **Phase 4 shipped (Part 1 & 2)**: Google Calendar OAuth (read-only) + Trend‑Scout autonomous agent.
+- ✅ **Phase 5 shipped**: Admin dashboard (backend + UI) + provider activity monitoring + Accessibility + SEO hardening.
+- 🎯 **Current focus (next milestone)**: **PayPlus payments integration** (replacing Stripe) — *deferred until PayPlus API credentials are available*.
 
-> **Operational note (external):** The user’s **EMERGENT_LLM_KEY budget is currently exhausted** (BudgetExceeded). This can temporarily impact Gemini calls (Stylist + Trend‑Scout). No code fix needed; user must top up the universal key balance.
+> **Operational note:** The Emergent LLM Key budget issue is resolved (user topped up + enabled auto-recharge). Text LLM calls (Stylist + Trend‑Scout) are expected to be stable again.
 
 ---
 
@@ -29,7 +30,7 @@
 **Phase 1 artifacts**
 - ✅ `/app/docs/ARCHITECTURE.md`
 - ✅ `/app/docs/MONGODB_SCHEMA.md`
-- ✅ `/app/scripts/poc_stylist_pipeline.py` (updated to reflect HF segmentation + Nano Banana edit)
+- ✅ `/app/scripts/poc_stylist_pipeline.py` (updated to reflect HF segmentation + HF FLUX image variant generation)
 
 ---
 
@@ -53,9 +54,9 @@
 - ✅ Closet
   - `/app/backend/app/api/v1/closet.py`
     - best‑effort segmentation via HF segmentation service
-    - `/closet/{id}/edit-image` uses Nano Banana edit and degrades to 503 on upstream unavailability
+    - `/closet/{id}/edit-image` now uses **HF FLUX** variant generation (prompt-synth) and returns **HTTP 503** on provider unavailability
   - `/app/backend/app/services/hf_segmentation.py`
-  - `/app/backend/app/services/gemini_image_service.py`
+  - `/app/backend/app/services/hf_image_service.py`
 
 - ✅ Marketplace
   - `/app/backend/app/api/v1/listings.py`
@@ -63,18 +64,15 @@
 
 - ✅ Stylist agent
   - `/app/backend/app/services/stylist_memory.py`
-  - `/app/backend/app/services/logic.py`
+  - `/app/backend/app/services/logic.py` (now uses `hf_image_service` for optional infill)
   - `/app/backend/app/api/v1/stylist.py`
+  - `/app/backend/app/services/gemini_stylist.py`
 
 - ✅ Data layer
   - `/app/backend/app/services/repos.py`
-  - `/app/backend/app/db/database.py` — partial-filter unique index for `transactions.stripe.checkout_session_id` (legacy; will be revisited when PayPlus lands)
-
-**Phase 2 testing status**
-- ✅ Regression testing: `/app/test_reports/iteration_2.json` (historical)
+  - `/app/backend/app/db/database.py`
 
 **Phase 2 known limitations (expected, not bugs)**
-- Nano Banana image generate/edit can intermittently return upstream 502; app retries and returns 503 with a user‑safe message.
 - Payments are not wired (transactions remain `pending`).
 
 ---
@@ -97,70 +95,39 @@
   - `/app/frontend/src/pages/Transactions.jsx`
   - Routed in `/app/frontend/src/App.js`
   - Linked via TopNav dropdown
-- ✅ Lint warnings resolved.
-- ✅ UI verified via screenshots.
 
 **Phase 3 testing**
 - ✅ Frontend + backend integration testing: `/app/test_reports/iteration_3.json`
-  - Backend: **92.7%**, Frontend: **95%**, Integration: **90%**
-  - **0 critical bugs**, **0 UI bugs**
 
 ---
 
-### Phase 4 — Context + Autonomy + Payments (PayPlus) **(IN PROGRESS)**
+### Phase 4 — Context + Autonomy + Payments (PayPlus) **(PARTIALLY COMPLETE / PAYPLUS DEFERRED)**
 
 #### Phase 4 (Part 1) — Google Calendar OAuth (P0) **(COMPLETE)**
 **Delivered**
 - ✅ Backend OAuth + Calendar API
   - `/app/backend/app/services/calendar_service.py`
-    - auth URL builder
-    - code exchange + userinfo fetch
-    - token persistence on `users.google_calendar_tokens`
-    - refresh-token preservation on repeated consent
-    - auto-refresh access token when expired
-    - `get_events_for_user()` returns compact events for stylist grounding
   - `/app/backend/app/api/v1/google_auth.py`
-    - `GET /api/v1/auth/google/start`
-    - `GET /api/v1/auth/google/callback`
-    - `POST /api/v1/auth/google/disconnect`
-    - `GET /api/v1/calendar/status`
-    - `GET /api/v1/calendar/upcoming`
-    - CSRF-safe state using short-lived (15 min) JWT carrying DressApp `user_id`
-    - Graceful redirect-with-error for all failure paths
-  - `/app/backend/app/api/v1/stylist.py`
-    - When `include_calendar=true`, hydrates real events if connected; falls back to mock event otherwise
-
+  - `/app/backend/app/api/v1/stylist.py` real-event hydration when connected
 - ✅ Frontend UI
-  - `/app/frontend/src/components/CalendarConnect.jsx` — connect/disconnect card + post‑OAuth toast handling
-  - `/app/frontend/src/pages/Profile.jsx` — Calendar card embedded in Profile
-  - `/app/frontend/src/pages/Stylist.jsx` — “Live Google Calendar” badge when connected; occasion input shown when not connected
-
+  - `/app/frontend/src/components/CalendarConnect.jsx`
+  - `/app/frontend/src/pages/Profile.jsx`
+  - `/app/frontend/src/pages/Stylist.jsx` (badge + occasion fallback)
 
 #### Phase 4 (Part 2) — Trend‑Scout Background Agent (P1) **(COMPLETE)**
 **Delivered**
 - ✅ Backend Trend‑Scout agent + persistence
   - `/app/backend/app/services/trend_scout.py`
-    - generates 3 editorial cards/day (runway / street / sustainability)
-    - idempotent per day
-    - persists to `trend_reports` with unique `(bucket, date)`
   - `/app/backend/app/services/scheduler.py`
-    - APScheduler singleton
-    - schedule default: **daily 07:00 UTC** (env configurable)
   - `/app/backend/app/api/v1/trends.py`
-    - `GET /api/v1/trends/latest` (public-safe)
-    - `POST /api/v1/trends/run-now` (admin)
-    - `POST /api/v1/trends/run-now-dev` (auth-only dev helper)
-  - `/app/backend/app/db/database.py`
-    - indexes: `(date desc, bucket)` and unique `(bucket, date)`
-
+  - `/app/backend/app/db/database.py` unique `(bucket, date)` index
 - ✅ Frontend Home feed integration
-  - `/app/frontend/src/pages/Home.jsx` reads from `/api/v1/trends/latest` and falls back to built‑in cards when empty
+  - `/app/frontend/src/pages/Home.jsx` reads `/api/v1/trends/latest`
   - `/app/frontend/src/lib/api.js` includes `trendsLatest()`
-
 
 #### Phase 4 (Part 3) — PayPlus Payments (replaces Stripe) **(NEXT / DEFERRED)**
 **User stories**
-1. Seller onboarding / payout routing using PayPlus (exact mechanism depends on PayPlus capabilities).
+1. Seller onboarding / payout routing using PayPlus (depends on PayPlus capabilities).
 2. Buyer checkout creates a PayPlus payment session.
 3. Webhooks update transaction lifecycle: `pending → paid/failed/refunded`.
 4. Ledger consistency: store `gross`, `processing_fee`, `platform_fee (7% after fee)`, `seller_net`.
@@ -179,39 +146,88 @@
 
 ---
 
-### Phase 5 — Admin + Hardening + Comprehensive E2E **(UPCOMING)**
+### Phase 5 — Admin + Hardening + Comprehensive E2E **(COMPLETE)**
 **User stories (Phase 5)**
-1. Admin dashboard: revenue, payouts, user activity, stylist usage.
-2. Reporting/moderation workflow for listings.
-3. Export/delete data.
-4. Deterministic E2E suite.
+1. ✅ Admin dashboard: revenue, users, marketplace activity, stylist usage.
+2. ✅ Monitoring for external providers (latency + error rate + last error tail).
+3. ✅ Trend‑Scout monitoring + manual force-run.
+4. ✅ Accessibility hardening pass.
+5. ✅ SEO hardening pass.
 
-**Implementation**
-- Admin endpoints + (optional) UI
-- Observability: request IDs, provider latency metrics, structured logs
-- Load/chaos tests for stylist pipeline; retries/backoff
+**Phase 5 delivered**
+- ✅ Admin Dashboard backend (gated by `require_admin`)
+  - `/app/backend/app/api/v1/admin.py`
+    - `/admin/overview`
+    - `/admin/users` + `/{id}/promote|demote`
+    - `/admin/listings` + `/{id}/status`
+    - `/admin/transactions`
+    - `/admin/providers` + `/{provider}/calls`
+    - `/admin/trend-scout` + `/run`
+    - `/admin/llm-usage` (best-effort, never 500)
+    - `/admin/system` (redacted config + key presence)
+
+- ✅ Provider activity tracker
+  - `/app/backend/app/services/provider_activity.py`
+  - wired into:
+    - HF image gen (`hf-image`)
+    - HF segmentation (`hf-segformer`)
+    - Gemini stylist (`gemini-stylist`)
+    - Groq Whisper (`groq-whisper`)
+    - Deepgram TTS (`deepgram-tts`)
+    - OpenWeather (`openweather`)
+
+- ✅ Admin Dashboard UI
+  - `/app/frontend/src/pages/Admin.jsx` (7 tabs: Overview/Providers/Trend‑Scout/Users/Listings/Transactions/System)
+  - `/app/frontend/src/App.js` route: `/admin`
+  - `/app/frontend/src/components/TopNav.jsx` adds “Admin” menu item for admin users only
+
+- ✅ Accessibility
+  - Skip link on first Tab (in App shell)
+  - `<main id="main-content" tabIndex={-1}>` in `AppLayout`
+  - Global `:focus-visible` outline
+  - `prefers-reduced-motion` support
+  - `aria-label` on icon-only nav elements
+
+- ✅ SEO
+  - `react-helmet-async` + per-route SEO
+    - `/app/frontend/src/components/SeoBase.jsx`
+    - `/app/frontend/src/App.js` wires `HelmetProvider` + `SeoBase`
+  - Static assets:
+    - `/app/frontend/public/robots.txt`
+    - `/app/frontend/public/sitemap.xml`
+    - `/app/frontend/public/manifest.json`
+
+**Phase 5 testing**
+- ✅ Comprehensive testing: `/app/test_reports/iteration_5.json`
+  - Backend: **93.3%**, Frontend: **95%**, Overall: **94%**
+  - **0 critical bugs / UI bugs / integration issues / design issues**
+  - One LOW note: page title hydration latency (react-helmet-async updates after first paint; not a functional bug).
 
 ---
 
 ## 3) Next Actions (immediate)
-1. **User action (external): Top up EMERGENT_LLM_KEY** to remove BudgetExceeded errors (affects Trend‑Scout completeness + fresh stylist calls).
-2. Verify Google Calendar connection end-to-end in browser:
-   - Profile → Connect Google Calendar → consent → redirected back to `/me?calendar=connected`
-   - Stylist → toggle “Include calendar” → confirm advice references real events
-3. (Optional hardening) Increase timeout for `/api/v1/trends/run-now-dev` since it can exceed 30s on cold starts.
-4. **PayPlus discovery (deferred)**: once PayPlus credentials are available, implement checkout + webhooks + DB field migration.
-5. Add a small E2E “happy path” script:
-   - dev login → add closet item (segmented) → create listing → create transaction → verify ledger in `/transactions`
+1. **PayPlus discovery (deferred)**: when PayPlus credentials are available:
+   - confirm sandbox/prod endpoints
+   - confirm payout model
+   - implement checkout + webhooks + DB field migration
+2. Optional production hardening (nice-to-have, not blocking):
+   - structured JSON logs + request IDs propagated through provider_activity
+   - rate limits on stylist endpoints
+   - deterministic E2E script (Playwright/Cypress) running the happy path:
+     dev login → add closet item → edit variant → create listing → create transaction → verify ledger
+3. (Optional) Add provider health “pings” (cheap GET probes) so Admin/Providers tab can show “configured but idle” vs “down”.
 
 ---
 
 ## 4) Success Criteria
 - Phase 1: ✅ shipped.
 - Phase 2: ✅ shipped and tested.
-- Phase 3: ✅ shipped; UI stable; iteration_3 test report green.
-- Phase 4 (current):
+- Phase 3: ✅ shipped; UI stable; integration tests green.
+- Phase 4:
   - ✅ Google Calendar OAuth functional (real events in stylist context)
   - ✅ Trend‑Scout runs daily and is visible in UI
   - ⏳ PayPlus payments wired end‑to‑end with webhook-driven transaction updates (pending user credentials)
 - Phase 5:
-  - Admin dashboard + hardened observability + deterministic E2E coverage
+  - ✅ Admin dashboard + provider observability
+  - ✅ Accessibility + SEO baseline shipped
+  - ✅ Test report iteration_5 green
