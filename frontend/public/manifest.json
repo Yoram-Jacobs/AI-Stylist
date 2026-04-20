@@ -1,0 +1,17 @@
+{
+  "name": "DressApp",
+  "short_name": "DressApp",
+  "description": "Your closet, community marketplace, and AI stylist in one.",
+  "start_url": "/home",
+  "display": "standalone",
+  "background_color": "#F7F4EE",
+  "theme_color": "#1F6F6B",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

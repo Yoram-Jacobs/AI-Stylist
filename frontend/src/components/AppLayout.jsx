@@ -18,7 +18,7 @@ export const AppLayout = () => {
   return (
     <div className="page-shell">
       <TopNav />
-      <main className="flex-1 pb-safe-tabs md:pb-10">
+      <main id="main-content" tabIndex={-1} className="flex-1 pb-safe-tabs md:pb-10">
         <Outlet />
       </main>
       <BottomTabs />

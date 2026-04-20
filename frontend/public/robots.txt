@@ -1,0 +1,8 @@
+# DressApp robots
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /me
+Disallow: /api
+
+Sitemap: https://ai-stylist-api.preview.emergentagent.com/sitemap.xml

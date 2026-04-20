@@ -52,14 +52,19 @@ class DeepgramService:
             "Content-Type": "application/json",
         }
         payload = {"text": text}
+        from app.services import provider_activity
+
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                DEEPGRAM_REST_URL, params=params, headers=headers, json=payload
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(
-                    f"Deepgram TTS failed {resp.status_code}: {resp.text[:300]}"
+            async with provider_activity.Track(
+                "deepgram-tts", {"voice": voice, "encoding": encoding}
+            ):
+                resp = await client.post(
+                    DEEPGRAM_REST_URL, params=params, headers=headers, json=payload
                 )
+                if resp.status_code >= 400:
+                    raise RuntimeError(
+                        f"Deepgram TTS failed {resp.status_code}: {resp.text[:300]}"
+                    )
             logger.info(
                 "Deepgram TTS ok voice=%s encoding=%s bytes=%d",
                 voice,

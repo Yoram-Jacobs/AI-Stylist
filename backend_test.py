@@ -763,6 +763,295 @@ class DressAppAPITester:
         else:
             self.log_test("Stylist Multipart Real Image", False, f"Status: {status}, Data: {response_data}")
 
+    # ==================== PHASE 5 ADMIN TESTS ====================
+    
+    def test_admin_overview(self):
+        """Test GET /admin/overview endpoint"""
+        if not self.dev_token:
+            self.log_test("Admin Overview", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/overview', token=self.dev_token)
+        
+        if success and status == 200:
+            # Check required fields
+            required_fields = ['users', 'closet_items', 'listings', 'transactions', 'revenue_cents', 'stylist', 'trend_scout', 'providers']
+            has_all_fields = all(field in data for field in required_fields)
+            
+            # Check nested structure
+            users_valid = isinstance(data.get('users', {}), dict) and 'total' in data['users']
+            revenue_valid = isinstance(data.get('revenue_cents', {}), dict)
+            
+            all_valid = has_all_fields and users_valid and revenue_valid
+            self.log_test("Admin Overview", all_valid, f"Fields: {list(data.keys())}")
+        else:
+            self.log_test("Admin Overview", False, f"Status: {status}, Data: {data}")
+    
+    def test_admin_overview_auth(self):
+        """Test admin overview auth requirements"""
+        # Test without auth - should return 401
+        success, data, status = self.make_request('GET', '/admin/overview')
+        no_auth_fails = status == 401
+        
+        # Test with non-admin user (if available)
+        non_admin_fails = True
+        if self.buyer_token:
+            success, data, status = self.make_request('GET', '/admin/overview', token=self.buyer_token)
+            non_admin_fails = status == 403
+        
+        auth_working = no_auth_fails and non_admin_fails
+        self.log_test("Admin Overview Auth", auth_working, f"No auth: {status}, Non-admin: {status if self.buyer_token else 'N/A'}")
+    
+    def test_admin_users(self):
+        """Test GET /admin/users endpoint"""
+        if not self.dev_token:
+            self.log_test("Admin Users", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/users', token=self.dev_token)
+        
+        if success and status == 200:
+            # Check structure
+            has_items = 'items' in data and isinstance(data['items'], list)
+            has_pagination = all(k in data for k in ['total', 'skip', 'limit'])
+            
+            # Check that sensitive fields are not exposed
+            if data['items']:
+                first_user = data['items'][0]
+                no_password = 'password_hash' not in first_user
+                no_tokens = 'google_calendar_tokens' not in first_user
+                has_counts = 'closet_count' in first_user and 'listing_count' in first_user
+                
+                all_valid = has_items and has_pagination and no_password and no_tokens and has_counts
+                self.log_test("Admin Users", all_valid, f"Users: {len(data['items'])}, Total: {data.get('total')}")
+            else:
+                self.log_test("Admin Users", has_items and has_pagination, "No users found but structure valid")
+        else:
+            self.log_test("Admin Users", False, f"Status: {status}, Data: {data}")
+    
+    def test_admin_user_promotion(self):
+        """Test POST /admin/users/{id}/promote and /demote"""
+        if not self.dev_token or not self.buyer_token:
+            self.log_test("Admin User Promotion", False, "Missing required tokens")
+            return
+            
+        # Get buyer user ID first
+        success, buyer_data, status = self.make_request('GET', '/users/me', token=self.buyer_token)
+        if not (success and status == 200):
+            self.log_test("Admin User Promotion", False, "Could not get buyer user data")
+            return
+            
+        buyer_id = buyer_data.get('id')
+        
+        # Test promotion
+        success, data, status = self.make_request('POST', f'/admin/users/{buyer_id}/promote', token=self.dev_token)
+        promote_works = success and status == 200
+        
+        # Test demotion (idempotent)
+        success, data, status = self.make_request('POST', f'/admin/users/{buyer_id}/demote', token=self.dev_token)
+        demote_works = success and status == 200
+        
+        # Test idempotency - demote again
+        success, data, status = self.make_request('POST', f'/admin/users/{buyer_id}/demote', token=self.dev_token)
+        idempotent_works = success and status == 200
+        
+        all_works = promote_works and demote_works and idempotent_works
+        self.log_test("Admin User Promotion", all_works, f"Promote: {promote_works}, Demote: {demote_works}, Idempotent: {idempotent_works}")
+    
+    def test_admin_listings(self):
+        """Test GET /admin/listings with status filter"""
+        if not self.dev_token:
+            self.log_test("Admin Listings", False, "No dev token available")
+            return
+            
+        # Test without filter
+        success, data, status = self.make_request('GET', '/admin/listings', token=self.dev_token)
+        basic_works = success and status == 200 and 'items' in data
+        
+        # Test with status filter
+        success, data, status = self.make_request('GET', '/admin/listings?status=active', token=self.dev_token)
+        filter_works = success and status == 200
+        
+        both_work = basic_works and filter_works
+        self.log_test("Admin Listings", both_work, f"Basic: {basic_works}, Filter: {filter_works}")
+    
+    def test_admin_listing_status_change(self):
+        """Test POST /admin/listings/{id}/status"""
+        if not self.dev_token:
+            self.log_test("Admin Listing Status", False, "No dev token available")
+            return
+            
+        # First create a listing to test with
+        listing_id = self.test_listings_operations()
+        if not listing_id:
+            self.log_test("Admin Listing Status", False, "Could not create test listing")
+            return
+        
+        # Test valid status change
+        success, data, status = self.make_request('POST', f'/admin/listings/{listing_id}/status?status=paused', token=self.dev_token)
+        valid_change = success and status == 200
+        
+        # Test invalid status (should return 422)
+        success, data, status = self.make_request('POST', f'/admin/listings/{listing_id}/status?status=invalid', token=self.dev_token)
+        invalid_rejected = status == 422
+        
+        both_work = valid_change and invalid_rejected
+        self.log_test("Admin Listing Status", both_work, f"Valid: {valid_change}, Invalid rejected: {invalid_rejected}")
+    
+    def test_admin_transactions(self):
+        """Test GET /admin/transactions"""
+        if not self.dev_token:
+            self.log_test("Admin Transactions", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/transactions', token=self.dev_token)
+        
+        if success and status == 200:
+            has_structure = 'items' in data and isinstance(data['items'], list)
+            self.log_test("Admin Transactions", has_structure, f"Transactions: {len(data.get('items', []))}")
+        else:
+            self.log_test("Admin Transactions", False, f"Status: {status}, Data: {data}")
+    
+    def test_admin_providers(self):
+        """Test GET /admin/providers"""
+        if not self.dev_token:
+            self.log_test("Admin Providers", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/providers', token=self.dev_token)
+        
+        if success and status == 200:
+            has_summary = 'summary' in data and isinstance(data['summary'], list)
+            self.log_test("Admin Providers", has_summary, f"Provider entries: {len(data.get('summary', []))}")
+        else:
+            self.log_test("Admin Providers", False, f"Status: {status}, Data: {data}")
+    
+    def test_admin_trend_scout(self):
+        """Test GET /admin/trend-scout and POST /admin/trend-scout/run"""
+        if not self.dev_token:
+            self.log_test("Admin Trend Scout", False, "No dev token available")
+            return
+            
+        # Test GET endpoint
+        success, data, status = self.make_request('GET', '/admin/trend-scout', token=self.dev_token)
+        get_works = success and status == 200 and 'items' in data
+        
+        # Test POST run endpoint
+        print("🔄 Testing trend-scout run (this may take 15-30 seconds)...")
+        success, data, status = self.make_request('POST', '/admin/trend-scout/run?force=true', token=self.dev_token, timeout=60)
+        run_works = success and status == 200
+        
+        if run_works and 'generated' in data:
+            generated_count = len(data.get('generated', []))
+            self.log_test("Admin Trend Scout Run", generated_count > 0, f"Generated {generated_count} cards")
+        else:
+            self.log_test("Admin Trend Scout Run", False, f"Status: {status}, Data: {data}")
+        
+        self.log_test("Admin Trend Scout Get", get_works, f"Status: {status}")
+    
+    def test_admin_llm_usage(self):
+        """Test GET /admin/llm-usage"""
+        if not self.dev_token:
+            self.log_test("Admin LLM Usage", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/llm-usage', token=self.dev_token)
+        
+        if success and status == 200:
+            # Should never return 500 even if upstream is unreachable
+            has_available_field = 'available' in data
+            if data.get('available'):
+                has_usage = 'usage' in data
+                self.log_test("Admin LLM Usage", has_available_field and has_usage, f"Available: {data.get('available')}")
+            else:
+                has_reason = 'reason' in data
+                self.log_test("Admin LLM Usage", has_available_field and has_reason, f"Reason: {data.get('reason')}")
+        else:
+            self.log_test("Admin LLM Usage", False, f"Status: {status}, Data: {data}")
+    
+    def test_admin_system(self):
+        """Test GET /admin/system"""
+        if not self.dev_token:
+            self.log_test("Admin System", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/admin/system', token=self.dev_token)
+        
+        if success and status == 200:
+            # Check required sections
+            required_sections = ['ai', 'keys_present', 'trend_scout', 'dev']
+            has_sections = all(section in data for section in required_sections)
+            
+            # Check that all expected keys are present
+            keys_present = data.get('keys_present', {})
+            expected_keys = ['HF_TOKEN', 'EMERGENT_LLM_KEY', 'GROQ_API_KEY', 'DEEPGRAM_API_KEY', 'OPENWEATHER_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET']
+            all_keys_present = all(key in keys_present for key in expected_keys)
+            all_keys_true = all(keys_present.get(key) for key in expected_keys)
+            
+            # Ensure no secret values are exposed
+            no_secrets_exposed = True
+            for section in data.values():
+                if isinstance(section, dict):
+                    for value in section.values():
+                        if isinstance(value, str) and (value.startswith('sk-') or value.startswith('hf_') or value.startswith('gsk_')):
+                            no_secrets_exposed = False
+                            break
+            
+            all_valid = has_sections and all_keys_present and all_keys_true and no_secrets_exposed
+            self.log_test("Admin System", all_valid, f"Sections: {has_sections}, Keys: {all_keys_present}/{all_keys_true}, No secrets: {no_secrets_exposed}")
+        else:
+            self.log_test("Admin System", False, f"Status: {status}, Data: {data}")
+    
+    def test_image_edit_regression(self):
+        """Test POST /closet/{id}/edit-image with FLUX.1-schnell"""
+        if not self.dev_token:
+            self.log_test("Image Edit Regression", False, "No dev token available")
+            return
+            
+        # Create a closet item first
+        item_data = {
+            "title": "Test Jacket for Edit",
+            "category": "outerwear",
+            "sub_category": "jacket",
+            "brand": "TestBrand",
+            "color": "blue",
+            "material": "cotton",
+            "original_image_url": "https://example.com/jacket.jpg"
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        if not (success and status == 201):
+            self.log_test("Image Edit Regression", False, f"Could not create closet item: {status}")
+            return
+            
+        item_id = data.get('id')
+        
+        # Test image edit with FLUX
+        print("🔄 Testing image edit with FLUX.1-schnell (this may take 10-30 seconds)...")
+        edit_url = f'/closet/{item_id}/edit-image?prompt=Change the color to forest green'
+        success, data, status = self.make_request('POST', edit_url, token=self.dev_token, timeout=60)
+        
+        if success and status == 200:
+            has_variant_url = 'variant_url' in data and data['variant_url'].startswith('data:image/')
+            has_variants = 'variants' in data and isinstance(data['variants'], list)
+            
+            # Check that variant uses FLUX model
+            flux_model = False
+            if has_variants and data['variants']:
+                latest_variant = data['variants'][-1]
+                model_used = latest_variant.get('model', '').lower()
+                flux_model = 'flux' in model_used
+            
+            all_valid = has_variant_url and has_variants and flux_model
+            self.log_test("Image Edit Regression", all_valid, 
+                         f"Variant URL: {has_variant_url}, Variants: {has_variants}, FLUX model: {flux_model}")
+        else:
+            # Check if it's the expected 503 regression
+            if status == 503:
+                self.log_test("Image Edit Regression", False, f"REGRESSION: Still returning 503 - FLUX not working: {data}")
+            else:
+                self.log_test("Image Edit Regression", False, f"Status: {status}, Data: {data}")
+
     def run_all_tests(self):
         """Run all test suites"""
         print("🚀 Starting DressApp Backend API Tests")
@@ -807,6 +1096,24 @@ class DressAppAPITester:
         self.test_multiple_pending_transactions()
         self.test_multipart_stylist_with_real_image()
         self.test_stylist_history_persistence()
+        
+        # PHASE 5 ADMIN TESTS
+        print("\n🔄 Running Phase 5 Admin Dashboard Tests...")
+        self.test_admin_overview()
+        self.test_admin_overview_auth()
+        self.test_admin_users()
+        self.test_admin_user_promotion()
+        self.test_admin_listings()
+        self.test_admin_listing_status_change()
+        self.test_admin_transactions()
+        self.test_admin_providers()
+        self.test_admin_trend_scout()
+        self.test_admin_llm_usage()
+        self.test_admin_system()
+        
+        # PHASE 5 IMAGE EDIT REGRESSION
+        print("\n🔄 Running Phase 5 Image Edit Regression Test...")
+        self.test_image_edit_regression()
         
         return self.generate_report()
 

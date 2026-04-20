@@ -14,9 +14,9 @@ from typing import Any
 import httpx
 
 from app.services.deepgram_service import deepgram_service
-from app.services.gemini_image_service import gemini_image_service
 from app.services.gemini_stylist import gemini_stylist_service, image_bytes_to_base64
 from app.services.groq_service import groq_whisper_service
+from app.services.hf_image_service import hf_image_service
 from app.services.hf_segmentation import hf_segmentation_service
 from app.services.weather_service import weather_service
 
@@ -107,11 +107,11 @@ async def get_styling_advice(
             logger.warning("Segmentation failed: %s", exc)
         latency["segmentation_ms"] = int((time.perf_counter() - t0) * 1000)
 
-    # --- 3. Optional infill / edit (Gemini Nano Banana)
-    if image_bytes and do_infill and infill_prompt and gemini_image_service is not None:
+    # --- 3. Optional infill / edit (HF FLUX text-to-image)
+    if image_bytes and do_infill and infill_prompt and hf_image_service is not None:
         t0 = time.perf_counter()
         try:
-            edit = await gemini_image_service.edit(image_bytes, infill_prompt)
+            edit = await hf_image_service.edit(image_bytes, infill_prompt)
             if edit.get("image_b64"):
                 result["infilled_image_url"] = (
                     f"data:{edit.get('mime_type', 'image/png')};base64,"

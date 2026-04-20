@@ -14,6 +14,7 @@ const TABS = [
 export const BottomTabs = () => (
   <nav
     data-testid="bottom-tabs"
+    aria-label="Mobile primary navigation"
     className="md:hidden fixed bottom-0 inset-x-0 bg-background/95 backdrop-blur border-t border-border z-40"
     style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
   >
@@ -23,6 +24,7 @@ export const BottomTabs = () => (
           <NavLink
             to={to}
             data-testid={testid}
+            aria-label={label}
             className={({ isActive }) =>
               cn(
                 'flex-1 flex flex-col items-center justify-center rounded-lg px-1 py-2 min-h-[52px]',

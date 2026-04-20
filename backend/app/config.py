@@ -46,6 +46,12 @@ class Settings:
         "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"
     )
 
+    # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
+    HF_IMAGE_MODEL: str = os.environ.get(
+        "HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"
+    )
+    HF_IMAGE_PROVIDER: str = os.environ.get("HF_IMAGE_PROVIDER", "hf-inference")
+
     # --- Groq (Whisper-v3) ---
     GROQ_API_KEY: str | None = os.environ.get("GROQ_API_KEY")
     WHISPER_MODEL: str = os.environ.get("WHISPER_MODEL", "whisper-large-v3")

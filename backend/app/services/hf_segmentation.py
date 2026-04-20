@@ -93,6 +93,8 @@ class HFSegmentationService:
 
     # -------------------- internals --------------------
     def _run_segformer(self, image_bytes: bytes) -> dict[str, Any]:
+        from app.services import provider_activity
+
         # The HF Inference client expects a URL or a local path when given
         # raw bytes without an explicit content-type. We write to a secure
         # temp file to keep the API happy and avoid content-type guesswork.
@@ -100,9 +102,10 @@ class HFSegmentationService:
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=True) as tf:
             tf.write(image_bytes)
             tf.flush()
-            segments = self._client.image_segmentation(
-                image=tf.name, model=self.primary_model
-            )
+            with provider_activity.Track("hf-segformer", {"model": self.primary_model}):
+                segments = self._client.image_segmentation(
+                    image=tf.name, model=self.primary_model
+                )
         if not segments:
             raise RuntimeError("segmenter returned no segments")
 

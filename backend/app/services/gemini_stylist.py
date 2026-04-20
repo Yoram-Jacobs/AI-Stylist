@@ -99,7 +99,12 @@ class GeminiStylistService:
             self.model,
             bool(image_base64),
         )
-        raw = await chat.send_message(message)
+        from app.services import provider_activity
+
+        with provider_activity.Track(
+            "gemini-stylist", {"model": self.model, "has_image": bool(image_base64)}
+        ):
+            raw = await chat.send_message(message)
         return _parse_json(raw)
 
 

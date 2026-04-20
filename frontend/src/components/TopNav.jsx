@@ -4,7 +4,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Home, Shirt, Sparkles, Store, LogOut, Settings, Receipt } from 'lucide-react';
+import { Home, Shirt, Sparkles, Store, LogOut, Settings, Receipt, Shield } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
@@ -29,7 +29,7 @@ export const TopNav = () => {
         <Link to="/home" className="font-display text-2xl" data-testid="brand-logo">
           DressApp
         </Link>
-        <nav className="flex items-center gap-1">
+        <nav aria-label="Primary navigation" className="flex items-center gap-1">
           {LINKS.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
@@ -52,7 +52,7 @@ export const TopNav = () => {
         <div className="ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="rounded-full h-10 w-10 p-0" data-testid="topnav-avatar-button">
+              <Button variant="ghost" aria-label="Open user menu" className="rounded-full h-10 w-10 p-0" data-testid="topnav-avatar-button">
                 <span className="h-9 w-9 inline-flex items-center justify-center rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] font-medium">
                   {initials}
                 </span>
@@ -67,6 +67,11 @@ export const TopNav = () => {
               <DropdownMenuItem onClick={() => nav('/transactions')} data-testid="topnav-menu-transactions">
                 <Receipt className="h-4 w-4 mr-2" /> Transactions
               </DropdownMenuItem>
+              {(user.roles || []).includes('admin') && (
+                <DropdownMenuItem onClick={() => nav('/admin')} data-testid="topnav-menu-admin">
+                  <Shield className="h-4 w-4 mr-2" /> Admin
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => nav('/me')} data-testid="topnav-menu-settings">
                 <Settings className="h-4 w-4 mr-2" /> Settings
               </DropdownMenuItem>

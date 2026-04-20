@@ -31,8 +31,11 @@ class WeatherService:
             "appid": self.api_key,
         }
         async with httpx.AsyncClient(timeout=15.0) as client:
-            cur_resp = await client.get(f"{OWM_BASE}/weather", params=params)
-            fc_resp = await client.get(f"{OWM_BASE}/forecast", params=params)
+            from app.services import provider_activity
+
+            async with provider_activity.Track("openweather", {"lat": lat, "lng": lng}):
+                cur_resp = await client.get(f"{OWM_BASE}/weather", params=params)
+                fc_resp = await client.get(f"{OWM_BASE}/forecast", params=params)
 
         cur_resp.raise_for_status()
         fc_resp.raise_for_status()

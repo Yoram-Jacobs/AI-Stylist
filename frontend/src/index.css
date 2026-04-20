@@ -141,3 +141,41 @@ body {
 @layer base {
   [data-debug-wrapper='true'] { display: contents !important; }
 }
+
+/* ----- Accessibility: visible keyboard focus everywhere ----- */
+@layer base {
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* Avoid double rings on shadcn buttons that already render their own */
+  button:focus-visible,
+  [role='button']:focus-visible,
+  a:focus-visible {
+    outline-offset: 3px;
+  }
+}
+
+/* ----- Accessibility: respect users who prefer reduced motion ----- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ----- Accessibility: visible alt-text fallback when an image fails to load ----- */
+img {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+/* ----- Branded text selection ----- */
+::selection {
+  background: hsl(var(--accent) / 0.25);
+  color: hsl(var(--foreground));
+}

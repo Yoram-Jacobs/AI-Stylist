@@ -38,9 +38,9 @@ load_dotenv(BACKEND / ".env")
 from app.services.calendar_service import calendar_service  # noqa: E402
 from app.services.deepgram_service import deepgram_service  # noqa: E402
 from app.services.fees import compute_fees  # noqa: E402
-from app.services.gemini_image_service import gemini_image_service  # noqa: E402
 from app.services.gemini_stylist import gemini_stylist_service  # noqa: E402
 from app.services.groq_service import groq_whisper_service  # noqa: E402
+from app.services.hf_image_service import hf_image_service  # noqa: E402
 from app.services.hf_segmentation import hf_segmentation_service  # noqa: E402
 from app.services.logic import get_styling_advice  # noqa: E402
 from app.services.weather_service import weather_service  # noqa: E402
@@ -154,18 +154,19 @@ async def test_hf_segment(image_bytes: bytes) -> str | None:
     return f"data:{seg.get('mime_type', 'image/png')};base64,{seg['image_b64']}"
 
 
-async def test_nano_banana_edit(image_bytes: bytes) -> str | None:
-    section("5. Gemini Nano Banana image-to-image edit")
+async def test_hf_image_edit(image_bytes: bytes) -> str | None:
+    section("5. HF FLUX text-to-image edit (synthesised variant)")
     try:
-        edit = await gemini_image_service.edit(
+        edit = await hf_image_service.edit(
             image_bytes,
             prompt=(
                 "Same garment, but in deep navy blue. Clean studio backdrop, "
                 "high detail photograph."
             ),
+            garment_metadata={"category": "shirt", "color": "white", "title": "Oxford"},
         )
     except Exception as exc:  # noqa: BLE001
-        warn(f"Nano Banana edit failed: {str(exc)[:160]}")
+        warn(f"HF image edit failed: {str(exc)[:160]}")
         return None
     print("   model_used:", edit.get("model_used"))
     require(bool(edit.get("image_b64")), "Edit produced image bytes")
@@ -314,7 +315,7 @@ async def main() -> None:
     print("   (Whisper transcript preserved for reference) \u2192", transcript[:80], "\u2026")
 
     await test_hf_segment(image_bytes)
-    await test_nano_banana_edit(image_bytes)
+    await test_hf_image_edit(image_bytes)
     await test_openweather()
 
     # Orchestrated end-to-end runs (the core path)

@@ -18,7 +18,7 @@ from app.db.database import get_db
 from app.models.schemas import ClosetItem, Formality, RetailMetadata, Source
 from app.services import repos
 from app.services.auth import get_current_user
-from app.services.gemini_image_service import gemini_image_service
+from app.services.hf_image_service import hf_image_service
 from app.services.hf_segmentation import hf_segmentation_service
 
 logger = logging.getLogger(__name__)
@@ -207,12 +207,23 @@ async def edit_item_image(
     source_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not source_url:
         raise HTTPException(400, "No source image on this item")
-    if gemini_image_service is None:
-        raise HTTPException(503, "Gemini image service not configured")
+    if hf_image_service is None:
+        raise HTTPException(503, "Image generation service not configured")
     try:
-        edit = await gemini_image_service.edit(source_url, prompt)
+        edit = await hf_image_service.edit(
+            source_url,
+            prompt,
+            garment_metadata={
+                "title": item.get("title"),
+                "category": item.get("category"),
+                "color": item.get("color"),
+                "material": item.get("material"),
+                "pattern": item.get("pattern"),
+                "brand": item.get("brand"),
+            },
+        )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Nano Banana edit failed for item %s: %s", item_id, exc)
+        logger.warning("HF image edit failed for item %s: %s", item_id, exc)
         raise HTTPException(
             503,
             "Image generation is temporarily unavailable. Please try again shortly.",

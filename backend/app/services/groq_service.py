@@ -29,6 +29,8 @@ class GroqWhisperService:
 
         Returns `{text, language, raw}`.
         """
+        from app.services import provider_activity
+
         params: dict[str, Any] = {
             "file": (filename, audio_bytes, content_type),
             "model": self.model,
@@ -40,7 +42,8 @@ class GroqWhisperService:
         logger.info(
             "Groq Whisper transcribe model=%s bytes=%d", self.model, len(audio_bytes)
         )
-        result = self.client.audio.transcriptions.create(**params)
+        with provider_activity.Track("groq-whisper", {"bytes": len(audio_bytes)}):
+            result = self.client.audio.transcriptions.create(**params)
         # groq SDK returns a pydantic-like object
         text = getattr(result, "text", None) or ""
         lang = getattr(result, "language", None)
