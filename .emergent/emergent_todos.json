@@ -1,26 +1,30 @@
 [
   {
-    "content": "Replace Nano Banana with HF FLUX.1-schnell",
-    "status": "completed"
+    "content": "Extend ClosetItem schema + DB with all 17 new fields + marketplace_intent",
+    "status": "in_progress"
   },
   {
-    "content": "Phase 5 — Admin auth + backend + UI + provider activity",
-    "status": "completed"
+    "content": "Backend: Gemini Vision 'The Eyes' analyzer service + POST /api/v1/closet/analyze endpoint (returns full auto-filled payload)",
+    "status": "pending"
   },
   {
-    "content": "Phase 5 — Accessibility hardening",
-    "status": "completed"
+    "content": "Backend: Update POST /api/v1/closet to accept all new fields (+ auto-list creation when marketplace_intent=for_sale/donate/swap)",
+    "status": "pending"
   },
   {
-    "content": "Phase 5 — SEO hardening",
-    "status": "completed"
+    "content": "Frontend: Rewrite AddItem.jsx — multi-file picker, thumbnail grid with scanning animation, editable cards per item, marketplace intent + 7% preview, Save All",
+    "status": "pending"
   },
   {
-    "content": "Phase 5 — Testing agent green (94% overall, zero critical)",
-    "status": "completed"
+    "content": "Frontend: CSS scanning animation keyframes (vertical sweep + shimmer)",
+    "status": "pending"
   },
   {
-    "content": "Phase 5 — Update plan.md",
-    "status": "completed"
+    "content": "Testing: analyze endpoint + batch upload flow",
+    "status": "pending"
+  },
+  {
+    "content": "Update plan.md & finish",
+    "status": "pending"
   }
 ]
