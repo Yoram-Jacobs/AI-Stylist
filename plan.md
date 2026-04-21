@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Add-Item Overhaul + The Eyes + Batch Upload + Auto-Listing)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Multi-Item Outfit Extraction)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
@@ -12,6 +12,7 @@
 - ✅ **Phase 4 shipped (Part 1 & 2)**: Google Calendar OAuth (read‑only) + Trend‑Scout autonomous agent.
 - ✅ **Phase 5 shipped**: Admin dashboard (backend + UI) + provider activity monitoring + Accessibility + SEO hardening.
 - ✅ **Add Item overhaul shipped**: batch upload + animated scanning + “The Eyes” auto-fill + rich closet schema + one‑click auto‑listing to marketplace.
+- ✅ **Multi-Item Outfit Extraction shipped (NEW)**: one uploaded photo → N editable item cards, each with its own crop + 17 auto-filled fields.
 - 🎯 **Current focus (next milestone)**: **PayPlus payments integration** (replacing Stripe) — *deferred until PayPlus API credentials are available*.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Trend‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
@@ -270,6 +271,58 @@ This feature spans Phases 2–3 (schema + backend + frontend UX) but is tracked 
 
 ---
 
+### Multi-Item Outfit Extraction — One photo → N cards **(COMPLETE)**
+Upgrades "The Eyes" so a single uploaded outfit photo expands into a dedicated editable card for every garment, accessory, and piece of jewelry visible in the frame.
+
+**User stories**
+1. ✅ User uploads one outfit photo containing multiple pieces.
+2. ✅ The Eyes detects every item (Gemini bounding-box detector).
+3. ✅ Backend crops each bbox server-side (Pillow), drops tiny / full-frame detections.
+4. ✅ Each crop is re-analysed in parallel for the rich 17-field form payload.
+5. ✅ Frontend replaces the single upload card with `N` editable cards — each with its own tight crop, "Detected" badge, auto-filled fields, and independent marketplace intent.
+6. ✅ Graceful fallback to single-item analysis when detection fails / yields nothing useful.
+
+**Delivered**
+- ✅ Backend orchestration
+  - `/app/backend/app/services/garment_vision.py`
+    - `detect_items()` — Gemini 2.5 Flash bounding-box detector (normalised 0–1000 coords, Gemini `[ymin, xmin, ymax, xmax]` order)
+    - `_crop_to_bbox()` — Pillow cropper with ~4% padding + min-area filter
+    - `analyze_outfit()` — full pipeline: detect → crop (thread pool) → parallel `analyze()` (semaphore=6) → returns `list[{label, kind, bbox, crop_base64, crop_mime, analysis}]`
+    - parametrised `analyze(model=...)` so the per-crop path can use Flash for speed
+  - `/app/backend/app/api/v1/closet.py`
+    - `POST /closet/analyze` now accepts `multi: bool = True` and returns `{items: [...], count, ...legacyMirror}`
+    - Safe Pydantic validation + defaulting per item (`_safe_analysis`)
+    - Top-level fields mirror `items[0].analysis` for full backwards compatibility
+  - `/app/backend/app/config.py`
+    - `GARMENT_VISION_CROP_MODEL` (default `gemini-2.5-flash`) and `GARMENT_VISION_MAX_ITEMS` (default 6)
+    - Keeps Pro as the default for single-image analysis while holding the multi-item pipeline under the 60s ingress budget
+
+- ✅ Frontend expansion logic
+  - `/app/frontend/src/pages/AddItem.jsx`
+    - `analyzeCard()` reads the new `items` array; when >1 it replaces the single scanning card with `N` fresh cards, each owning its own crop as `base64` (so Save persists only the relevant garment)
+    - Each expanded card keeps its own `mime`, `label`, hydrated fields, and marketplace intent
+    - "Detected" badge overlay renders the Gemini label (e.g. *"shirt dress"*, *"sunglasses"*, *"dangle earring"*)
+    - Toast confirms *"Detected N items in that photo — review each card below."*
+    - `buildCreatePayload()` uses `card.mime` so expanded cards (no `File`) still save correctly
+
+**Performance**
+- Typical real outfit photo: **~25–35 s** total (≈10 s detection on Flash + ≈18 s per-crop Flash analysis in parallel batches of 6).
+- Hard cap `max_items=6` prevents runaway cost on catalog-style photos.
+
+**Testing**
+- ✅ Multi-item extraction test pass: `/app/test_reports/iteration_7.json`
+  - Backend **95%** (0 critical bugs, 0 flaky endpoints)
+  - Verified: multi=true array shape, multi=false legacy path, 401 auth, 400 bad base64, regression suite (closet / stylist / market / admin)
+  - Manually verified end-to-end in the browser: 1 Unsplash outfit portrait → **3 cards** rendered in 32 s, each with its own crop + label badge + complete auto-fill payload
+
+**Key extension points**
+- `GARMENT_VISION_CROP_MODEL` env var — swap to fine-tuned Gemma 4 E4B when the user's fine-tune is ready.
+- `GARMENT_VISION_MAX_ITEMS` env var — raise the per-photo cap if future UX calls for it.
+
+---
+
+**Testing (legacy)**
+
 ## 3) Next Actions (immediate)
 1. **PayPlus discovery (deferred)**: when PayPlus credentials are available:
    - confirm sandbox/prod endpoints
@@ -303,3 +356,8 @@ This feature spans Phases 2–3 (schema + backend + frontend UX) but is tracked 
   - ✅ The Eyes auto-fill with rich structured fields
   - ✅ One-click auto-listing when marketplace_intent != own
   - ✅ Test report iteration_6 green
+- Multi-Item Outfit Extraction:
+  - ✅ `/closet/analyze` returns an `items` array (multi-item) with backwards-compatible legacy mirror
+  - ✅ Server-side bbox detection + cropping + parallel per-crop analysis
+  - ✅ Frontend splits 1 upload into N editable cards with crop previews & labels
+  - ✅ Test report iteration_7 green (backend 95%, 0 critical bugs)
