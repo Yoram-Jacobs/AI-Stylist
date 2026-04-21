@@ -151,6 +151,17 @@ DETECT_SYSTEM_PROMPT = (
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
+# A single bbox covering at least this fraction of the frame means the
+# user uploaded an already-tight garment shot; cropping further would
+# chop the item in half. We skip the crop step in that case.
+# 0.45 captures the common "single garment on clean background with
+# surrounding whitespace" product-shot pattern.
+_SINGLE_ITEM_AREA_FRAC = 0.45
+# When multiple detections all have the same "kind" AND their combined
+# union bbox covers less than this fraction of the frame, they are
+# almost certainly sub-parts of one already-cropped garment (collar,
+# sleeve, hem, etc.). We collapse them into one whole-frame item.
+_SUBPART_UNION_FRAC = 0.55
 
 
 def _iou_norm(a: list[int], b: list[int]) -> float:
@@ -241,6 +252,53 @@ def _nms_detections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         kept.append(it)
     return kept
+
+
+def _looks_already_cropped(detections: list[dict[str, Any]]) -> bool:
+    """Return True when the photo is already a tight single-item shot.
+
+    Two signals trigger this:
+
+    1. **Single large detection** \u2014 exactly one bbox remains after NMS
+       and it covers at least ``_SINGLE_ITEM_AREA_FRAC`` of the frame.
+    2. **Cluster of sub-parts** \u2014 multiple detections share the same
+       ``kind`` AND their union bbox covers less than
+       ``_SUBPART_UNION_FRAC`` of the frame, which is the tell-tale
+       pattern of the model hallucinating a collar/sleeve/hem as
+       separate items on an already-cropped garment photo.
+
+    In either case we skip the server-side cropping step and analyse
+    the image as a single item so we never shred an already-clean
+    product shot.
+    """
+    if not detections:
+        return True  # nothing detectable \u2014 safer to analyse whole frame
+    frame_area = 1000 * 1000
+
+    def _area(bbox: list[int]) -> int:
+        y1, x1, y2, x2 = bbox
+        return max(0, (x2 - x1)) * max(0, (y2 - y1))
+
+    # Signal 1: one dominant detection.
+    if len(detections) == 1:
+        if _area(detections[0]["bbox"]) >= frame_area * _SINGLE_ITEM_AREA_FRAC:
+            return True
+        # A single tiny detection on a clean-looking frame also hints at
+        # an over-zealous sub-part crop.
+        if _area(detections[0]["bbox"]) <= frame_area * 0.25:
+            return True
+        return False
+
+    # Signal 2: several detections, all clustered inside a small area.
+    kinds = {(d.get("kind") or "garment").lower() for d in detections}
+    if len(kinds) > 1:
+        return False
+    ymins = [d["bbox"][0] for d in detections]
+    xmins = [d["bbox"][1] for d in detections]
+    ymaxs = [d["bbox"][2] for d in detections]
+    xmaxs = [d["bbox"][3] for d in detections]
+    union = (max(ymaxs) - min(ymins)) * (max(xmaxs) - min(xmins))
+    return union <= frame_area * _SUBPART_UNION_FRAC
 
 
 # -------------------- enum sanitisers --------------------
@@ -557,6 +615,37 @@ class GarmentVisionService:
                 repr(exc)[:160],
             )
             detections = []
+
+        # 1b) Short-circuit: if the photo is already a tight single-item
+        #     shot (one dominant detection, or a cluster of same-kind
+        #     sub-parts), skip cropping entirely and analyse the whole
+        #     frame as one item. This prevents the model from shredding
+        #     already-clean product photos.
+        if _looks_already_cropped(detections):
+            logger.info(
+                "analyze_outfit: photo looks already-cropped "
+                "(detections=%d); skipping crop pipeline",
+                len(detections),
+            )
+            single = await self.analyze(image_bytes)
+            crop_b64 = base64.b64encode(image_bytes).decode("ascii")
+            label = (
+                (detections[0].get("label") if detections else None)
+                or single.get("item_type")
+                or single.get("sub_category")
+                or "garment"
+            )
+            kind = (detections[0].get("kind") if detections else None) or "garment"
+            return [
+                {
+                    "label": label,
+                    "kind": kind,
+                    "bbox": [0, 0, 1000, 1000],
+                    "crop_base64": crop_b64,
+                    "crop_mime": "image/jpeg",
+                    "analysis": single,
+                }
+            ]
 
         # Soft-normalise: if the detector saw one giant box that covers
         # the frame, treat it as a single-item analysis (no point paying
