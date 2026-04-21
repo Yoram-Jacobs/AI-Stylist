@@ -47,24 +47,47 @@ class Settings:
     )
 
     # --- The Eyes (garment vision analyzer) ---
-    # Starts on Gemini 2.5 Pro; flip to fine-tuned Gemma 4 E4B when ready.
+    # Phase A wiring: a clean provider dispatch is built so the Eyes can
+    # route to either Gemini or a Gemma-family model on HuggingFace.
+    #
+    # DEFAULT today: `gemini` (gemini-2.5-pro). We tried Gemma 3 27B via
+    # HF Inference Providers (Featherless) for Phase A, but their
+    # multimodal route currently rejects image content-lists with a
+    # "roles must alternate" error. Rather than ship a flaky analyzer,
+    # we kept Gemma as an *opt-in* path ready for the moment the user
+    # deploys their fine-tuned Gemma 4 E2B/E4B on a stable endpoint.
+    #
+    # FLIP TO GEMMA:
+    #     GARMENT_VISION_PROVIDER=hf
+    #     GARMENT_VISION_MODEL=<hf-repo-or-endpoint-url>
     GARMENT_VISION_PROVIDER: str = os.environ.get(
         "GARMENT_VISION_PROVIDER", "gemini"
     )
     GARMENT_VISION_MODEL: str = os.environ.get(
         "GARMENT_VISION_MODEL", "gemini-2.5-pro"
     )
-    # Per-crop analyzer used inside the multi-item outfit pipeline. We
-    # default to Flash here because (a) each crop is tiny and structurally
-    # simple, and (b) keeping Pro would push total latency past the
-    # 60s ingress ceiling when 4\u20135 items are detected in one photo.
+    # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
+    )
+    # Detection stays on Gemini Flash until we upgrade to a fine-tuned
+    # vision model that does boxes well.
+    GARMENT_VISION_DETECT_PROVIDER: str = os.environ.get(
+        "GARMENT_VISION_DETECT_PROVIDER", "gemini"
+    )
+    GARMENT_VISION_DETECT_MODEL: str = os.environ.get(
+        "GARMENT_VISION_DETECT_MODEL", "gemini-2.5-flash"
     )
     # Hard cap on how many items we analyse per uploaded photo.
     GARMENT_VISION_MAX_ITEMS: int = int(
         os.environ.get("GARMENT_VISION_MAX_ITEMS", "6")
     )
+    # FashionCLIP embedding service (for closet search + marketplace similarity).
+    FASHION_CLIP_MODEL: str = os.environ.get(
+        "FASHION_CLIP_MODEL", "patrickjohncyh/fashion-clip"
+    )
+    # Set to "0" to disable the local load (useful for tests / CI).
+    FASHION_CLIP_ENABLED: bool = os.environ.get("FASHION_CLIP_ENABLED", "1") == "1"
 
     # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
     HF_IMAGE_MODEL: str = os.environ.get(

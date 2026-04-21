@@ -35,6 +35,7 @@ from app.services import repos
 from app.services.auth import get_current_user
 from app.services.fees import compute_fees
 from app.services.garment_vision import garment_vision_service
+from app.services.fashion_clip import fashion_clip_service
 from app.services.hf_image_service import hf_image_service
 from app.services.hf_segmentation import hf_segmentation_service
 
@@ -173,6 +174,21 @@ async def create_item(
                 doc["segmentation_model"] = seg.get("model_used")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Segmentation skipped for item %s: %s", item.id, exc)
+
+    # Best-effort FashionCLIP embedding: persist a 512-d L2-normalised
+    # vector so the closet can later be searched by similarity
+    # ("/closet/search") and listings can be matched against each other.
+    # Failure is soft \u2014 the item still saves without an embedding.
+    if raw_bytes and fashion_clip_service is not None:
+        try:
+            vec = await fashion_clip_service.embed_image(raw_bytes)
+            if vec:
+                doc["clip_embedding"] = vec
+                doc["clip_model"] = fashion_clip_service.model_id
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FashionCLIP embedding skipped for item %s: %s", item.id, exc
+            )
 
     # If the user tagged this item for the marketplace, auto-create a listing.
     # Modes: for_sale -> sell, donate -> donate, swap -> swap. 'own' stays private.
@@ -354,8 +370,76 @@ async def list_items(
     items = await repos.find_many(
         db.closet_items, query, sort=[("created_at", -1)], limit=limit, skip=skip
     )
+    # Strip the 512-float embedding vector from the list response \u2014 it's
+    # only needed by /closet/search and would otherwise bloat the payload.
+    for it in items:
+        it.pop("clip_embedding", None)
     total = await repos.count(db.closet_items, query)
     return {"items": items, "total": total, "limit": limit, "skip": skip}
+
+
+class SearchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = None
+    image_base64: str | None = None
+    limit: int = 24
+    min_score: float = 0.15
+
+
+@router.post("/search")
+async def search_closet(
+    payload: SearchIn, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Semantic closet search via FashionCLIP embeddings.
+
+    Accepts *either* a free-text query ("blue flowy summer tops") *or*
+    an image (e.g. a screenshot the user wants to find a match for).
+    Returns items sorted by cosine similarity, filtered by ``min_score``.
+    """
+    if fashion_clip_service is None:
+        raise HTTPException(503, "Embedding search is not available right now.")
+    if not payload.text and not payload.image_base64:
+        raise HTTPException(400, "Provide either `text` or `image_base64`.")
+
+    try:
+        if payload.image_base64:
+            raw = base64.b64decode(payload.image_base64, validate=True)
+            q_vec = await fashion_clip_service.embed_image(raw)
+        else:
+            q_vec = await fashion_clip_service.embed_text(payload.text or "")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Search embedding failed: %s", exc)
+        raise HTTPException(503, "Could not build the search query.") from exc
+    if not q_vec:
+        raise HTTPException(400, "Empty query.")
+
+    db = get_db()
+    # Pull only items that have a stored embedding (others cannot be scored).
+    candidates = await repos.find_many(
+        db.closet_items,
+        {"user_id": user["id"], "clip_embedding": {"$exists": True, "$ne": None}},
+        sort=[("created_at", -1)],
+        limit=2000,
+    )
+    scored: list[dict[str, Any]] = []
+    for item in candidates:
+        vec = item.get("clip_embedding")
+        if not isinstance(vec, list) or not vec:
+            continue
+        score = fashion_clip_service.cosine(q_vec, vec)
+        if score < payload.min_score:
+            continue
+        # Strip the big embedding vector from the response payload.
+        slim = {k: v for k, v in item.items() if k != "clip_embedding"}
+        slim["_score"] = round(score, 4)
+        scored.append(slim)
+    scored.sort(key=lambda r: r["_score"], reverse=True)
+    return {
+        "items": scored[: max(1, payload.limit)],
+        "total": len(scored),
+        "indexed": len(candidates),
+        "model": fashion_clip_service.model_id,
+    }
 
 
 @router.get("/{item_id}")

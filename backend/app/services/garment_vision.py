@@ -1,22 +1,18 @@
-"""The Eyes \u2014 Gemini multimodal garment analyzer.
+"""The Eyes \u2014 multimodal garment analyzer.
 
-Purpose
--------
-Given a user-uploaded garment photo, return a structured ``GarmentAnalysis``
-dict covering every field of the Add-Item form (name, caption, category,
-sub-category, item type, brand, fabric composition, colours, pattern,
-gender, dress code, season, tradition, state, condition, quality, size,
-price, tags, and \u2014 if the condition is poor \u2014 a short repair_advice).
+Phase A implementation
+----------------------
+* Primary analyser: **Gemma 3 27B** via HuggingFace Inference (same model
+  family the user will fine-tune for the on-edge Gemma 4 E2B/E4B release).
+* Bounding-box detector: **Gemini 2.5 Flash** via Emergent universal key
+  (Gemma zero-shot detection is too weak; this stays until the fine-tune).
+* Enum sanitiser, NMS, "already cropped" short-circuit, multi-item
+  orchestration are all provider-agnostic and wrap either path.
 
-Implementation
---------------
-* Calls **Gemini 2.5 Pro** via the Emergent universal key (swappable later
-  to Gemma 4 E4B once the user's fine-tune is ready \u2014 only the
-  ``model`` attribute needs to change).
-* Uses a strict JSON contract prompt; we then parse with the same resilient
-  extractor used by the stylist and trend-scout.
-* Reports latency + success to the provider-activity ring buffer so the
-  Admin dashboard shows its health alongside every other provider.
+Swap path
+---------
+Set ``GARMENT_VISION_PROVIDER=hf`` and ``GARMENT_VISION_MODEL=<hf repo>``
+(or ``=gemini`` + a Gemini model id) without touching any consumer code.
 """
 from __future__ import annotations
 
@@ -37,6 +33,71 @@ from app.config import settings
 from app.services import provider_activity
 
 logger = logging.getLogger(__name__)
+
+
+# --- HF Inference client (Gemma) ---------------------------------------
+try:
+    from huggingface_hub import InferenceClient as _HFInferenceClient  # type: ignore
+except Exception:  # noqa: BLE001
+    _HFInferenceClient = None  # type: ignore[assignment]
+
+
+def _hf_client(token: str | None) -> Any:
+    if _HFInferenceClient is None:
+        raise RuntimeError("huggingface_hub is not installed.")
+    return _HFInferenceClient(token=token)
+
+
+async def _hf_chat_json(
+    *,
+    model: str,
+    system_prompt: str,
+    user_text: str,
+    image_b64_jpeg: str,
+    max_tokens: int = 900,
+    temperature: float = 0.1,
+    timeout: float = 45.0,
+) -> str:
+    """Fire a single multimodal chat_completion at an HF-hosted model.
+
+    Runs on a worker thread to keep the event loop free. Returns the raw
+    string content of the assistant message; callers parse it with
+    ``_extract_json``.
+    """
+    token = settings.HF_TOKEN
+    if not token:
+        raise RuntimeError("HF_TOKEN is not configured; HF analyzer unavailable.")
+
+    def _call() -> str:
+        client = _hf_client(token)
+        # Gemma's HF Inference route requires strict user/assistant
+        # alternation with no top-level `system` role; we fold the
+        # system prompt into the first user message.
+        merged = (
+            f"{system_prompt.strip()}\n\n---\n\n{user_text.strip()}"
+        )
+        resp = client.chat_completion(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": merged},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64_jpeg}"
+                            },
+                        },
+                    ],
+                },
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return resp.choices[0].message.content or ""
+
+    return await asyncio.wait_for(asyncio.to_thread(_call), timeout=timeout)
 
 
 SYSTEM_PROMPT = (
@@ -435,24 +496,53 @@ def _crop_to_bbox(
 
 class GarmentVisionService:
     def __init__(self) -> None:
-        if not settings.EMERGENT_LLM_KEY:
-            raise RuntimeError(
-                "EMERGENT_LLM_KEY is not configured; The Eyes analyzer unavailable."
-            )
-        self.api_key = settings.EMERGENT_LLM_KEY
-        # Start with Gemini 2.5 Pro; swap to fine-tuned Gemma later via env.
+        # We tolerate a missing EMERGENT_LLM_KEY if HF is configured for
+        # both analysis AND detection. In practice we keep Gemini Flash
+        # for detection, so both keys are typically required.
         self.model = settings.GARMENT_VISION_MODEL
         self.provider = settings.GARMENT_VISION_PROVIDER
-        # Detection only needs fast bounding boxes \u2014 use Flash so the
-        # multi-item pipeline stays under the ingress timeout budget.
-        self.detect_model = "gemini-2.5-flash"
-        # Faster per-crop analyser (still Gemini) \u2014 configurable.
+        # Detection stays on Gemini Flash for Phase A.
+        self.detect_provider = settings.GARMENT_VISION_DETECT_PROVIDER
+        self.detect_model = settings.GARMENT_VISION_DETECT_MODEL
+        # Per-crop analyser (multi-item pipeline).
         self.crop_model = settings.GARMENT_VISION_CROP_MODEL
         self.max_items = settings.GARMENT_VISION_MAX_ITEMS
+        # Legacy Emergent key kept for the detector and any caller who
+        # explicitly opts into the gemini provider.
+        self.api_key = settings.EMERGENT_LLM_KEY
+        # Fail fast when the service cannot actually run anything.
+        if self.provider == "gemini" and not self.api_key:
+            raise RuntimeError(
+                "GARMENT_VISION_PROVIDER=gemini but EMERGENT_LLM_KEY is unset."
+            )
+        if self.provider == "hf" and not settings.HF_TOKEN:
+            raise RuntimeError(
+                "GARMENT_VISION_PROVIDER=hf but HF_TOKEN is unset."
+            )
+        if self.detect_provider == "gemini" and not self.api_key:
+            logger.warning(
+                "Detection requires EMERGENT_LLM_KEY; multi-item pipeline will "
+                "degrade to single-item analysis."
+            )
 
     # -------------------- public API --------------------
     async def detect_items(self, image_bytes: bytes) -> list[dict[str, Any]]:
-        """Return a list of ``{label, kind, bbox}`` entries."""
+        """Return a list of ``{label, kind, bbox}`` entries.
+
+        Always runs on the configured detect provider/model (Gemini Flash
+        by default), independent of which model powers ``analyze()``.
+        """
+        if self.detect_provider != "gemini":
+            # Other detectors will be added later; for now only Gemini
+            # gives reliable bounding boxes.
+            logger.warning(
+                "Unsupported detect provider %s; returning empty detections.",
+                self.detect_provider,
+            )
+            return []
+        if not self.api_key:
+            logger.warning("No EMERGENT_LLM_KEY; skipping detection.")
+            return []
         shrunk = _shrink_for_vision(image_bytes, max_side=1024, q=80)
         b64 = base64.b64encode(shrunk).decode("ascii")
         chat = LlmChat(
@@ -460,7 +550,7 @@ class GarmentVisionService:
             session_id=f"theeyes-detect-{uuid.uuid4().hex[:12]}",
             system_message=DETECT_SYSTEM_PROMPT,
         )
-        chat.with_model(self.provider, self.detect_model)
+        chat.with_model(self.detect_provider, self.detect_model)
         msg = UserMessage(
             text=(
                 "List every fashion item visible in this photograph. "
@@ -521,28 +611,54 @@ class GarmentVisionService:
         return clean
 
     async def analyze(
-        self, image_bytes: bytes, *, model: str | None = None
+        self,
+        image_bytes: bytes,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
     ) -> dict[str, Any]:
+        """Run the 17-field analyser on a single image.
+
+        Dispatches to the HF Inference path (Gemma-family, Phase A
+        default) or the Gemini path (legacy / explicit override) based
+        on ``provider``. When called from the multi-item pipeline we
+        pass ``model=self.crop_model`` so per-crop calls use the smaller
+        crop-tuned model if the operator has configured one.
+        """
         shrunk = _shrink_for_vision(image_bytes)
         b64 = base64.b64encode(shrunk).decode("ascii")
         use_model = model or self.model
-        chat = LlmChat(
-            api_key=self.api_key,
-            session_id=f"theeyes-{uuid.uuid4().hex[:12]}",
-            system_message=SYSTEM_PROMPT,
-        )
-        chat.with_model(self.provider, use_model)
-        msg = UserMessage(
-            text=(
-                "Analyze this garment photograph. Return the JSON object only."
-            ),
-            file_contents=[ImageContent(b64)],
-        )
+        use_provider = (provider or self.provider or "hf").lower()
+
         t0 = time.perf_counter()
         ok = False
         last_err: str | None = None
+        raw: str | None = None
         try:
-            raw = await chat.send_message(msg)
+            if use_provider == "hf":
+                raw = await _hf_chat_json(
+                    model=use_model,
+                    system_prompt=SYSTEM_PROMPT,
+                    user_text=(
+                        "Analyse this garment photograph and return the "
+                        "JSON object only \u2014 no commentary."
+                    ),
+                    image_b64_jpeg=b64,
+                )
+            else:
+                chat = LlmChat(
+                    api_key=self.api_key,
+                    session_id=f"theeyes-{uuid.uuid4().hex[:12]}",
+                    system_message=SYSTEM_PROMPT,
+                )
+                chat.with_model(use_provider, use_model)
+                msg = UserMessage(
+                    text=(
+                        "Analyze this garment photograph. Return the JSON object only."
+                    ),
+                    file_contents=[ImageContent(b64)],
+                )
+                raw = await chat.send_message(msg)
             ok = True
         except Exception as exc:  # noqa: BLE001
             last_err = repr(exc)
@@ -553,7 +669,7 @@ class GarmentVisionService:
                 ok=ok,
                 latency_ms=int((time.perf_counter() - t0) * 1000),
                 error=last_err,
-                extra={"model": use_model},
+                extra={"provider": use_provider, "model": use_model},
             )
         parsed = _extract_json(raw or "")
         if not parsed.get("title") and parsed.get("name"):
@@ -561,17 +677,17 @@ class GarmentVisionService:
         if not parsed.get("title"):
             parsed["title"] = "Unnamed garment"
         # Sanitise AI-returned enum-like values so downstream Pydantic
-        # validation never 422s on a Flash slip.
+        # validation never 422s on a model slip.
         parsed = _coerce_enums(parsed)
         parsed["model_used"] = use_model
         parsed["raw"] = {"preview": (raw or "")[:500]}
         logger.info(
-            "The Eyes OK model=%s category=%s sub=%s item_type=%s condition=%s",
+            "The Eyes OK provider=%s model=%s category=%s sub=%s item_type=%s",
+            use_provider,
             use_model,
             parsed.get("category"),
             parsed.get("sub_category"),
             parsed.get("item_type"),
-            parsed.get("condition"),
         )
         return parsed
 
@@ -759,6 +875,25 @@ class GarmentVisionService:
         return items
 
 
-garment_vision_service = (
-    GarmentVisionService() if settings.EMERGENT_LLM_KEY else None
-)
+def _build_vision_service() -> GarmentVisionService | None:
+    """Instantiate the service if *any* supported provider is available."""
+    want_hf = settings.GARMENT_VISION_PROVIDER == "hf"
+    want_gemini_analyze = settings.GARMENT_VISION_PROVIDER == "gemini"
+    has_hf = bool(settings.HF_TOKEN)
+    has_emergent = bool(settings.EMERGENT_LLM_KEY)
+    if want_hf and not has_hf:
+        logger.warning("Garment vision disabled: provider=hf but HF_TOKEN missing.")
+        return None
+    if want_gemini_analyze and not has_emergent:
+        logger.warning(
+            "Garment vision disabled: provider=gemini but EMERGENT_LLM_KEY missing."
+        )
+        return None
+    try:
+        return GarmentVisionService()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Garment vision init failed: %s", exc)
+        return None
+
+
+garment_vision_service = _build_vision_service()

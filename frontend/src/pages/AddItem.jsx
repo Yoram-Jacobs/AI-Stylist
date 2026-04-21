@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Upload, Plus, Loader2, Eye, Wand2, Shirt, Store,
   HandCoins, Gift, Repeat, Trash2, Save, Tag, AlertTriangle,
-  X, Sparkles,
+  X, Sparkles, Camera,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -82,8 +82,10 @@ export default function AddItem() {
   const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error}]
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
   const pickFiles = () => fileInputRef.current?.click();
+  const openCamera = () => cameraInputRef.current?.click();
 
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
@@ -286,34 +288,88 @@ export default function AddItem() {
         data-testid="add-item-file-input"
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
       />
+      {/* Native camera capture — on mobile, `capture="environment"` opens
+          the rear camera directly; on desktop, falls back to a file
+          picker so the button is safe to show everywhere. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        data-testid="add-item-camera-input"
+        onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
+      />
 
       {cards.length === 0 ? (
-        <button
-          type="button"
-          onClick={pickFiles}
-          className="w-full border-2 border-dashed border-border rounded-[calc(var(--radius)+10px)] p-12 bg-card hover:bg-secondary/40 transition-colors flex flex-col items-center text-center"
+        <div
+          className="w-full border-2 border-dashed border-border rounded-[calc(var(--radius)+10px)] p-10 sm:p-12 bg-card flex flex-col items-center text-center"
           data-testid="add-item-dropzone"
         >
           <div className="h-14 w-14 rounded-full bg-secondary flex items-center justify-center mb-3">
-            <Upload className="h-6 w-6" />
+            <Eye className="h-6 w-6" />
           </div>
-          <div className="font-display text-xl">Drop photos or tap to pick</div>
+          <div className="font-display text-xl">Let The Eyes see your pieces</div>
           <div className="text-sm text-muted-foreground mt-1 max-w-md">
-            JPG, PNG, HEIC. You can select multiple at once — each will be analysed in parallel.
+            Snap a quick shot with your camera or upload existing photos. JPG, PNG, HEIC supported —
+            each piece is analysed in parallel.
           </div>
-        </button>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="add-item-cards-grid">
-          {cards.map((card) => (
-            <ItemCard
-              key={card.id}
-              card={card}
-              onRetry={() => retryCard(card)}
-              onRemove={() => removeCard(card.id)}
-              onChange={(patch) => updateField(card.id, patch)}
-            />
-          ))}
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+            <Button
+              type="button"
+              className="rounded-xl"
+              onClick={openCamera}
+              data-testid="add-item-open-camera-button"
+            >
+              <Camera className="h-4 w-4 mr-2" /> Take photo
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={pickFiles}
+              data-testid="add-item-pick-files-button"
+            >
+              <Upload className="h-4 w-4 mr-2" /> Upload photos
+            </Button>
+          </div>
         </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-end gap-2 mb-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-lg"
+              onClick={openCamera}
+              data-testid="add-item-camera-more-button"
+            >
+              <Camera className="h-4 w-4 mr-1.5" /> Take another
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-lg"
+              onClick={pickFiles}
+              data-testid="add-item-upload-more-button"
+            >
+              <Plus className="h-4 w-4 mr-1.5" /> Add more
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="add-item-cards-grid">
+            {cards.map((card) => (
+              <ItemCard
+                key={card.id}
+                card={card}
+                onRetry={() => retryCard(card)}
+                onRemove={() => removeCard(card.id)}
+                onChange={(patch) => updateField(card.id, patch)}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

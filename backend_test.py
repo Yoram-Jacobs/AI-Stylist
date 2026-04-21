@@ -1327,6 +1327,334 @@ class DressAppAPITester:
         else:
             self.log_test("Schema Fields Roundtrip", False, f"Status: {status}, Data: {data}")
     
+    # ==================== PHASE A ARCHITECTURE TESTS ====================
+    
+    def test_closet_analyze_regression_multi_true(self):
+        """REGRESSION: Test POST /api/v1/closet/analyze with multi=true (default)"""
+        if not self.dev_token:
+            self.log_test("Closet Analyze Regression Multi True", False, "No dev token available")
+            return
+            
+        # Use a small test image
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        analyze_data = {
+            "image_base64": test_image_b64,
+            "multi": True  # Explicit multi=true
+        }
+        
+        print("🔄 Testing analyze regression with multi=true (this may take 10-45 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Check response contract unchanged
+            has_items = 'items' in data and isinstance(data['items'], list)
+            has_count = 'count' in data
+            has_legacy_fields = 'title' in data and 'category' in data  # Legacy mirror
+            
+            # Check items structure
+            items_valid = True
+            if data.get('items'):
+                for item in data['items']:
+                    analysis = item.get('analysis', {})
+                    if not (analysis.get('title') and analysis.get('category') and 'model_used' in analysis):
+                        items_valid = False
+                        break
+                        
+            # Check model_used is gemini-*
+            model_used = data.get('model_used', '')
+            is_gemini_model = model_used.startswith('gemini-')
+            
+            all_valid = has_items and has_count and has_legacy_fields and items_valid and is_gemini_model
+            self.log_test("Closet Analyze Regression Multi True", all_valid, 
+                         f"Items: {len(data.get('items', []))}, Count: {data.get('count')}, Model: {model_used}")
+        else:
+            self.log_test("Closet Analyze Regression Multi True", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_analyze_regression_multi_false(self):
+        """REGRESSION: Test POST /api/v1/closet/analyze with multi=false"""
+        if not self.dev_token:
+            self.log_test("Closet Analyze Regression Multi False", False, "No dev token available")
+            return
+            
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        analyze_data = {
+            "image_base64": test_image_b64,
+            "multi": False  # Single analysis
+        }
+        
+        print("🔄 Testing analyze regression with multi=false (this may take 10-45 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Should have single item analysis
+            has_items = 'items' in data and len(data.get('items', [])) == 1
+            has_count = data.get('count') == 1
+            has_legacy_fields = 'title' in data and 'category' in data
+            
+            # Check model_used is gemini-*
+            model_used = data.get('model_used', '')
+            is_gemini_model = model_used.startswith('gemini-')
+            
+            all_valid = has_items and has_count and has_legacy_fields and is_gemini_model
+            self.log_test("Closet Analyze Regression Multi False", all_valid, 
+                         f"Items: {len(data.get('items', []))}, Model: {model_used}")
+        else:
+            self.log_test("Closet Analyze Regression Multi False", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_create_with_clip_embedding(self):
+        """NEW: Test POST /api/v1/closet persists clip_embedding and clip_model"""
+        if not self.dev_token:
+            self.log_test("Closet Create with CLIP Embedding", False, "No dev token available")
+            return
+            
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        item_data = {
+            "title": "Test CLIP Embedding Item",
+            "category": "Top",
+            "image_base64": test_image_b64
+        }
+        
+        print("🔄 Testing closet create with CLIP embedding (this may take 10-30 seconds)...")
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token, timeout=60)
+        
+        if success and status == 201:
+            item_id = data.get('id')
+            
+            # Verify via GET /closet/{id} that embedding is persisted
+            success2, item_data, status2 = self.make_request('GET', f'/closet/{item_id}', token=self.dev_token)
+            
+            if success2 and status2 == 200:
+                has_clip_embedding = 'clip_embedding' in item_data
+                has_clip_model = 'clip_model' in item_data
+                
+                # Check embedding is 512-d list of floats
+                embedding_valid = False
+                if has_clip_embedding:
+                    embedding = item_data.get('clip_embedding')
+                    if isinstance(embedding, list) and len(embedding) == 512:
+                        embedding_valid = all(isinstance(x, (int, float)) for x in embedding)
+                
+                # Check model is patrickjohncyh/fashion-clip
+                model_correct = item_data.get('clip_model') == 'patrickjohncyh/fashion-clip'
+                
+                all_valid = has_clip_embedding and has_clip_model and embedding_valid and model_correct
+                self.log_test("Closet Create with CLIP Embedding", all_valid, 
+                             f"Embedding: {len(item_data.get('clip_embedding', []))}d, Model: {item_data.get('clip_model')}")
+                return item_id
+            else:
+                self.log_test("Closet Create with CLIP Embedding", False, f"Could not retrieve item: {status2}")
+        else:
+            self.log_test("Closet Create with CLIP Embedding", False, f"Status: {status}, Data: {data}")
+        return None
+    
+    def test_closet_list_strips_embedding(self):
+        """NEW: Test GET /api/v1/closet strips clip_embedding from list payload"""
+        if not self.dev_token:
+            self.log_test("Closet List Strips Embedding", False, "No dev token available")
+            return
+            
+        # First create an item with embedding
+        item_id = self.test_closet_create_with_clip_embedding()
+        if not item_id:
+            self.log_test("Closet List Strips Embedding", False, "Could not create item with embedding")
+            return
+        
+        # Test GET /closet (list)
+        success, data, status = self.make_request('GET', '/closet', token=self.dev_token)
+        
+        if success and status == 200:
+            items = data.get('items', [])
+            if items:
+                # Check that no item has clip_embedding in the list response
+                no_embeddings = all('clip_embedding' not in item for item in items)
+                # But should still have other fields
+                has_other_fields = all('title' in item and 'category' in item for item in items)
+                
+                all_valid = no_embeddings and has_other_fields
+                self.log_test("Closet List Strips Embedding", all_valid, 
+                             f"Items: {len(items)}, No embeddings: {no_embeddings}")
+            else:
+                self.log_test("Closet List Strips Embedding", True, "No items found (expected)")
+        else:
+            self.log_test("Closet List Strips Embedding", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_search_text(self):
+        """NEW: Test POST /api/v1/closet/search with text query"""
+        if not self.dev_token:
+            self.log_test("Closet Search Text", False, "No dev token available")
+            return
+            
+        # First ensure we have an item with embedding
+        item_id = self.test_closet_create_with_clip_embedding()
+        if not item_id:
+            self.log_test("Closet Search Text", False, "Could not create item with embedding")
+            return
+        
+        search_data = {
+            "text": "blue shirt casual top",
+            "limit": 10,
+            "min_score": 0.1
+        }
+        
+        print("🔄 Testing closet search with text (this may take 5-15 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/search', search_data, token=self.dev_token, timeout=30)
+        
+        if success and status == 200:
+            # Check response structure
+            has_items = 'items' in data and isinstance(data['items'], list)
+            has_total = 'total' in data
+            has_indexed = 'indexed' in data
+            has_model = 'model' in data and data['model'] == 'patrickjohncyh/fashion-clip'
+            
+            # Check items are sorted by _score DESC and don't include clip_embedding
+            items_valid = True
+            if data.get('items'):
+                prev_score = float('inf')
+                for item in data['items']:
+                    if '_score' not in item or 'clip_embedding' in item:
+                        items_valid = False
+                        break
+                    if item['_score'] > prev_score:
+                        items_valid = False
+                        break
+                    prev_score = item['_score']
+            
+            all_valid = has_items and has_total and has_indexed and has_model and items_valid
+            self.log_test("Closet Search Text", all_valid, 
+                         f"Items: {len(data.get('items', []))}, Total: {data.get('total')}, Indexed: {data.get('indexed')}")
+        else:
+            self.log_test("Closet Search Text", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_search_image(self):
+        """NEW: Test POST /api/v1/closet/search with image_base64"""
+        if not self.dev_token:
+            self.log_test("Closet Search Image", False, "No dev token available")
+            return
+            
+        # Use same image as the item we created
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        search_data = {
+            "image_base64": test_image_b64,
+            "limit": 5,
+            "min_score": 0.8  # High threshold for exact match
+        }
+        
+        print("🔄 Testing closet search with image (this may take 5-15 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/search', search_data, token=self.dev_token, timeout=30)
+        
+        if success and status == 200:
+            has_items = 'items' in data
+            has_model = data.get('model') == 'patrickjohncyh/fashion-clip'
+            
+            # Check for high similarity score (should be ~1.0 for same image)
+            high_score_match = False
+            if data.get('items'):
+                top_score = data['items'][0].get('_score', 0)
+                high_score_match = top_score >= 0.9  # Should be very high for same image
+            
+            all_valid = has_items and has_model and high_score_match
+            self.log_test("Closet Search Image", all_valid, 
+                         f"Items: {len(data.get('items', []))}, Top score: {data.get('items', [{}])[0].get('_score', 0) if data.get('items') else 0}")
+        else:
+            self.log_test("Closet Search Image", False, f"Status: {status}, Data: {data}")
+    
+    def test_closet_search_auth_validation(self):
+        """NEW: Test POST /api/v1/closet/search authentication and validation"""
+        # Test without auth - should return 401
+        search_data = {"text": "test query"}
+        success, data, status = self.make_request('POST', '/closet/search', search_data)
+        no_auth_fails = status == 401
+        
+        # Test missing body fields - should return 400
+        if self.dev_token:
+            success, data, status = self.make_request('POST', '/closet/search', {}, token=self.dev_token)
+            missing_fields_fails = status == 400
+            
+            # Test with both text and image_base64 (should work)
+            both_fields_data = {
+                "text": "test",
+                "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+            }
+            success, data, status = self.make_request('POST', '/closet/search', both_fields_data, token=self.dev_token, timeout=30)
+            both_fields_works = status == 200
+        else:
+            missing_fields_fails = True
+            both_fields_works = True
+        
+        all_validations = no_auth_fails and missing_fields_fails and both_fields_works
+        self.log_test("Closet Search Auth Validation", all_validations, 
+                     f"No auth: 401={no_auth_fails}, Missing fields: 400={missing_fields_fails}, Both fields: 200={both_fields_works}")
+    
+    def test_closet_search_min_score_limit(self):
+        """NEW: Test POST /api/v1/closet/search honors min_score and limit"""
+        if not self.dev_token:
+            self.log_test("Closet Search Min Score Limit", False, "No dev token available")
+            return
+        
+        # Test with very high min_score (should return fewer/no results)
+        high_threshold_data = {
+            "text": "random query that probably won't match well",
+            "min_score": 0.95,
+            "limit": 100
+        }
+        
+        success, data, status = self.make_request('POST', '/closet/search', high_threshold_data, token=self.dev_token, timeout=30)
+        
+        if success and status == 200:
+            high_threshold_items = len(data.get('items', []))
+            
+            # Test with low min_score (should return more results)
+            low_threshold_data = {
+                "text": "shirt top clothing",
+                "min_score": 0.01,
+                "limit": 2  # Small limit
+            }
+            
+            success2, data2, status2 = self.make_request('POST', '/closet/search', low_threshold_data, token=self.dev_token, timeout=30)
+            
+            if success2 and status2 == 200:
+                low_threshold_items = len(data2.get('items', []))
+                limit_respected = low_threshold_items <= 2
+                
+                # High threshold should return fewer items than low threshold (or equal if no items)
+                threshold_works = high_threshold_items <= low_threshold_items
+                
+                all_valid = limit_respected and threshold_works
+                self.log_test("Closet Search Min Score Limit", all_valid, 
+                             f"High threshold: {high_threshold_items}, Low threshold: {low_threshold_items}, Limit respected: {limit_respected}")
+            else:
+                self.log_test("Closet Search Min Score Limit", False, f"Low threshold test failed: {status2}")
+        else:
+            self.log_test("Closet Search Min Score Limit", False, f"High threshold test failed: {status}")
+    
+    def test_admin_providers_fashion_clip(self):
+        """NEW: Test admin provider activity shows 'fashion-clip' after embedding call"""
+        if not self.dev_token:
+            self.log_test("Admin Providers Fashion CLIP", False, "No dev token available")
+            return
+            
+        # First make sure we have a CLIP embedding call
+        self.test_closet_create_with_clip_embedding()
+        
+        # Check admin providers
+        success, data, status = self.make_request('GET', '/admin/providers', token=self.dev_token)
+        
+        if success and status == 200:
+            providers = data.get('summary', [])
+            fashion_clip_found = any(
+                provider.get('provider_name') == 'fashion-clip' 
+                for provider in providers
+            )
+            
+            self.log_test("Admin Providers Fashion CLIP", fashion_clip_found, 
+                         f"Providers: {[p.get('provider_name') for p in providers]}")
+        else:
+            self.log_test("Admin Providers Fashion CLIP", False, f"Status: {status}, Data: {data}")
+
     def test_provider_activity_tracking(self):
         """Test that provider activity is tracked for garment vision calls"""
         if not self.dev_token:
