@@ -118,6 +118,16 @@ DETECT_SYSTEM_PROMPT = (
     "accessories (belts, scarves, hats, glasses), and jewelry (rings, "
     "necklaces, earrings, watches). Do not guess things that are not "
     "clearly visible. Ignore the person, skin, hair, and background.\n\n"
+    "CRITICAL RULES:\n"
+    "- Return **exactly one** bounding box per distinct physical item. "
+    "Never output multiple boxes for the same piece (e.g. do not return "
+    "both a \"shirt\" box and a \"sleeve\" box for the same shirt).\n"
+    "- If you are uncertain whether two regions are the same garment, "
+    "merge them into a single box that covers both.\n"
+    "- A pair (shoes, earrings, gloves) counts as ONE item \u2014 use a "
+    "single box that contains both pieces.\n"
+    "- Do NOT include a full-frame box covering the whole outfit \u2014 "
+    "only individual items.\n\n"
     "For each item, return a tight bounding box in normalized coordinates "
     "on a 0\u20131000 scale (where 0 is top/left and 1000 is bottom/right), "
     "using Gemini's standard ``[ymin, xmin, ymax, xmax]`` order.\n\n"
@@ -140,6 +150,97 @@ DETECT_SYSTEM_PROMPT = (
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
+_NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
+
+
+def _iou_norm(a: list[int], b: list[int]) -> float:
+    """Intersection-over-union of two ``[ymin, xmin, ymax, xmax]`` boxes."""
+    ay1, ax1, ay2, ax2 = a
+    by1, bx1, by2, bx2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0, (ax2 - ax1)) * max(0, (ay2 - ay1))
+    area_b = max(0, (bx2 - bx1)) * max(0, (by2 - by1))
+    union = area_a + area_b - inter
+    return float(inter) / float(union) if union > 0 else 0.0
+
+
+def _containment(a: list[int], b: list[int]) -> float:
+    """Fraction of the smaller box contained inside the other.
+
+    Catches the case where the detector returns a fine-grained part box
+    (e.g. a sleeve) nested inside a full-item box (e.g. the shirt).
+    """
+    ay1, ax1, ay2, ax2 = a
+    by1, bx1, by2, bx2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(1, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(1, (bx2 - bx1) * (by2 - by1))
+    smaller = min(area_a, area_b)
+    return inter / float(smaller)
+
+
+# Kind affinities so NMS still collapses near-duplicates even when the
+# detector hands back slightly different labels (e.g. "shirt" + "top").
+_SIMILAR_KINDS = {
+    "garment": {"garment", "outerwear"},
+    "outerwear": {"outerwear", "garment"},
+    "footwear": {"footwear"},
+    "bag": {"bag"},
+    "accessory": {"accessory", "jewelry"},
+    "jewelry": {"jewelry", "accessory"},
+}
+
+
+def _same_thing(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Heuristic \u2014 are two detections the same physical item?"""
+    bbox_a, bbox_b = a.get("bbox"), b.get("bbox")
+    if not (isinstance(bbox_a, list) and isinstance(bbox_b, list)):
+        return False
+    iou = _iou_norm(bbox_a, bbox_b)
+    contain = _containment(bbox_a, bbox_b)
+    kind_a = (a.get("kind") or "garment").lower()
+    kind_b = (b.get("kind") or "garment").lower()
+    compatible_kind = kind_b in _SIMILAR_KINDS.get(kind_a, {kind_a})
+    # Strong overlap -> duplicate, regardless of kind.
+    if iou >= _NMS_IOU_THRESHOLD:
+        return True
+    # One clearly nested inside the other AND compatible kind -> duplicate.
+    if contain >= 0.8 and compatible_kind:
+        return True
+    return False
+
+
+def _nms_detections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Non-max-suppression over detector output.
+
+    Keeps the larger bbox when two detections describe the same item,
+    so one physical garment can only ever yield a single card.
+    """
+    def _area(it: dict[str, Any]) -> int:
+        y1, x1, y2, x2 = it["bbox"]
+        return max(0, (x2 - x1)) * max(0, (y2 - y1))
+
+    # Sort by area DESC so the dominant (larger) box wins.
+    sorted_items = sorted(items, key=_area, reverse=True)
+    kept: list[dict[str, Any]] = []
+    for it in sorted_items:
+        if any(_same_thing(it, k) for k in kept):
+            continue
+        kept.append(it)
+    return kept
 
 
 # -------------------- enum sanitisers --------------------
@@ -330,9 +431,8 @@ class GarmentVisionService:
         items = parsed.get("items") or []
         if not isinstance(items, list):
             items = []
-        # Minimal validation + de-duplication on (label, rounded bbox).
+        # Minimal validation + normalisation first.
         clean: list[dict[str, Any]] = []
-        seen: set[tuple[str, tuple[int, int, int, int]]] = set()
         for it in items:
             if not isinstance(it, dict):
                 continue
@@ -345,18 +445,19 @@ class GarmentVisionService:
                 or not all(isinstance(v, (int, float)) for v in bbox)
             ):
                 continue
-            rounded = tuple(int(round(v / 25.0) * 25) for v in bbox)  # 4% dedupe
-            key = (label, rounded)
-            if key in seen:
-                continue
-            seen.add(key)
             clean.append(
                 {"label": label, "kind": kind, "bbox": [int(v) for v in bbox]}
             )
+        # Non-maximum suppression: collapse overlapping detections that
+        # describe the same physical item (IoU >= 0.35 OR one box nested
+        # inside the other with compatible kind).
+        before = len(clean)
+        clean = _nms_detections(clean)
         logger.info(
-            "detect_items OK model=%s count=%d labels=%s",
-            self.model,
+            "detect_items OK model=%s count=%d (nms removed %d) labels=%s",
+            self.detect_model,
             len(clean),
+            before - len(clean),
             [c["label"] for c in clean][:8],
         )
         return clean
