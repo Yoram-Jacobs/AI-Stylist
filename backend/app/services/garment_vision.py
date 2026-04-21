@@ -142,6 +142,103 @@ _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
 
 
+# -------------------- enum sanitisers --------------------
+# The Flash tier of Gemini occasionally confuses ``state`` (new/used) with
+# ``condition`` (bad/fair/good/excellent) or returns values in slightly
+# different casing (e.g. "Smart Casual" vs "smart-casual"). Rather than
+# reject those responses with a 422 at save time, we coerce them to the
+# nearest valid enum value so the auto-fill stays useful and the user
+# can still edit freely.
+_VALID_STATE = {"new", "used"}
+_VALID_CONDITION = {"bad", "fair", "good", "excellent"}
+_VALID_QUALITY = {"budget", "mid", "premium", "luxury"}
+_VALID_GENDER = {"men", "women", "unisex", "kids"}
+_VALID_DRESS_CODE = {
+    "casual", "smart-casual", "business", "formal", "athletic", "loungewear",
+}
+_VALID_PATTERN = {
+    "solid", "striped", "plaid", "floral", "herringbone",
+    "polka", "paisley", "geometric", "abstract",
+}
+
+
+def _norm_str(v: Any) -> str | None:
+    if not isinstance(v, str):
+        return None
+    return v.strip().lower().replace("_", "-")
+
+
+def _coerce_enums(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort coercion of AI-returned enum values.
+
+    * Unknown / empty values are dropped rather than kept, so Pydantic's
+      optional-enum fields stay valid (None instead of an unknown literal).
+    * ``state`` is the main hazard: the model sometimes echoes the
+      ``condition`` value there. We infer ``used`` by default, but flip
+      to ``new`` if the item is also labelled ``excellent`` and looks
+      brand-new.
+    """
+    # gender
+    g = _norm_str(parsed.get("gender"))
+    if g and g not in _VALID_GENDER:
+        g = {"male": "men", "female": "women", "uni": "unisex", "kid": "kids"}.get(g)
+    parsed["gender"] = g if g in _VALID_GENDER else None
+
+    # dress_code
+    dc = _norm_str(parsed.get("dress_code"))
+    if dc:
+        dc = dc.replace(" ", "-")
+        if dc == "athleisure":
+            dc = "athletic"
+        if dc == "lounge":
+            dc = "loungewear"
+    parsed["dress_code"] = dc if dc in _VALID_DRESS_CODE else None
+
+    # condition
+    c = _norm_str(parsed.get("condition"))
+    if c == "poor":
+        c = "bad"
+    if c == "very-good":
+        c = "excellent"
+    parsed["condition"] = c if c in _VALID_CONDITION else None
+
+    # state \u2014 coerce unknowns based on other signals
+    s = _norm_str(parsed.get("state"))
+    if s not in _VALID_STATE:
+        s = "used"  # sensible default; user can flip to "new" in the form
+    parsed["state"] = s
+
+    # quality
+    q = _norm_str(parsed.get("quality"))
+    q_map = {
+        "cheap": "budget", "entry": "budget", "basic": "budget",
+        "mid-range": "mid", "standard": "mid",
+        "high": "premium", "high-end": "premium",
+    }
+    q = q_map.get(q, q)
+    parsed["quality"] = q if q in _VALID_QUALITY else None
+
+    # pattern
+    p = _norm_str(parsed.get("pattern"))
+    parsed["pattern"] = p if p in _VALID_PATTERN else None
+
+    # season \u2014 must be a list of known tokens
+    allowed_seasons = {"spring", "summer", "fall", "autumn", "winter", "all"}
+    raw_seasons = parsed.get("season") or []
+    if isinstance(raw_seasons, str):
+        raw_seasons = [raw_seasons]
+    seasons: list[str] = []
+    for s2 in raw_seasons:
+        tok = _norm_str(s2)
+        if tok == "autumn":
+            tok = "fall"
+        if tok in allowed_seasons:
+            seasons.append(tok)
+    parsed["season"] = seasons
+
+    return parsed
+
+
 def _crop_to_bbox(
     image_bytes: bytes, bbox_norm: list[int]
 ) -> tuple[bytes, tuple[int, int, int, int]] | None:
@@ -304,6 +401,9 @@ class GarmentVisionService:
             parsed["title"] = parsed["name"]
         if not parsed.get("title"):
             parsed["title"] = "Unnamed garment"
+        # Sanitise AI-returned enum-like values so downstream Pydantic
+        # validation never 422s on a Flash slip.
+        parsed = _coerce_enums(parsed)
         parsed["model_used"] = use_model
         parsed["raw"] = {"preview": (raw or "")[:500]}
         logger.info(
