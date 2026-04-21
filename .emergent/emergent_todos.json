@@ -25,6 +25,10 @@
   },
   {
     "content": "Run testing agent on new /closet/search + Gemma dispatch + camera UI",
-    "status": "in_progress"
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md with Phase A milestone",
+    "status": "completed"
   }
 ]

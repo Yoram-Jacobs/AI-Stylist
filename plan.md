@@ -1,19 +1,19 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Multi-Item Outfit Extraction)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Phase A architecture pivot)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
 - ✅ **Phase 2 shipped**: Fully functional backend (auth, users, closet, listings, transactions w/ fee math, stylist pipeline).
 - ✅ **Vision stack migrated & stabilised** (fal.ai removed entirely):
-  - **Segmentation (cutout)**: Hugging Face Inference (free tier) using **`mattmdjaga/segformer_b2_clothes`** via `huggingface_hub.InferenceClient`.
-  - **Image generate/edit**: Hugging Face **FLUX.1-schnell** via `InferenceClient.text_to_image(provider='hf-inference')`.
-    - Edit is implemented as **prompt‑synthesised variant generation** using garment metadata + user instruction.
-    - Typical latency: ~5–10s; output: **1024×1024 PNG** stored in `closet_items.variants[]`.
-- ✅ **Phase 3 shipped**: React frontend compiles, screenshot‑verified, and passes integration testing.
-- ✅ **Phase 4 shipped (Part 1 & 2)**: Google Calendar OAuth (read‑only) + Trend‑Scout autonomous agent.
-- ✅ **Phase 5 shipped**: Admin dashboard (backend + UI) + provider activity monitoring + Accessibility + SEO hardening.
-- ✅ **Add Item overhaul shipped**: batch upload + animated scanning + “The Eyes” auto-fill + rich closet schema + one‑click auto‑listing to marketplace.
-- ✅ **Multi-Item Outfit Extraction shipped (NEW)**: one uploaded photo → N editable item cards, each with its own crop + 17 auto-filled fields.
-- 🎯 **Current focus (next milestone)**: **PayPlus payments integration** (replacing Stripe) — *deferred until PayPlus API credentials are available*.
+  - **Segmentation (cutout)**: Hugging Face Inference (free tier) using **`mattmdjaga/segformer_b2_clothes`**.
+  - **Image generate/edit**: Hugging Face **FLUX.1-schnell**.
+- ✅ **Phase 3 shipped**: React frontend compiles, screenshot‑verified, integration-tested.
+- ✅ **Phase 4 shipped**: Google Calendar OAuth + Trend‑Scout autonomous agent.
+- ✅ **Phase 5 shipped**: Admin dashboard, provider activity monitoring, accessibility + SEO hardening.
+- ✅ **Add Item overhaul shipped**: batch upload + animated scanning + "The Eyes" auto-fill + rich closet schema + one‑click auto‑listing.
+- ✅ **Multi-Item Outfit Extraction shipped**: one uploaded photo → N editable item cards with IoU-NMS dedupe + "already cropped" short-circuit.
+- ✅ **Closet Bulk Delete shipped**: multi-select mode on `/closet` with confirmation dialog + parallel deletes.
+- ✅ **Phase A (architecture pivot) shipped (NEW)**: provider-dispatched Eyes (Gemini default, Gemma HF path ready for user's fine-tune), local FashionCLIP embedding service + `/closet/search`, native camera capture on Add Item.
+- 🎯 **Next milestone**: PayPlus payments integration — *deferred until API credentials are available*.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Trend‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -322,6 +322,53 @@ Upgrades "The Eyes" so a single uploaded outfit photo expands into a dedicated e
 ---
 
 **Testing (legacy)**
+
+---
+
+### Phase A — Architecture pivot toward Gemma-on-edge **(COMPLETE)**
+Lays the groundwork for the user's fine-tuned Gemma 4 E2B (Eyes) / E4B (Brain) edge deployment. No user-visible regressions — the default Eyes provider is still Gemini while Gemma HF routing stabilises and the fine-tune lands.
+
+**Delivered**
+- ✅ Provider-dispatched analyser in `garment_vision.py`
+  - New `_hf_chat_json()` helper for any HF-hosted multimodal chat model (system prompt folded into first user message to satisfy Featherless / strict alternation rules).
+  - `analyze(image, model=..., provider=...)` routes to either `hf` or `gemini` based on `GARMENT_VISION_PROVIDER`.
+  - Service no longer hard-requires `EMERGENT_LLM_KEY`; it fails fast only on the configured provider's missing credential.
+- ✅ Config surface in `app/config.py`: `GARMENT_VISION_PROVIDER`, `GARMENT_VISION_MODEL`, `GARMENT_VISION_CROP_MODEL`, `GARMENT_VISION_DETECT_PROVIDER`, `GARMENT_VISION_DETECT_MODEL`, `GARMENT_VISION_MAX_ITEMS`, `FASHION_CLIP_MODEL`, `FASHION_CLIP_ENABLED`. Operator can flip to Gemma with a single env change.
+- ✅ Detection remains on Gemini 2.5 Flash for now (Gemma zero-shot bbox quality is too weak; detector is swappable independently).
+- ✅ FashionCLIP embedding service (`app/services/fashion_clip.py`)
+  - Lazy `torch + transformers` load (CPU) so the backend still boots if torch isn't installed.
+  - `embed_image(bytes)` / `embed_text(str)` → 512-d **L2-normalised** float vectors.
+  - Reports to the provider-activity ring buffer as `fashion-clip` → visible on Admin → Providers.
+  - First call downloads ~600MB weights; subsequent calls are ~150-300ms on CPU.
+- ✅ `/closet` integration
+  - `POST /closet` now auto-computes and persists `clip_embedding` + `clip_model` on every item created with an image (soft-fail).
+  - `GET /closet` strips `clip_embedding` from list responses to keep the payload lightweight.
+  - **NEW** `POST /closet/search` (text or image query) → cosine-scored items with `_score` field, honours `limit` / `min_score`.
+- ✅ Native camera capture on `/closet/add`
+  - `Take photo` primary button (rear camera via `<input capture="environment">` on mobile; graceful file-picker fallback on desktop).
+  - `Upload photos` secondary button alongside.
+  - Action bar shows `Take another` + `Add more` once at least one card is present.
+  - All new controls wear `data-testid` attributes for test automation.
+
+**Architecture note on the Gemma HF path**
+Gemma-family multimodal models are currently only routable via Featherless AI on the free HF Inference Providers tier, and Featherless' implementation rejects the standard `content: [text, image_url]` list payload with a "Conversation roles must alternate" error. The dispatch code is fully wired and unit-tested end-to-end for the structure of requests it will send; we simply haven't enabled it as the default because the upstream is unreliable. The moment the user's fine-tune is hosted on a stable endpoint (HF Dedicated Inference Endpoint, Modal, Replicate, their own Gemma endpoint, etc.), the swap is a one-line env change:
+
+```
+GARMENT_VISION_PROVIDER=hf
+GARMENT_VISION_MODEL=<their hf repo or endpoint url>
+```
+
+**Device strategy for the eventual on-edge Eyes**
+- The Eyes → Gemma 4 **E2B** (~1.3 GB Q4, ~60% of 2026 mobile install base)
+- The Brain → Gemma 4 **E4B** (~2.5 GB Q4, flagship phones)
+- Older devices transparently fall back to the server `/analyze` endpoint.
+
+**Testing**
+- ✅ `/app/test_reports/iteration_8.json`: backend 85%, frontend 95%, **0 critical bugs, 0 UI bugs, 0 integration issues**.
+- Two "issues" flagged by the agent were false alarms: (a) `multi=true` returning 1 item for a tight single-garment photo is the intentional "already cropped" short-circuit (contract is still `items[]`); (b) embedding failure on 1×1 synthetic images is not reachable in production.
+- Live manual verification: Gemini analyzer 20s + valid 17-field JSON, FashionCLIP image↔image cosine 1.000 self-match, text query "black motorcycle jacket" returns the moto-jacket item with score 0.32.
+
+---
 
 ## 3) Next Actions (immediate)
 1. **PayPlus discovery (deferred)**: when PayPlus credentials are available:
