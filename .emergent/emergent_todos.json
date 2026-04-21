@@ -1,34 +1,26 @@
 [
   {
-    "content": "Extend ClosetItem schema + DB with all 17 new fields + marketplace_intent",
+    "content": "Add analyze_outfit() orchestrator in garment_vision.py (detect → crop → parallel analyze)",
     "status": "completed"
   },
   {
-    "content": "Backend: Gemini Vision 'The Eyes' analyzer (/api/v1/closet/analyze)",
+    "content": "Update POST /api/v1/closet/analyze to return items array",
     "status": "completed"
   },
   {
-    "content": "Backend: Extended POST /api/v1/closet + auto-listing on For Sale/Donate/Swap",
+    "content": "Update AddItem.jsx to expand 1 upload into N item cards based on items array",
     "status": "completed"
   },
   {
-    "content": "Frontend: AddItem.jsx batch upload + scanning animation + editable cards + fee preview + Save All",
+    "content": "Test backend multi-item pipeline + frontend end-to-end",
     "status": "completed"
   },
   {
-    "content": "Frontend: CSS scan-line animation (reduced-motion safe)",
-    "status": "completed"
+    "content": "Run testing agent for comprehensive multi-item flow validation",
+    "status": "in_progress"
   },
   {
-    "content": "Testing iteration_6 (Backend 89.9%, Frontend 100%, Overall 95%)",
-    "status": "completed"
-  },
-  {
-    "content": "Safety fallbacks for occasional missing Gemini fields",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md",
-    "status": "completed"
+    "content": "Update plan.md with completed multi-item feature",
+    "status": "pending"
   }
 ]

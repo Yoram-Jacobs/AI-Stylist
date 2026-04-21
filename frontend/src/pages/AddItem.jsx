@@ -94,12 +94,14 @@ export default function AddItem() {
         return {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           file,
+          mime: file.type || 'image/jpeg',
           previewUrl: URL.createObjectURL(file),
           base64: b64,
           status: 'scanning', // scanning | ready | error | saving | saved
           progress: 4,
           fields: blankFields(),
           error: null,
+          label: null,
         };
       })
     );
@@ -119,14 +121,69 @@ export default function AddItem() {
       );
     }, 250);
     try {
-      const analysis = await api.analyzeItemImage({ image_base64: card.base64 });
+      const resp = await api.analyzeItemImage({ image_base64: card.base64 });
       clearInterval(tick);
-      setCards((prev) =>
-        prev.map((c) =>
-          c.id === card.id
-            ? { ...c, status: 'ready', progress: 100, fields: hydrate(analysis) }
-            : c
-        )
+      // New API shape: { items: [...], count, ...topLevelAnalysisMirror }.
+      // Legacy callers that still get a single object without `items` keep working.
+      const items = Array.isArray(resp?.items) && resp.items.length > 0 ? resp.items : null;
+
+      if (!items) {
+        // Legacy single-object response.
+        setCards((prev) =>
+          prev.map((c) =>
+            c.id === card.id
+              ? { ...c, status: 'ready', progress: 100, fields: hydrate(resp) }
+              : c
+          )
+        );
+        return;
+      }
+
+      if (items.length === 1) {
+        // Single-item photo — keep the original preview, just hydrate fields.
+        const it = items[0];
+        setCards((prev) =>
+          prev.map((c) =>
+            c.id === card.id
+              ? {
+                  ...c,
+                  status: 'ready',
+                  progress: 100,
+                  fields: hydrate(it.analysis || {}),
+                  label: it.label || null,
+                }
+              : c
+          )
+        );
+        return;
+      }
+
+      // Multi-item photo — replace the single placeholder card with one
+      // fully-editable card per detected piece. Each new card owns the
+      // crop image so saving persists only the relevant garment.
+      const newCards = items.map((it, idx) => {
+        const mime = it.crop_mime || 'image/jpeg';
+        return {
+          id: `${card.id}-${idx}`,
+          file: null,
+          mime,
+          previewUrl: `data:${mime};base64,${it.crop_base64}`,
+          base64: it.crop_base64,
+          status: 'ready',
+          progress: 100,
+          fields: hydrate(it.analysis || {}),
+          error: null,
+          label: it.label || null,
+        };
+      });
+      if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
+      setCards((prev) => {
+        const idx = prev.findIndex((c) => c.id === card.id);
+        if (idx < 0) return prev;
+        return [...prev.slice(0, idx), ...newCards, ...prev.slice(idx + 1)];
+      });
+      toast.success(
+        `Detected ${items.length} items in that photo — review each card below.`
       );
     } catch (err) {
       clearInterval(tick);
@@ -323,6 +380,20 @@ function ItemCard({ card, onRetry, onRemove, onChange }) {
               >
                 <X className="h-4 w-4" />
               </button>
+            )}
+            {card.label && !isBusy && status !== 'error' && (
+              <div
+                className="absolute top-2 left-2 max-w-[70%]"
+                data-testid="add-item-detected-label"
+              >
+                <Badge
+                  variant="outline"
+                  className="bg-background/85 backdrop-blur text-[10px] capitalize border-border/60 flex items-center gap-1"
+                >
+                  <Sparkles className="h-2.5 w-2.5 text-[hsl(var(--accent))]" />
+                  {card.label}
+                </Badge>
+              </div>
             )}
           </div>
 
@@ -721,7 +792,7 @@ function buildCreatePayload(card) {
     marketplace_intent: f.marketplace_intent || 'own',
     tags: f.tags || [],
     image_base64: asBase64,
-    image_mime: card.file?.type || 'image/jpeg',
+    image_mime: card.mime || card.file?.type || 'image/jpeg',
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

@@ -54,6 +54,17 @@ class Settings:
     GARMENT_VISION_MODEL: str = os.environ.get(
         "GARMENT_VISION_MODEL", "gemini-2.5-pro"
     )
+    # Per-crop analyzer used inside the multi-item outfit pipeline. We
+    # default to Flash here because (a) each crop is tiny and structurally
+    # simple, and (b) keeping Pro would push total latency past the
+    # 60s ingress ceiling when 4\u20135 items are detected in one photo.
+    GARMENT_VISION_CROP_MODEL: str = os.environ.get(
+        "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
+    )
+    # Hard cap on how many items we analyse per uploaded photo.
+    GARMENT_VISION_MAX_ITEMS: int = int(
+        os.environ.get("GARMENT_VISION_MAX_ITEMS", "6")
+    )
 
     # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
     HF_IMAGE_MODEL: str = os.environ.get(

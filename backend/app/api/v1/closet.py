@@ -220,6 +220,31 @@ class AnalyzeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     image_base64: str | None = None
     image_url: str | None = None
+    # When True (default), run the multi-item detect\u2192crop\u2192analyse pipeline
+    # so a single outfit photo expands into one card per garment / accessory.
+    # Set False to force a single, whole-frame analysis (legacy behaviour).
+    multi: bool = True
+
+
+def _apply_defaults(parsed: dict[str, Any]) -> dict[str, Any]:
+    parsed.setdefault("category", "Top")
+    parsed.setdefault("pattern", "solid")
+    parsed.setdefault("gender", "unisex")
+    parsed.setdefault("dress_code", "casual")
+    parsed.setdefault("state", "used")
+    parsed.setdefault("condition", "good")
+    parsed.setdefault("quality", "mid")
+    return parsed
+
+
+def _safe_analysis(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Validate through Pydantic; fall back to a minimal shape on error."""
+    try:
+        return GarmentAnalysis(**_apply_defaults(parsed)).model_dump()
+    except Exception:  # noqa: BLE001
+        return GarmentAnalysis(
+            title=parsed.get("title") or "Unnamed garment"
+        ).model_dump()
 
 
 @router.post("/analyze")
@@ -227,7 +252,15 @@ async def analyze_item_image(
     payload: AnalyzeIn,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo."""
+    """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo.
+
+    Returns an object with an ``items`` array. Each entry represents one
+    detected garment / accessory / jewelry piece with its own cropped
+    preview and full auto-fill payload. When the photo only contains a
+    single item, the array has one entry (and the top-level legacy
+    fields are mirrored from that single analysis for backward
+    compatibility).
+    """
     if garment_vision_service is None:
         raise HTTPException(503, "Garment analyzer not configured")
     if not payload.image_base64 and not payload.image_url:
@@ -248,6 +281,34 @@ async def analyze_item_image(
     if not raw:
         raise HTTPException(400, "Could not load image bytes")
 
+    # Multi-item pipeline (default). Degrades gracefully to single.
+    if payload.multi:
+        try:
+            detections = await garment_vision_service.analyze_outfit(raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Outfit analysis failed: %s", exc)
+            raise HTTPException(
+                503,
+                "Garment analyzer is temporarily unavailable. Please try again.",
+            ) from exc
+        items_out: list[dict[str, Any]] = []
+        for det in detections:
+            analysis = _safe_analysis(dict(det.get("analysis") or {}))
+            items_out.append(
+                {
+                    "label": det.get("label"),
+                    "kind": det.get("kind"),
+                    "bbox": det.get("bbox"),
+                    "crop_base64": det.get("crop_base64"),
+                    "crop_mime": det.get("crop_mime", "image/jpeg"),
+                    "analysis": analysis,
+                }
+            )
+        # Mirror the first item at the top level so older callers keep working.
+        first = items_out[0]["analysis"] if items_out else _safe_analysis({})
+        return {"items": items_out, "count": len(items_out), **first}
+
+    # Legacy single-item path (kept for any internal caller that sets multi=False).
     try:
         parsed = await garment_vision_service.analyze(raw)
     except Exception as exc:  # noqa: BLE001
@@ -255,21 +316,22 @@ async def analyze_item_image(
         raise HTTPException(
             503, "Garment analyzer is temporarily unavailable. Please try again."
         ) from exc
-
-    # Safety fallbacks so the frontend form always has sensible defaults.
-    parsed.setdefault("category", "Top")
-    parsed.setdefault("pattern", "solid")
-    parsed.setdefault("gender", "unisex")
-    parsed.setdefault("dress_code", "casual")
-    parsed.setdefault("state", "used")
-    parsed.setdefault("condition", "good")
-    parsed.setdefault("quality", "mid")
-
-    try:
-        analysis = GarmentAnalysis(**parsed)
-    except Exception:  # noqa: BLE001
-        analysis = GarmentAnalysis(title=parsed.get("title") or "Unnamed garment")
-    return analysis.model_dump()
+    analysis = _safe_analysis(parsed)
+    crop_b64 = base64.b64encode(raw).decode("ascii")
+    return {
+        "items": [
+            {
+                "label": analysis.get("item_type") or analysis.get("sub_category") or "garment",
+                "kind": "garment",
+                "bbox": [0, 0, 1000, 1000],
+                "crop_base64": crop_b64,
+                "crop_mime": "image/jpeg",
+                "analysis": analysis,
+            }
+        ],
+        "count": 1,
+        **analysis,
+    }
 
 
 @router.get("")
