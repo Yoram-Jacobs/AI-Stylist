@@ -229,6 +229,22 @@
     "stopSpeaking": "Stop speaking",
     "playReply": "Play reply"
   },
+  "outfitCompletion": {
+    "cta": "Complete the outfit",
+    "title": "Complete the outfit",
+    "subtitle": "Starting from {{count}} selected piece(s). We'll suggest complementary items from your closet — and, optionally, the marketplace.",
+    "anchorsLabel": "Your picks",
+    "includeMarketplace": "Also search the marketplace",
+    "occasionPlaceholder": "Occasion (optional) — e.g. Brunch in 18°C",
+    "thinking": "Building your look…",
+    "rationaleLabel": "Stylist rationale",
+    "fromClosetLabel": "From your closet",
+    "fromMarketplaceLabel": "From the marketplace",
+    "noClosetSuggestions": "No complementary items found in your closet. Try enabling the marketplace, or add more pieces to your closet.",
+    "embeddingsMissingHint": "Some of your selected pieces don't have embeddings yet. Re-uploading them will improve suggestion quality.",
+    "empty": "No suggestions came back. Try picking different anchors or toggling the marketplace.",
+    "error": "Outfit completion failed. Please try again."
+  },
   "market": {
     "title": "Marketplace",
     "subtitle": "Community-curated resale and swaps.",

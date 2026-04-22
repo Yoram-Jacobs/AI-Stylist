@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
-  Square, Loader2, ListChecks, Sparkles,
+  Square, Loader2, ListChecks, Sparkles, Wand2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
+import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -42,6 +43,9 @@ export default function Closet() {
   const [selected, setSelected] = useState(() => new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Outfit completion sheet (Phase P)
+  const [completionOpen, setCompletionOpen] = useState(false);
+  const [completionAnchors, setCompletionAnchors] = useState([]);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -349,6 +353,24 @@ export default function Closet() {
             </Button>
             <Button
               type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-lg"
+              disabled={selected.size === 0}
+              onClick={() => {
+                const ids = Array.from(selected);
+                const hints = items.filter((i) => selected.has(i.id));
+                setCompletionAnchors(hints);
+                setCompletionOpen(true);
+              }}
+              data-testid="closet-complete-outfit-button"
+            >
+              <Wand2 className="h-4 w-4 mr-1.5" />
+              {t('outfitCompletion.cta')}
+              {selected.size > 0 ? ` (${selected.size})` : ''}
+            </Button>
+            <Button
+              type="button"
               variant="destructive"
               size="sm"
               className="rounded-lg"
@@ -478,6 +500,14 @@ export default function Closet() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Phase P: Outfit Completion sheet */}
+      <OutfitCompletionSheet
+        open={completionOpen}
+        onOpenChange={setCompletionOpen}
+        anchorIds={Array.from(selected)}
+        anchorsHint={completionAnchors}
+      />
     </div>
   );
 }

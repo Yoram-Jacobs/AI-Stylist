@@ -102,6 +102,17 @@ export const api = {
   stylistHistory: (limit = 20) =>
     client.get('/stylist/history', { params: { limit } }).then((r) => r.data),
 
+  // outfit completion (Phase P)
+  completeOutfit: ({ itemIds, includeMarketplace = false, occasion = null, limit = 6 }) =>
+    client
+      .post('/closet/complete-outfit', {
+        item_ids: itemIds,
+        include_marketplace: includeMarketplace,
+        occasion: occasion || null,
+        limit,
+      })
+      .then((r) => r.data),
+
   // google calendar
   calendarStatus: () => client.get('/calendar/status').then((r) => r.data),
   calendarUpcoming: (hours = 48) =>

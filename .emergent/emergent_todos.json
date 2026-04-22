@@ -1,46 +1,46 @@
 [
   {
-    "content": "Explore existing Stylist.jsx STT/TTS flow + backend speech endpoints",
+    "content": "Explore Closet.jsx multi-select pattern, fashion_clip.py, gemini_stylist.py, closet.py",
     "status": "completed"
   },
   {
-    "content": "Create /app/frontend/src/lib/speech.js (Web Speech API wrapper with feature detection)",
+    "content": "Design complete-outfit schema (request/response Pydantic models)",
     "status": "completed"
   },
   {
-    "content": "Add skip_tts flag to backend stylist route",
+    "content": "Implement POST /api/v1/closet/complete-outfit backend endpoint",
     "status": "completed"
   },
   {
-    "content": "Refactor Stylist.jsx to use local STT with graceful Groq fallback",
+    "content": "Add api.completeOutfit() helper to frontend api.js",
     "status": "completed"
   },
   {
-    "content": "Refactor Stylist.jsx to use local TTS with graceful Deepgram fallback (locale-aware voice)",
+    "content": "Create OutfitCompletionSheet.jsx component",
     "status": "completed"
   },
   {
-    "content": "Add i18n keys for speech UI states (mic on/off, unsupported, etc.)",
+    "content": "Wire 'Complete the Outfit' button into Closet multi-select toolbar",
     "status": "completed"
   },
   {
-    "content": "Lint frontend + esbuild compile check",
+    "content": "Add i18n keys (en + he)",
     "status": "completed"
   },
   {
-    "content": "Backend smoke test: stylist skip_tts path returns no audio",
+    "content": "Lint + esbuild compile check",
     "status": "completed"
   },
   {
-    "content": "Frontend screenshot verification on /stylist",
+    "content": "Backend smoke test the new endpoint",
     "status": "completed"
   },
   {
-    "content": "Call testing_agent for full Phase M backend validation",
+    "content": "Frontend screenshot verification",
     "status": "completed"
   },
   {
-    "content": "Update plan.md Phase M status to COMPLETED",
+    "content": "Update plan.md Phase P status to COMPLETED",
     "status": "completed"
   }
 ]

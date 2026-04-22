@@ -7,6 +7,7 @@ Hugging Face SAM segmentation in the background; failures are swallowed
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -440,6 +441,249 @@ async def search_closet(
         "total": len(scored),
         "indexed": len(candidates),
         "model": fashion_clip_service.model_id,
+    }
+
+
+class CompleteOutfitIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_ids: list[str] = Field(min_length=1, max_length=8)
+    include_marketplace: bool = False
+    occasion: str | None = None
+    limit: int = Field(default=6, ge=1, le=12)
+    min_score: float = Field(default=0.10, ge=0.0, le=1.0)
+
+
+def _slim_item(it: dict[str, Any]) -> dict[str, Any]:
+    """Strip the 512-float embedding + other heavy fields from an item."""
+    return {k: v for k, v in it.items() if k not in ("clip_embedding",)}
+
+
+def _anchor_summary(anchor: dict[str, Any]) -> dict[str, Any]:
+    """Compact anchor description used for stylist prompting."""
+    return {
+        "id": anchor.get("id"),
+        "title": anchor.get("title") or anchor.get("name"),
+        "category": anchor.get("category"),
+        "sub_category": anchor.get("sub_category"),
+        "color": anchor.get("color"),
+        "material": anchor.get("material"),
+        "pattern": anchor.get("pattern"),
+        "dress_code": anchor.get("dress_code"),
+        "season": anchor.get("season") or [],
+    }
+
+
+@router.post("/complete-outfit")
+async def complete_outfit(
+    payload: CompleteOutfitIn,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """**Complete the Outfit** — given 1..N anchor items from the user's
+    closet, return ranked complementary items (from the closet and,
+    optionally, from the active marketplace) plus a short rationale.
+
+    The score uses FashionCLIP embeddings averaged across the anchors
+    (centroid) against every candidate's embedding. Candidates whose
+    ``category`` duplicates any anchor's ``category`` are filtered out
+    so suggestions are actually *completing* the look rather than
+    duplicating it.
+
+    When ``include_marketplace=true`` the endpoint also searches active
+    listings (excluding the user's own listings) using the same
+    FashionCLIP centroid, then asks Gemini to produce a combined
+    rationale grounded in the anchors + shortlist.
+    """
+    db = get_db()
+    # ------- 1. Fetch & validate anchors -------
+    anchors = await repos.find_many(
+        db.closet_items,
+        {"id": {"$in": payload.item_ids}, "user_id": user["id"]},
+        limit=len(payload.item_ids),
+    )
+    if not anchors:
+        raise HTTPException(404, "None of the selected items were found.")
+    if len(anchors) != len(payload.item_ids):
+        missing = set(payload.item_ids) - {a["id"] for a in anchors}
+        raise HTTPException(
+            404,
+            f"{len(missing)} item(s) were not found in your closet.",
+        )
+
+    # ------- 2. Build anchor centroid (mean of available embeddings) -------
+    anchor_vecs = [
+        a["clip_embedding"]
+        for a in anchors
+        if isinstance(a.get("clip_embedding"), list) and a["clip_embedding"]
+    ]
+    anchor_categories = {a.get("category") for a in anchors if a.get("category")}
+
+    centroid: list[float] | None = None
+    if anchor_vecs and fashion_clip_service is not None:
+        dim = len(anchor_vecs[0])
+        sums = [0.0] * dim
+        for v in anchor_vecs:
+            if len(v) != dim:
+                continue
+            for i, x in enumerate(v):
+                sums[i] += float(x)
+        n = float(len(anchor_vecs))
+        mean = [s / n for s in sums]
+        # L2-normalise so cosine is still a straight dot product.
+        norm = sum(x * x for x in mean) ** 0.5
+        if norm > 0:
+            centroid = [x / norm for x in mean]
+
+    # ------- 3. Score closet candidates -------
+    closet_suggestions: list[dict[str, Any]] = []
+    if centroid is not None:
+        candidates = await repos.find_many(
+            db.closet_items,
+            {
+                "user_id": user["id"],
+                "id": {"$nin": payload.item_ids},
+                "clip_embedding": {"$exists": True, "$ne": None},
+            },
+            sort=[("created_at", -1)],
+            limit=2000,
+        )
+        scored: list[dict[str, Any]] = []
+        for c in candidates:
+            vec = c.get("clip_embedding")
+            if not isinstance(vec, list) or not vec:
+                continue
+            # Diversity: skip same-category-as-any-anchor items so we
+            # actually COMPLETE the look (don't suggest another top
+            # when the anchor is already a top).
+            if c.get("category") in anchor_categories:
+                continue
+            score = fashion_clip_service.cosine(centroid, vec)
+            if score < payload.min_score:
+                continue
+            slim = _slim_item(c)
+            slim["_score"] = round(score, 4)
+            scored.append(slim)
+        scored.sort(key=lambda r: r["_score"], reverse=True)
+        closet_suggestions = scored[: payload.limit]
+
+    # ------- 4. Marketplace suggestions (opt-in) -------
+    market_suggestions: list[dict[str, Any]] = []
+    if payload.include_marketplace and centroid is not None:
+        listings = await repos.find_many(
+            db.listings,
+            {"status": "active", "seller_id": {"$ne": user["id"]}},
+            sort=[("created_at", -1)],
+            limit=1000,
+        )
+        listing_item_ids = [
+            lg.get("closet_item_id") for lg in listings if lg.get("closet_item_id")
+        ]
+        vec_map: dict[str, list[float]] = {}
+        cat_map: dict[str, str | None] = {}
+        if listing_item_ids:
+            docs = await repos.find_many(
+                db.closet_items,
+                {"id": {"$in": listing_item_ids}},
+                limit=len(listing_item_ids),
+            )
+            for d in docs:
+                ce = d.get("clip_embedding")
+                if isinstance(ce, list) and ce:
+                    vec_map[d["id"]] = ce
+                cat_map[d["id"]] = d.get("category")
+        m_scored: list[dict[str, Any]] = []
+        for lg in listings:
+            cid = lg.get("closet_item_id")
+            if not cid:
+                continue
+            cat = cat_map.get(cid)
+            # Same diversity rule for marketplace
+            if cat and cat in anchor_categories:
+                continue
+            vec = vec_map.get(cid)
+            if not vec:
+                continue
+            score = fashion_clip_service.cosine(centroid, vec)
+            if score < payload.min_score:
+                continue
+            lg2 = dict(lg)
+            lg2["_score"] = round(score, 4)
+            m_scored.append(lg2)
+        m_scored.sort(key=lambda r: r["_score"], reverse=True)
+        market_suggestions = m_scored[: payload.limit]
+
+    # ------- 5. Stylist rationale (Gemini) -------
+    from app.services.gemini_stylist import gemini_stylist_service
+
+    rationale = ""
+    outfit_recommendations: list[dict[str, Any]] = []
+    do_dont: list[str] = []
+    spoken_reply = ""
+    if gemini_stylist_service is not None:
+        try:
+            anchors_pretty = [_anchor_summary(a) for a in anchors]
+            closet_short = [
+                {
+                    "closet_item_id": s["id"],
+                    "title": s.get("title") or s.get("name"),
+                    "category": s.get("category"),
+                    "color": s.get("color"),
+                    "material": s.get("material"),
+                    "score": s["_score"],
+                }
+                for s in closet_suggestions
+            ]
+            market_short = [
+                {
+                    "listing_id": lg["id"],
+                    "title": lg.get("title"),
+                    "category": lg.get("category"),
+                    "price_cents": (lg.get("financial_metadata") or {}).get(
+                        "list_price_cents"
+                    ),
+                    "score": lg["_score"],
+                }
+                for lg in market_suggestions
+            ]
+            request_text = (
+                "Complete this outfit using the user's ANCHOR pieces as the "
+                "starting point. Choose complementary items from the "
+                "CLOSET_CANDIDATES first (preferred); only reach into "
+                "MARKET_CANDIDATES if a key complementary category is missing. "
+                "Return ONE or TWO outfit recommendations. In `why`, explain "
+                "the reasoning in 1-2 sentences.\n\n"
+                f"OCCASION: {payload.occasion or 'unspecified (casual by default)'}\n\n"
+                f"ANCHORS: {json.dumps(anchors_pretty, ensure_ascii=False)}\n\n"
+                f"CLOSET_CANDIDATES: {json.dumps(closet_short, ensure_ascii=False)}\n\n"
+                f"MARKET_CANDIDATES: {json.dumps(market_short, ensure_ascii=False)}"
+            )
+            user_profile = {
+                "preferred_language": user.get("preferred_language", "en"),
+                "style_profile": user.get("style_profile"),
+            }
+            advice = await gemini_stylist_service.advise(
+                session_id=f"complete-outfit:{user['id']}",
+                user_text=request_text,
+                image_base64=None,
+                user_profile=user_profile,
+                closet_summary=closet_short + [{"is_anchor": True, **a} for a in anchors_pretty],
+            )
+            rationale = advice.get("reasoning_summary", "") or ""
+            outfit_recommendations = advice.get("outfit_recommendations", []) or []
+            do_dont = advice.get("do_dont", []) or []
+            spoken_reply = advice.get("spoken_reply", "") or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Complete-outfit stylist call failed: %s", exc)
+            # Soft-fail: the ranked suggestions are still useful without rationale.
+
+    return {
+        "anchors": [_slim_item(a) for a in anchors],
+        "closet_suggestions": closet_suggestions,
+        "market_suggestions": market_suggestions,
+        "rationale": rationale,
+        "outfit_recommendations": outfit_recommendations,
+        "do_dont": do_dont,
+        "spoken_reply": spoken_reply,
+        "has_embeddings": centroid is not None,
     }
 
 
