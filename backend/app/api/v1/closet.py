@@ -298,9 +298,10 @@ async def analyze_item_image(
         raise HTTPException(400, "Could not load image bytes")
 
     # Multi-item pipeline (default). Degrades gracefully to single.
+    user_lang = (user or {}).get("preferred_language") or "en"
     if payload.multi:
         try:
-            detections = await garment_vision_service.analyze_outfit(raw)
+            detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Outfit analysis failed: %s", exc)
             raise HTTPException(
@@ -326,7 +327,7 @@ async def analyze_item_image(
 
     # Legacy single-item path (kept for any internal caller that sets multi=False).
     try:
-        parsed = await garment_vision_service.analyze(raw)
+        parsed = await garment_vision_service.analyze(raw, language=user_lang)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garment analysis failed: %s", exc)
         raise HTTPException(

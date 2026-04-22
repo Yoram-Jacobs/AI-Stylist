@@ -1,18 +1,38 @@
 [
   {
-    "content": "Add POST /listings/{id}/similar endpoint (embedding-based recommendations)",
+    "content": "Install i18next + react-i18next via yarn",
     "status": "completed"
   },
   {
-    "content": "Add semantic search toggle to /closet (Keyword vs Meaning) + score badges",
+    "content": "Create /app/frontend/src/lib/i18n.js bootstrap + LanguageSync component",
     "status": "completed"
   },
   {
-    "content": "Add 'Items like this' section to ListingDetail.jsx",
+    "content": "Create 12 translation JSON files in /app/frontend/src/locales/",
     "status": "completed"
   },
   {
-    "content": "Test both flows end-to-end",
+    "content": "Update Profile.jsx language selector (12 langs with native names + immediate apply)",
     "status": "completed"
+  },
+  {
+    "content": "Bootstrap i18n in index.js + mount LanguageSync in AppLayout",
+    "status": "completed"
+  },
+  {
+    "content": "Replace hardcoded strings with t() in shell + key pages (TopNav, BottomTabs, Login, Register, Home, Profile, Closet)",
+    "status": "completed"
+  },
+  {
+    "content": "Audit RTL mirroring for Hebrew/Arabic (verified via screenshot: dir=rtl, layout mirrored)",
+    "status": "completed"
+  },
+  {
+    "content": "Localize AI output (stylist + garment_vision) via preferred_language prompt",
+    "status": "completed"
+  },
+  {
+    "content": "Run backend testing agent for i18n persistence + AI localization",
+    "status": "in_progress"
   }
 ]

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
   Square, Loader2, ListChecks, Sparkles,
@@ -26,6 +27,7 @@ const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', '
 const SOURCES = ['all', 'Private', 'Shared', 'Retail'];
 
 export default function Closet() {
+  const { t } = useTranslation();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -160,11 +162,11 @@ export default function Closet() {
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
       <header className="flex items-end justify-between mb-6">
         <div>
-          <div className="caps-label text-muted-foreground">Your wardrobe</div>
+          <div className="caps-label text-muted-foreground">{t('closet.subtitle')}</div>
           <h1 className="font-display text-3xl sm:text-4xl mt-1">
-            Closet{' '}
+            {t('closet.title')}{' '}
             <span
-              className="text-muted-foreground font-body text-base align-middle ml-2"
+              className="text-muted-foreground font-body text-base align-middle ms-2"
               data-testid="closet-total"
             >
               ({total})
@@ -181,14 +183,14 @@ export default function Closet() {
                 disabled={items.length === 0}
                 data-testid="closet-select-mode-button"
               >
-                <ListChecks className="h-4 w-4 mr-2" /> Select
+                <ListChecks className="h-4 w-4 me-2" /> {t('closet.bulkSelect')}
               </Button>
               <Button
                 asChild
                 className="rounded-xl hidden md:inline-flex"
                 data-testid="closet-add-item-button"
               >
-                <Link to="/closet/add"><Plus className="h-4 w-4 mr-2" /> Add item</Link>
+                <Link to="/closet/add"><Plus className="h-4 w-4 me-2" /> {t('closet.addItem')}</Link>
               </Button>
             </>
           ) : (
@@ -198,7 +200,7 @@ export default function Closet() {
               onClick={cancelSelect}
               data-testid="closet-select-cancel-button"
             >
-              <X className="h-4 w-4 mr-2" /> Cancel
+              <X className="h-4 w-4 me-2" /> {t('common.cancel')}
             </Button>
           )}
         </div>
@@ -221,8 +223,8 @@ export default function Closet() {
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
               placeholder={
                 searchMode === 'meaning'
-                  ? 'Describe what you want — e.g. “blue flowy summer tops”'
-                  : 'Search by title, brand, tag'
+                  ? t('closet.semanticHint')
+                  : t('closet.searchPlaceholder')
               }
               className="pl-9 pr-24 rounded-xl"
               data-testid="closet-search-input"
@@ -231,7 +233,7 @@ export default function Closet() {
             <div
               className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center rounded-lg bg-secondary/70 p-0.5"
               role="radiogroup"
-              aria-label="Search mode"
+              aria-label={t('common.search')}
             >
               <button
                 type="button"
@@ -244,7 +246,7 @@ export default function Closet() {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                Keyword
+                {t('closet.keywordSearch')}
               </button>
               <button
                 type="button"
@@ -257,16 +259,16 @@ export default function Closet() {
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Sparkles className="h-3 w-3" /> Meaning
+                <Sparkles className="h-3 w-3" /> {t('closet.meaningSearch')}
               </button>
             </div>
           </div>
           <Select value={filters.category} onValueChange={(v) => setFilters((f) => ({ ...f, category: v }))}>
             <SelectTrigger className="w-[140px] rounded-xl" data-testid="closet-category-select">
-              <SelectValue placeholder="Category" />
+              <SelectValue placeholder={t('closet.category')} />
             </SelectTrigger>
             <SelectContent>
-              {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c === 'all' ? t('common.all') : c}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
@@ -274,7 +276,7 @@ export default function Closet() {
               <SelectValue placeholder="Source" />
             </SelectTrigger>
             <SelectContent>
-              {SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              {SOURCES.map((s) => <SelectItem key={s} value={s}>{s === 'all' ? t('common.all') : s}</SelectItem>)}
             </SelectContent>
           </Select>
           <Button
@@ -283,8 +285,8 @@ export default function Closet() {
             className="rounded-xl"
             data-testid="closet-search-button"
           >
-            {searchMode === 'meaning' ? <Sparkles className="h-4 w-4 mr-1.5" /> : null}
-            Search
+            {searchMode === 'meaning' ? <Sparkles className="h-4 w-4 me-1.5" /> : null}
+            {t('common.search')}
           </Button>
         </div>
       </form>
@@ -386,12 +388,12 @@ export default function Closet() {
               className="w-full h-full object-cover"
             />
           </div>
-          <h2 className="font-display text-2xl">Your closet starts here</h2>
+          <h2 className="font-display text-2xl">{t('closet.emptyTitle')}</h2>
           <p className="text-sm text-muted-foreground mt-2">
-            Add your first piece — DressApp will tag it and keep it ready for styling, sharing, or listing.
+            {t('closet.emptySub')}
           </p>
           <Button asChild className="mt-5 rounded-xl" data-testid="closet-empty-add-button">
-            <Link to="/closet/add"><Plus className="h-4 w-4 mr-2" /> Add an item</Link>
+            <Link to="/closet/add"><Plus className="h-4 w-4 me-2" /> {t('closet.addItem')}</Link>
           </Button>
         </div>
       )}
@@ -452,17 +454,14 @@ export default function Closet() {
         <AlertDialogContent data-testid="closet-delete-confirm-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {selected.size} item{selected.size === 1 ? '' : 's'}?
+              {t('closet.confirmDeleteTitle')}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove the selected piece{selected.size === 1 ? '' : 's'} from
-              your closet. Any marketplace listings attached to them will stay for buyers who
-              already have the link, but they'll no longer be discoverable from your wardrobe.
-              This action can't be undone.
+              {t('closet.confirmDeleteBody', { count: selected.size })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel data-testid="closet-delete-cancel">Keep them</AlertDialogCancel>
+            <AlertDialogCancel data-testid="closet-delete-cancel">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deleting}
@@ -470,11 +469,11 @@ export default function Closet() {
               className="bg-[hsl(var(--destructive,0_84%_60%))] text-white hover:opacity-90"
             >
               {deleting ? (
-                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                <Loader2 className="h-4 w-4 me-1.5 animate-spin" />
               ) : (
-                <Trash2 className="h-4 w-4 mr-1.5" />
+                <Trash2 className="h-4 w-4 me-1.5" />
               )}
-              Delete
+              {t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

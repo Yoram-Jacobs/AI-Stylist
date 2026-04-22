@@ -49,6 +49,42 @@ Hard rules:
 """
 
 
+# Human-readable names for each supported UI language code (matches
+# frontend/src/lib/i18n.js). Enum/token-ish JSON fields must stay in English;
+# only the user-facing string fields should honor this language.
+_LANG_NAMES = {
+    "en": "English",
+    "he": "Hebrew",
+    "ar": "Arabic",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "zh": "Chinese (Simplified)",
+    "ja": "Japanese",
+    "hi": "Hindi",
+}
+
+
+def _language_directive(code: str | None) -> str:
+    code = (code or "en").lower()
+    name = _LANG_NAMES.get(code, "English")
+    if code == "en":
+        return ""
+    return (
+        f"\n\nLANGUAGE DIRECTIVE: The user's preferred UI language is "
+        f"{name} (code: {code}). Write every human-readable string you "
+        f"return — including `reasoning_summary`, each item `description`, "
+        f"each recommendation `name` and `why`, every entry of `do_dont`, "
+        f"`shopping_suggestions`, and the final `spoken_reply` — in "
+        f"natural, idiomatic {name}. Keep JSON keys and enum-ish values "
+        f"(like `role: top|bottom|outerwear|shoes|accessory|dress`) "
+        f"in English exactly as specified above."
+    )
+
+
 class GeminiStylistService:
     def __init__(self) -> None:
         if not settings.EMERGENT_LLM_KEY:
@@ -72,7 +108,9 @@ class GeminiStylistService:
         chat = LlmChat(
             api_key=self.api_key,
             session_id=session_id,
-            system_message=SYSTEM_PROMPT,
+            system_message=SYSTEM_PROMPT + _language_directive(
+                (user_profile or {}).get("preferred_language")
+            ),
         ).with_model(self.provider, self.model)
 
         context_block = {

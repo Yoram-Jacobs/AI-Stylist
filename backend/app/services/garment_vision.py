@@ -149,6 +149,40 @@ SYSTEM_PROMPT = (
 )
 
 
+# Human-readable names for each supported UI language (matches
+# frontend/src/lib/i18n.js). Enum-ish values and JSON keys MUST stay in
+# English so downstream Pydantic validation never 422s.
+_LANG_NAMES = {
+    "en": "English",
+    "he": "Hebrew",
+    "ar": "Arabic",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "zh": "Chinese (Simplified)",
+    "ja": "Japanese",
+    "hi": "Hindi",
+}
+
+
+def _language_directive(code: str | None) -> str:
+    code = (code or "en").lower()
+    name = _LANG_NAMES.get(code, "English")
+    if code == "en":
+        return ""
+    return (
+        "\n\nLANGUAGE DIRECTIVE: Write the free-text fields (`name`, "
+        f"`title`, `caption`, `repair_advice`, `tags`) in natural, "
+        f"idiomatic {name} (code: {code}). All other JSON keys and "
+        f"all enum-ish values (category, sub_category, item_type, "
+        f"gender, dress_code, season, pattern, state, condition, "
+        f"quality) MUST stay in English exactly as specified."
+    )
+
+
 def _extract_json(raw: str) -> dict[str, Any]:
     if not raw:
         return {}
@@ -627,6 +661,7 @@ class GarmentVisionService:
         *,
         model: str | None = None,
         provider: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         """Run the 17-field analyser on a single image.
 
@@ -640,6 +675,7 @@ class GarmentVisionService:
         b64 = base64.b64encode(shrunk).decode("ascii")
         use_model = model or self.model
         use_provider = (provider or self.provider or "hf").lower()
+        system_prompt = SYSTEM_PROMPT + _language_directive(language)
 
         t0 = time.perf_counter()
         ok = False
@@ -649,7 +685,7 @@ class GarmentVisionService:
             if use_provider == "hf":
                 raw = await _hf_chat_json(
                     model=use_model,
-                    system_prompt=SYSTEM_PROMPT,
+                    system_prompt=system_prompt,
                     user_text=(
                         "Analyse this garment photograph and return the "
                         "JSON object only \u2014 no commentary."
@@ -660,7 +696,7 @@ class GarmentVisionService:
                 chat = LlmChat(
                     api_key=self.api_key,
                     session_id=f"theeyes-{uuid.uuid4().hex[:12]}",
-                    system_message=SYSTEM_PROMPT,
+                    system_message=system_prompt,
                 )
                 chat.with_model(use_provider, use_model)
                 msg = UserMessage(
@@ -704,7 +740,8 @@ class GarmentVisionService:
 
     # -------------------- multi-item outfit pipeline --------------------
     async def analyze_outfit(
-        self, image_bytes: bytes, *, max_items: int | None = None
+        self, image_bytes: bytes, *, max_items: int | None = None,
+        language: str | None = None,
     ) -> list[dict[str, Any]]:
         """End-to-end multi-item pipeline.
 
@@ -754,7 +791,7 @@ class GarmentVisionService:
                 "(detections=%d); skipping crop pipeline",
                 len(detections),
             )
-            single = await self.analyze(image_bytes)
+            single = await self.analyze(image_bytes, language=language)
             crop_b64 = base64.b64encode(image_bytes).decode("ascii")
             label = (
                 (detections[0].get("label") if detections else None)
@@ -793,7 +830,7 @@ class GarmentVisionService:
         useful = useful[:cap]
 
         if not useful:
-            single = await self.analyze(image_bytes)
+            single = await self.analyze(image_bytes, language=language)
             crop_b64 = base64.b64encode(image_bytes).decode("ascii")
             return [
                 {
@@ -822,7 +859,7 @@ class GarmentVisionService:
         crops = await asyncio.to_thread(_crop_all)
         if not crops:
             # Every crop was rejected (tiny / invalid bbox). Degrade gracefully.
-            single = await self.analyze(image_bytes)
+            single = await self.analyze(image_bytes, language=language)
             crop_b64 = base64.b64encode(image_bytes).decode("ascii")
             return [
                 {
@@ -844,7 +881,9 @@ class GarmentVisionService:
         async def _one(det: dict[str, Any], crop_bytes: bytes) -> dict[str, Any] | None:
             async with sem:
                 try:
-                    analysis = await self.analyze(crop_bytes, model=self.crop_model)
+                    analysis = await self.analyze(
+                        crop_bytes, model=self.crop_model, language=language,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "crop analyze failed for label=%s: %s",
