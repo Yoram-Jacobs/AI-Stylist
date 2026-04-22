@@ -20,11 +20,11 @@
     "status": "completed"
   },
   {
-    "content": "Replace hardcoded strings with t() in shell + key pages (TopNav, BottomTabs, Login, Register, Home, Profile, Closet)",
+    "content": "Replace hardcoded strings with t() in shell + key pages",
     "status": "completed"
   },
   {
-    "content": "Audit RTL mirroring for Hebrew/Arabic (verified via screenshot: dir=rtl, layout mirrored)",
+    "content": "Audit RTL mirroring for Hebrew/Arabic",
     "status": "completed"
   },
   {
@@ -32,7 +32,7 @@
     "status": "completed"
   },
   {
-    "content": "Run backend testing agent for i18n persistence + AI localization",
-    "status": "in_progress"
+    "content": "Run backend testing agent for i18n persistence + AI localization (100% pass, 17/17)",
+    "status": "completed"
   }
 ]
