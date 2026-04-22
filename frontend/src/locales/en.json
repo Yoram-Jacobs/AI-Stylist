@@ -189,7 +189,23 @@
     "removeTitle": "Remove from closet?",
     "removeBody": "This can't be undone.",
     "variantGenerated": "New variant generated",
-    "editUnavailable": "Image edit unavailable"
+    "editUnavailable": "Image edit unavailable",
+    "repair": {
+      "label": "Image repair",
+      "subtitle": "If the photo clips the garment, rebuild a clean, centered product shot. Add a hint (or speak it) to emphasise missing details.",
+      "cta": "Repair image",
+      "retryCta": "Repair again",
+      "hintPlaceholder": "e.g. with three-quarter sleeves and a scalloped hem",
+      "running": "Repairing…",
+      "progressHint": "Thinking about the missing parts, generating a clean product shot, then sanity-checking the category.",
+      "success": "Image repaired",
+      "rejected": "Reconstructor produced an off-category image — keeping the original.",
+      "error": "Repair failed. Please try again.",
+      "showingRepaired": "AI-repaired",
+      "showingOriginal": "Original crop",
+      "showOriginal": "Show original",
+      "showRepaired": "Show repaired"
+    }
   },
   "stylist": {
     "title": "Your stylist",

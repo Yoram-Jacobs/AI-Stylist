@@ -141,6 +141,9 @@ class ClosetItem(BaseDoc):
     original_image_url: str | None = None
     segmented_image_url: str | None = None
     segmentation_model: str | None = None
+    # Phase Q — Wardrobe Reconstructor
+    reconstructed_image_url: str | None = None
+    reconstruction_metadata: dict[str, Any] | None = None
     variants: list[dict[str, Any]] = Field(default_factory=list)
     embedding_id: str | None = None
     # Purchase history

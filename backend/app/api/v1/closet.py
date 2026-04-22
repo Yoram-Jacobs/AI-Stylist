@@ -84,6 +84,9 @@ class CreateItemIn(BaseModel):
     original_image_url: str | None = None
     image_base64: str | None = None
     image_mime: str = "image/jpeg"
+    # Phase Q — Wardrobe Reconstructor (optional; set by /analyze response)
+    reconstructed_image_b64: str | None = None
+    reconstruction_metadata: dict[str, Any] | None = None
     # Purchase history (optional)
     purchase_price_cents: int | None = None
     purchase_currency: str = "USD"
@@ -110,6 +113,10 @@ class UpdateItemIn(BaseModel):
     wear_count: int | None = None
     last_worn_at: str | None = None
     notes: str | None = None
+    reconstructed_image_url: str | None = None
+    reconstruction_metadata: dict[str, Any] | None = None
+    # Allow clearing the reconstruction (user can "revert" via Repair UI)
+    clear_reconstruction: bool = False
 
 
 @router.post("", status_code=201)
@@ -160,8 +167,16 @@ async def create_item(
         purchase_date=payload.purchase_date,
         notes=payload.notes,
         retail_metadata=payload.retail_metadata,
+        reconstruction_metadata=payload.reconstruction_metadata,
     )
     doc = item.model_dump()
+
+    # Phase Q — persist the reconstructed image (data URL) when supplied.
+    if payload.reconstructed_image_b64:
+        mime = (payload.reconstruction_metadata or {}).get("mime_type", "image/png")
+        doc["reconstructed_image_url"] = (
+            f"data:{mime};base64,{payload.reconstructed_image_b64}"
+        )
 
     # Best-effort segmentation (non-blocking for POC latency): try once, soft-fail.
     if raw_bytes and hf_segmentation_service is not None:
@@ -740,6 +755,116 @@ async def complete_outfit(
         "has_embeddings": centroid is not None,
         "weather_summary": weather_summary_text,
     }
+
+
+# ------------------------- Phase Q: Wardrobe Reconstructor -------------------------
+class RepairItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Optional free-form hint (typed or transcribed from Phase M voice)
+    # that the user supplies when the automatic reconstruction missed
+    # some detail ("it has ruffles at the hem", "the sleeves are
+    # three-quarter, not long", etc.).
+    user_hint: str | None = None
+    # Ignore the automatic category-drift validator. Useful when the
+    # user explicitly wants to retry and accept whatever comes back.
+    force: bool = False
+
+
+@router.post("/{item_id}/repair")
+async def repair_item_image(
+    item_id: str,
+    payload: RepairItemIn,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Rebuild a clean product-grade image for an existing closet item.
+
+    Uses the item's stored analysis fields (title, category, color,
+    material, pattern, brand, ...) to drive HF FLUX. An optional
+    ``user_hint`` is woven into the prompt so users who noticed a
+    missing detail (e.g., "three-quarter sleeves") can steer the
+    generation. Falls back cleanly when HF is unavailable.
+    """
+    from app.services.reconstruction import reconstruct
+
+    db = get_db()
+    item = await repos.find_one(
+        db.closet_items, {"id": item_id, "user_id": user["id"]}
+    )
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    analysis: dict[str, Any] = {
+        "title": item.get("title"),
+        "category": item.get("category"),
+        "sub_category": item.get("sub_category"),
+        "item_type": item.get("item_type"),
+        "color": item.get("color"),
+        "material": item.get("material"),
+        "pattern": item.get("pattern"),
+        "brand": item.get("brand"),
+        "dress_code": item.get("dress_code"),
+    }
+
+    # Weave the user's hint into the prompt path. The reconstruction
+    # service doesn't accept a hint directly, so we smuggle it via a
+    # synthetic "item_type" extension that _build_reconstruction_prompt
+    # pulls in verbatim.
+    if payload.user_hint:
+        hint = payload.user_hint.strip()[:240]
+        analysis["item_type"] = (
+            f"{analysis.get('item_type') or ''} — {hint}"
+        ).strip(" —")
+
+    # Use the segmented image as the visual conditioning when present so
+    # HF has SOME pixels to look at; otherwise we still fall back to the
+    # original crop or an empty byte string (text-to-image path).
+    crop_url = item.get("segmented_image_url") or item.get("original_image_url")
+    crop_bytes: bytes = b""
+    if isinstance(crop_url, str) and crop_url.startswith("data:"):
+        try:
+            _, _, b64_part = crop_url.partition(",")
+            crop_bytes = base64.b64decode(b64_part)
+        except Exception:  # noqa: BLE001
+            crop_bytes = b""
+
+    out = await reconstruct(
+        crop_bytes,
+        analysis,
+        reasons=["manual_repair"] + (["with_hint"] if payload.user_hint else []),
+        validate=not payload.force,
+    )
+    if out is None:
+        raise HTTPException(
+            502, "Reconstruction service unavailable. Please try again later."
+        )
+    if not out.get("validated"):
+        return {
+            "item": item,
+            "reconstruction": out,
+            "applied": False,
+            "detail": out.get("rejected_reason")
+            or "Reconstructor produced an off-category image; keep the existing one.",
+        }
+
+    # Persist the reconstruction on the item.
+    mime = out.get("mime_type", "image/png")
+    data_url = f"data:{mime};base64,{out['image_b64']}"
+    meta: dict[str, Any] = {
+        "reasons": out.get("reasons", []),
+        "prompt": out.get("prompt"),
+        "model": out.get("model"),
+        "mime_type": mime,
+        "user_hint": payload.user_hint,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    update_doc = {
+        "reconstructed_image_url": data_url,
+        "reconstruction_metadata": meta,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.closet_items.update_one({"id": item_id}, {"$set": update_doc})
+    item = await repos.find_one(db.closet_items, {"id": item_id}) or item
+    return {"item": item, "reconstruction": out, "applied": True}
 
 
 @router.get("/{item_id}")

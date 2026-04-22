@@ -113,6 +113,15 @@ export const api = {
       })
       .then((r) => r.data),
 
+  // wardrobe reconstructor (Phase Q)
+  repairItemImage: (itemId, { userHint = null, force = false } = {}) =>
+    client
+      .post(`/closet/${itemId}/repair`, {
+        user_hint: userHint || null,
+        force,
+      })
+      .then((r) => r.data),
+
   // google calendar
   calendarStatus: () => client.get('/calendar/status').then((r) => r.data),
   calendarUpcoming: (hours = 48) =>

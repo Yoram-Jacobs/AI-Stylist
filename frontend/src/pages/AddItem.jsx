@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, Upload, Plus, Loader2, Eye, Wand2, Shirt, Store,
   HandCoins, Gift, Repeat, Trash2, Save, Tag, AlertTriangle,
-  X, Sparkles, Camera,
+  X, Sparkles, Camera, RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -167,12 +167,31 @@ export default function AddItem() {
       // crop image so saving persists only the relevant garment.
       const newCards = items.map((it, idx) => {
         const mime = it.crop_mime || 'image/jpeg';
+        const rec = it.reconstruction;
+        const recValidated = !!(rec && rec.validated && rec.image_b64);
+        const previewUrl = recValidated
+          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+          : `data:${mime};base64,${it.crop_base64}`;
         return {
           id: `${card.id}-${idx}`,
           file: null,
           mime,
-          previewUrl: `data:${mime};base64,${it.crop_base64}`,
+          previewUrl,
           base64: it.crop_base64,
+          originalCropUrl: `data:${mime};base64,${it.crop_base64}`,
+          reconstructedUrl: recValidated
+            ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+            : null,
+          reconstructedB64: recValidated ? rec.image_b64 : null,
+          reconstructionMeta: recValidated
+            ? {
+                reasons: rec.reasons || [],
+                prompt: rec.prompt,
+                model: rec.model,
+                mime_type: rec.mime_type,
+              }
+            : null,
+          useReconstructed: recValidated,
           status: 'ready',
           progress: 100,
           fields: hydrate(it.analysis || {}),
@@ -219,6 +238,13 @@ export default function AddItem() {
   const updateField = (cardId, patch) => {
     setCards((prev) =>
       prev.map((c) => (c.id === cardId ? { ...c, fields: { ...c.fields, ...patch } } : c))
+    );
+  };
+
+  // Phase Q: patch top-level card props (e.g., `useReconstructed` toggle).
+  const patchCard = (cardId, patch) => {
+    setCards((prev) =>
+      prev.map((c) => (c.id === cardId ? { ...c, ...patch } : c))
     );
   };
 
@@ -366,6 +392,7 @@ export default function AddItem() {
                 onRetry={() => retryCard(card)}
                 onRemove={() => removeCard(card.id)}
                 onChange={(patch) => updateField(card.id, patch)}
+                onCardPatch={(patch) => patchCard(card.id, patch)}
               />
             ))}
           </div>
@@ -376,10 +403,12 @@ export default function AddItem() {
 }
 
 /* -------------------- item card -------------------- */
-function ItemCard({ card, onRetry, onRemove, onChange }) {
+function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
   const { fields, status, progress, previewUrl, error } = card;
   const isBusy = status === 'scanning';
   const saved = status === 'saved';
+  const hasReconstruction = !!(card.reconstructedUrl && card.reconstructionMeta);
+  const showingReconstructed = hasReconstruction && card.useReconstructed;
 
   return (
     <Card
@@ -400,6 +429,35 @@ function ItemCard({ card, onRetry, onRemove, onChange }) {
                 className="w-full h-full object-cover"
               />
             </div>
+            {hasReconstruction && !isBusy && (
+              <div
+                className="absolute top-2 start-2 inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2 py-1 text-[10px] font-semibold"
+                data-testid="add-item-repaired-badge"
+              >
+                <Wand2 className="h-3 w-3 text-[hsl(var(--accent))]" />
+                {showingReconstructed ? 'AI-repaired' : 'Original crop'}
+              </div>
+            )}
+            {hasReconstruction && !isBusy && (
+              <button
+                type="button"
+                onClick={() => onCardPatch?.({
+                  useReconstructed: !showingReconstructed,
+                  previewUrl: showingReconstructed
+                    ? card.originalCropUrl
+                    : card.reconstructedUrl,
+                })}
+                className="absolute top-2 end-2 inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur border border-border px-2 py-1 text-[10px] font-medium hover:bg-secondary transition-colors"
+                data-testid="add-item-toggle-reconstruction"
+                aria-label={showingReconstructed ? 'Show original crop' : 'Show AI-repaired image'}
+              >
+                {showingReconstructed ? (
+                  <><RefreshCw className="h-3 w-3" /> Original</>
+                ) : (
+                  <><Wand2 className="h-3 w-3" /> AI</>
+                )}
+              </button>
+            )}
             {isBusy && (
               <div
                 className="absolute bottom-0 left-0 right-0 bg-background/80 backdrop-blur-sm px-3 py-2"
@@ -849,6 +907,13 @@ function buildCreatePayload(card) {
     tags: f.tags || [],
     image_base64: asBase64,
     image_mime: card.mime || card.file?.type || 'image/jpeg',
+    // Phase Q: forward the reconstructed image when the user kept it
+    reconstructed_image_b64: card.useReconstructed && card.reconstructedB64
+      ? card.reconstructedB64
+      : undefined,
+    reconstruction_metadata: card.useReconstructed && card.reconstructionMeta
+      ? card.reconstructionMeta
+      : undefined,
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

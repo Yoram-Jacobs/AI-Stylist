@@ -891,6 +891,24 @@ class GarmentVisionService:
                         repr(exc)[:160],
                     )
                     return None
+                # -------- Phase Q: optional auto-reconstruction --------
+                reconstruction_payload: dict[str, Any] | None = None
+                try:
+                    from app.services.reconstruction import (
+                        reconstruct,
+                        should_reconstruct,
+                    )
+                    needs, reasons = should_reconstruct(analysis, det.get("bbox"))
+                    if needs:
+                        reconstruction_payload = await reconstruct(
+                            crop_bytes, analysis, reasons=reasons,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "reconstruction pipeline failed for label=%s: %s",
+                        det.get("label"),
+                        repr(exc)[:160],
+                    )
                 return {
                     "label": det.get("label") or "garment",
                     "kind": det.get("kind") or "garment",
@@ -898,6 +916,7 @@ class GarmentVisionService:
                     "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
                     "crop_mime": "image/jpeg",
                     "analysis": analysis,
+                    "reconstruction": reconstruction_payload,
                 }
 
         results = await asyncio.gather(*[_one(d, b) for d, b in crops])

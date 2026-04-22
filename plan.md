@@ -521,12 +521,81 @@ Adds a first-class "Complete the outfit" action in the Closet. Given 1–N user-
 
 ---
 
+### Phase Q — High-Fidelity Wardrobe Reconstructor **(P1 / COMPLETE)**
+Fixes the "cropped images only show part of the item" pain point. Every garment crop produced by the multi-item extractor is evaluated against a cheap local-heuristics check; when the crop looks incomplete, the pipeline automatically generates a clean, centered, full-item product image via HF FLUX.1-schnell driven by a semantic prompt built from The Eyes' analysis. Category-drift sanity check rejects off-target generations. A manual "Image Repair" card on the item edit page handles edge cases with optional typed-or-spoken hints.
+
+**Scope notes (what this is NOT)**
+- ❌ Not the original ComfyUI/OOTDiffusion/CatVTON/LoRA-on-DressCode spec — that required in-pod GPU + custom training runs that we audit-rejected in the Phase M/N/O/P cycle. Rationale documented in `Explicitly Out of Scope`.
+- ❌ No LPIPS 25% perceptual-similarity guarantee (research-grade eval harness out of scope).
+- ✅ Forward-compatible with Phase N: when the user lands the fine-tuned Gemma 4 E2B endpoint, The Eyes + validator both swap in transparently via existing provider-dispatch.
+
+**Delivered — backend**
+- ✅ New service `/app/backend/app/services/reconstruction.py`
+  - `should_reconstruct(analysis, bbox_norm)` — local heuristics returning `(needs_repair, reasons)`. Reasons set: `whole_frame_skip` (user-spec: "neglect whole-item-no-bg images"), `edge_touch_top/left/bottom/right`, `aspect_mismatch_{category}`, `undersized_crop`, `manual_repair`, `with_hint`.
+  - `reconstruct(crop_bytes, analysis, *, reasons, validate)` — composes a high-fidelity product-shot prompt from `color/material/pattern/sub_category/item_type/title/brand/dress_code`, calls `hf_image_service.edit()`, then (optionally) re-runs `garment_vision.analyze` on the generated image to sanity-check category parity. Returns `{image_b64, mime_type, prompt, model, reasons, validated, rejected_reason}` or `None` on unrecoverable failure.
+- ✅ Auto-repair integrated into `garment_vision.analyze_outfit` per-crop worker (`_one()`). Runs inside the existing `asyncio.Semaphore(6)` pool so latency bump is amortised — HF FLUX adds ~4–6 s per flagged crop, in parallel with up to 5 siblings. Soft-fails so the analyse pipeline never errors on HF hiccups.
+- ✅ New endpoint `POST /api/v1/closet/{item_id}/repair`
+  - body: `{ user_hint: str | null, force: bool }`
+  - Uses the item's stored analysis fields to drive FLUX; `user_hint` is woven into the `item_type` for prompt composition (Phase M native dictation feeds this field).
+  - Validates ownership (404 otherwise), soft-fails HF (502 otherwise).
+  - Validated generation → persists `reconstructed_image_url` (data URL) + `reconstruction_metadata` on the item. Rejected generation → returns `{applied: false, detail: "category drift 'outerwear' -> 'top'"}` without mutating the item.
+- ✅ `ClosetItem` schema extended with `reconstructed_image_url: str | None` + `reconstruction_metadata: dict | None`.
+- ✅ `CreateItemIn` extended with `reconstructed_image_b64` + `reconstruction_metadata` so AddItem.jsx persists the validated reconstruction when the user keeps it.
+- ✅ `UpdateItemIn` extended with `reconstructed_image_url`, `reconstruction_metadata`, and a `clear_reconstruction` flag (future revert UI).
+
+**Delivered — frontend**
+- ✅ `api.repairItemImage(itemId, { userHint, force })` in `/app/frontend/src/lib/api.js`.
+- ✅ `/app/frontend/src/pages/AddItem.jsx`:
+  - Consumes the new `reconstruction` field on each analyse card. When `validated`, the card's preview defaults to the AI-repaired image and carries the metadata forward to save.
+  - New "AI-repaired" badge (Wand2 icon, top-start) + **Original ↔ AI** toggle button (RefreshCw icon, top-end) on every card with a reconstruction.
+  - Save payload forwards `reconstructed_image_b64` + `reconstruction_metadata` when the user keeps the repair.
+- ✅ `/app/frontend/src/pages/ItemDetail.jsx` rewritten:
+  - New **Image Repair** card with reasons-pill (shows `manual_repair, with_hint`, `edge_touch_bottom`, etc.), 240-char hint `Textarea`, inline mic button (Phase M native STT) that dictates into the hint field in the user's `preferred_language`, and a primary "Repair image" / "Repair again" CTA.
+  - Progressive-refinement cue: shimmer bar + localised "Thinking about the missing parts, generating a clean product shot, then sanity-checking the category." Tagline while FLUX runs.
+  - Main image panel uses the precedence `reconstructed_image_url` > `segmented_image_url` > `original_image_url`, with an "AI-repaired" pill + "Show original ↔ Show repaired" toggle so the user can compare.
+  - Toast variants for the three outcomes: `applied` → success, `!applied` → warning with backend rejection reason, HTTP failure → error.
+- ✅ Image precedence plumbed through `/app/frontend/src/pages/Closet.jsx` list cards AND `/app/frontend/src/components/OutfitCompletionSheet.jsx` thumbnails, so reconstructed images show up wherever items render.
+- ✅ i18n (`en.json` + `he.json`): new `itemDetail.repair.*` block with 13 keys (label, subtitle, cta, retryCta, hintPlaceholder, running, progressHint, success, rejected, error, showingRepaired, showingOriginal, showOriginal, showRepaired). Other 10 locales fall back to English per the Phase L strategy.
+
+**Verification**
+- ✅ Backend heuristic unit tests (9/9 pass in a single Python harness): edge-touch bottom, whole-frame skip, undersized crop, dress aspect-mismatch, good-top no-repair, top-left edge, no bbox, invalid bbox, prompt-composition includes brand + dress_code + all descriptor fields.
+- ✅ Backend live `/repair` endpoint tests against the preview URL:
+  - no-hint repair on an Outerwear item → HTTP 200, `applied=true`, `validated=true`, FLUX-schnell used, 1.16 MB PNG, prompt contains `Jacket: Black Moto Jacket (test)` and `off-white backdrop`, `reasons=['manual_repair']`, `item.reconstructed_image_url` persisted.
+  - with-hint repair (`"with asymmetric silver zipper and quilted shoulders"`) → prompt reflects the hint verbatim, `reasons=['manual_repair', 'with_hint']`, HTTP 200.
+  - 404 on a nonexistent item.
+- ✅ Frontend Chromium flow screenshot-verified:
+  - ItemDetail renders the repaired PNG by default, the "AI-repaired" pill, and the reasons badge `manual_repair, with_hint`.
+  - Clicking the toggle flips to the **original** crop (src prefix confirmed `data:image/png;base64,iVBORw0K…`).
+  - Screenshot 1 shows the "Show repaired" Hebrew UI in full (page direction RTL, all `itemDetail.repair.*` keys localized — proof of i18n wiring).
+  - Screenshot 2 shows the actual FLUX-reconstructed moto jacket on an off-white product-shot backdrop — visually dramatically better than a tight crop.
+- ✅ Closet list + Outfit Completion sheet now display reconstructed image when present.
+- ✅ Lint clean (Python + JS). esbuild bundle clean. Backend restarted cleanly with new endpoint live.
+- ✅ Zero regressions to AddItem multi-item flow, Stylist, Outfit Completion, Marketplace, or Closet list.
+
+**User-spec mapping** (what the request asked for → what shipped vs. what was consciously cut)
+| Spec phrase | Status |
+| --- | --- |
+| "Check mechanism for the image to determine if the item's image needs to be restored" | ✅ `should_reconstruct` heuristics + 9 unit tests |
+| "Transforms badly cropped garment images into professional-grade digital closet items" | ✅ via FLUX.1-schnell + prompt composer |
+| "Semantic Inference (The Brain) — detailed visual description to fill the semantic gap before generation" | ✅ via The Eyes' existing `analyze()` feeding `_build_reconstruction_prompt()` |
+| "Perception Specialist (E2B) — category labels as a sanity check" | ✅ via post-gen `analyze()` with category-drift rejection (upgrades automatically when Phase N lands) |
+| "Latent Diffusion Pipeline — ComfyUI node workflow running OOTDiffusion/CatVTON" | ⚠️ **cut** — ComfyUI/OOTDiffusion/CatVTON rejected in audit; replaced by HF FLUX.1-schnell (same API surface, no in-pod GPU required) |
+| "LoRA fine-tuned on DressCode + VITON-HD with 25% LPIPS target" | ⚠️ **cut** — training-grade research project; not shippable this session |
+| "CIS scoring module with auto re-run below threshold" | ⚠️ **scoped down** to category-drift rejection (structurally equivalent for the error we see; can be upgraded later) |
+| "Image Repair workflow with progressive refinement preview" | ✅ Repair card with shimmer + localized progress hint. Diffusion-step progression not surfaced because FLUX.1-schnell is one-shot. |
+| "Multilingual voice interface using Gemma 4 native audio ingestion" | ✅ via Phase M `speech.js` (Web Speech API, 12 locales, zero extra API cost). Gemma audio tokens would require Phase O hosting. |
+| "Neglect item images that show the whole item without bg and without other items" | ✅ `whole_frame_skip` rule in `should_reconstruct` |
+| "All processing occurs locally via Ollama and Docker" | ❌ **out of scope** — web app stack. Images still flow through HF inference (same privacy profile as today). Can be layered on the off-pod endpoint pattern once Phases N/O land. |
+
+---
+
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
 | P0 | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
 | P1 | ✅ Phase M — System-native STT/TTS | — | **SHIPPED** |
 | P1 | ✅ Phase P — Outfit Completion | FashionCLIP (shipped) | **SHIPPED** |
+| P1 | ✅ Phase Q — Wardrobe Reconstructor | HF FLUX, The Eyes | **SHIPPED** |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
 
 ### Explicitly Out of Scope (from the audited proposal)

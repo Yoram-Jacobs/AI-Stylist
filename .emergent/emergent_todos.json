@@ -1,34 +1,46 @@
 [
   {
-    "content": "Backend: add weighted centroid (by anchor order) to complete-outfit endpoint",
+    "content": "Explore: multi-item pipeline, HF FLUX edit interface, item edit page, ClosetItem schema",
     "status": "completed"
   },
   {
-    "content": "Backend: add weather hook — fetch home_location weather and inject into stylist prompt",
+    "content": "Create /app/backend/app/services/reconstruction.py (needs_reconstruction + reconstruct + validate)",
     "status": "completed"
   },
   {
-    "content": "Frontend: add anchor reorder UI (up/down arrows) in OutfitCompletionSheet",
+    "content": "Add reconstructed_image_url + reconstruction_metadata to ClosetItem schema",
     "status": "completed"
   },
   {
-    "content": "i18n: translate outfitCompletion.* keys into ar, es, fr, de, it, pt, ru, zh, ja, hi",
+    "content": "Auto-repair in POST /closet/analyze for flagged crops (parallel via asyncio.gather)",
     "status": "completed"
   },
   {
-    "content": "Lint + esbuild compile check",
+    "content": "Add POST /closet/{id}/repair endpoint for manual edit-page trigger",
     "status": "completed"
   },
   {
-    "content": "Backend smoke test: weighting + weather",
+    "content": "Frontend: AddItem.jsx shows AI-repaired badge and uses reconstructed crop",
     "status": "completed"
   },
   {
-    "content": "Frontend screenshot verification of reorder + localized sheet",
+    "content": "Frontend: add Repair button + hint input to ItemDetail.jsx with voice input",
     "status": "completed"
   },
   {
-    "content": "Update plan.md with polish additions",
+    "content": "Add i18n keys for repair UI + badges",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + compile check",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend screenshot: AddItem repair badge + edit-page Repair button",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md with Phase Q",
     "status": "completed"
   }
 ]

@@ -39,7 +39,11 @@ import { isTTSSupported, speak, cancelSpeak } from '@/lib/speech';
  * extends the search to active marketplace listings.
  */
 function ItemThumb({ item, showScore = false, scoreLabel = null, linkTo = null }) {
-  const src = item?.original_image_url || item?.segmented_image_url || null;
+  const src =
+    item?.reconstructed_image_url ||
+    item?.original_image_url ||
+    item?.segmented_image_url ||
+    null;
   const title = item?.title || item?.name || item?.category || 'Item';
   const cat = item?.category;
   const inner = (

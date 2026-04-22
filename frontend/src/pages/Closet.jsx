@@ -521,9 +521,9 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
       }`}
     >
       <AspectRatio ratio={3 / 4} className="bg-secondary relative">
-        {(item.segmented_image_url || item.original_image_url) ? (
+        {(item.reconstructed_image_url || item.segmented_image_url || item.original_image_url) ? (
           <img
-            src={item.segmented_image_url || item.original_image_url}
+            src={item.reconstructed_image_url || item.segmented_image_url || item.original_image_url}
             alt={item.title}
             className="w-full h-full object-cover"
           />
