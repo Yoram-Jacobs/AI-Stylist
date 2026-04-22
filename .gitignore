@@ -92,3 +92,12 @@ models/pog_phase6/pog_phase6_model/adapter_model.safetensors
 models/pog_phase6/pog_phase6_model/adapter_model.safetensors
 frontend/node_modules/.cache/default-development/8.pack
 frontend/node_modules/.cache/default-development/8.pack
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
