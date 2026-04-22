@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Mic, Image as ImgIcon, Send, CloudSun, Calendar as CalIcon, Square, Sparkles, X } from 'lucide-react';
+import {
+  Mic,
+  Image as ImgIcon,
+  Send,
+  CloudSun,
+  Calendar as CalIcon,
+  Square,
+  Sparkles,
+  X,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,6 +23,14 @@ import { WaveformAudioPlayer } from '@/components/WaveformAudioPlayer';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
+import {
+  isSTTSupported,
+  isTTSSupported,
+  createRecognition,
+  speak,
+  cancelSpeak,
+  ensureVoicesLoaded,
+} from '@/lib/speech';
 
 const base64ToUrl = (b64, mime = 'audio/mpeg') => {
   if (!b64) return null;
@@ -33,9 +52,21 @@ export default function Stylist() {
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [interim, setInterim] = useState('');
+  const [speakingId, setSpeakingId] = useState(null);
+
+  // Browser capabilities (memoized once per mount)
+  const sttSupportedRef = useRef(isSTTSupported());
+  const ttsSupportedRef = useRef(isTTSSupported());
+
+  // Server-side STT fallback
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  // Native STT handle
+  const recognitionRef = useRef(null);
   const threadRef = useRef(null);
+
+  const userLang = user?.preferred_language || 'en';
 
   useEffect(() => {
     (async () => {
@@ -51,13 +82,56 @@ export default function Stylist() {
         setCalendarConnected(!!s?.connected);
       } catch { /* silent */ }
     })();
+    // Prime native voices so the first TTS call doesn't stutter.
+    if (ttsSupportedRef.current) {
+      ensureVoicesLoaded().catch(() => { /* ignore */ });
+    }
+    // Cancel any in-flight speech when the page unmounts.
+    return () => {
+      cancelSpeak();
+      try { recognitionRef.current?.abort?.(); } catch { /* ignore */ }
+    };
   }, []);
 
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [messages, busy]);
 
-  const startRecording = async () => {
+  /* ---------- Native STT path (preferred) ---------- */
+  const startNativeRecognition = () => {
+    const rec = createRecognition({
+      lang: userLang,
+      onInterim: (partial) => setInterim(partial || ''),
+      onFinal: (finalText) => {
+        // Auto-send as a text-only turn (matches the previous voice-upload UX).
+        if (finalText) {
+          sendTurn({ overrideText: finalText });
+        }
+      },
+      onError: (err) => {
+        const code = err?.error || '';
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
+          toast.error(t('stylist.micDenied'));
+        }
+      },
+      onEnd: () => {
+        setInterim('');
+        setRecording(false);
+        recognitionRef.current = null;
+      },
+    });
+    if (!rec) {
+      // Shouldn't happen because we guarded with isSTTSupported()
+      return false;
+    }
+    recognitionRef.current = rec;
+    rec.start();
+    setRecording(true);
+    return true;
+  };
+
+  /* ---------- Server STT fallback (MediaRecorder + Groq Whisper) ---------- */
+  const startServerRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -65,7 +139,7 @@ export default function Stylist() {
       mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach((t) => t.stop());
+        stream.getTracks().forEach((tr) => tr.stop());
         await sendTurn({ voiceBlob: blob });
       };
       mr.start();
@@ -76,19 +150,50 @@ export default function Stylist() {
     }
   };
 
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
+  const startRecording = () => {
+    if (sttSupportedRef.current) {
+      startNativeRecognition();
+    } else {
+      startServerRecording();
+    }
   };
 
-  const sendTurn = async ({ voiceBlob = null } = {}) => {
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    } else {
+      mediaRecorderRef.current?.stop();
+      setRecording(false);
+    }
+  };
+
+  /* ---------- Local TTS helper ---------- */
+  const playLocalSpeech = (messageId, textToSpeak) => {
+    if (!ttsSupportedRef.current || !textToSpeak) return;
+    setSpeakingId(messageId);
+    speak(textToSpeak, userLang, {
+      onEnd: () => setSpeakingId((cur) => (cur === messageId ? null : cur)),
+      onError: () => setSpeakingId((cur) => (cur === messageId ? null : cur)),
+    });
+  };
+
+  const stopLocalSpeech = () => {
+    cancelSpeak();
+    setSpeakingId(null);
+  };
+
+  /* ---------- Compose + send turn ---------- */
+  const sendTurn = async ({ voiceBlob = null, overrideText = null } = {}) => {
     if (busy) return;
+    const outgoingText = (overrideText ?? text).trim();
     const body = new FormData();
-    if (text.trim()) body.append('text', text.trim());
+    if (outgoingText) body.append('text', outgoingText);
     if (voiceBlob) body.append('voice_audio', voiceBlob, 'voice.webm');
     if (imageFile) body.append('image', imageFile);
-    body.append('language', user?.preferred_language || 'en');
+    body.append('language', userLang);
     body.append('voice_id', user?.preferred_voice_id || 'aura-2-thalia-en');
+    // Phase M: client will synthesize TTS locally when supported.
+    if (ttsSupportedRef.current) body.append('skip_tts', 'true');
     if (includeCalendar) {
       body.append('include_calendar', 'true');
       if (occasion) body.append('occasion', occasion);
@@ -97,7 +202,7 @@ export default function Stylist() {
     const optimistic = {
       id: `tmp-${Date.now()}`,
       role: 'user',
-      transcript: voiceBlob ? t('stylist.voiceNote') : text,
+      transcript: voiceBlob ? t('stylist.voiceNote') : outgoingText,
       imagePreview: imageFile ? URL.createObjectURL(imageFile) : null,
     };
     setMessages((m) => [...m, optimistic]);
@@ -106,12 +211,26 @@ export default function Stylist() {
     try {
       const res = await api.stylist(body);
       const advice = res.advice;
+      // Prefer server-generated audio when present (Firefox fallback);
+      // otherwise rely on native speechSynthesis.
       const audioUrl = base64ToUrl(advice.tts_audio_base64);
+      const newId = `a-${Date.now()}`;
       setMessages((m) => [
         ...m,
-        { id: `a-${Date.now()}`, role: 'assistant',
-          transcript: advice.reasoning_summary, payload: advice, audioUrl },
+        {
+          id: newId,
+          role: 'assistant',
+          transcript: advice.reasoning_summary,
+          payload: advice,
+          audioUrl,
+          spokenText: advice.spoken_reply || advice.reasoning_summary || '',
+        },
       ]);
+      // Auto-speak with native TTS when supported and no server audio was returned.
+      if (ttsSupportedRef.current && !audioUrl) {
+        const spoken = advice.spoken_reply || advice.reasoning_summary || '';
+        if (spoken) playLocalSpeech(newId, spoken);
+      }
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('stylist.errorAdvice'));
     } finally { setBusy(false); }
@@ -125,7 +244,18 @@ export default function Stylist() {
           <h1 className="font-display text-2xl md:text-3xl">{t('stylist.hero')}</h1>
         </div>
         <div className="hidden md:flex items-center gap-2">
-          <Badge variant="outline" className="caps-label rounded-full bg-card"><CloudSun className="h-3 w-3 me-1" /> {t('stylist.weatherAware')}</Badge>
+          <Badge variant="outline" className="caps-label rounded-full bg-card">
+            <CloudSun className="h-3 w-3 me-1" /> {t('stylist.weatherAware')}
+          </Badge>
+          {(sttSupportedRef.current || ttsSupportedRef.current) && (
+            <Badge
+              variant="outline"
+              className="caps-label rounded-full bg-card"
+              data-testid="stylist-native-speech-badge"
+            >
+              <Mic className="h-3 w-3 me-1" /> {t('stylist.nativeSpeech')}
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -173,7 +303,35 @@ export default function Stylist() {
                         {m.payload.weather_summary && (
                           <div className="caps-label text-muted-foreground">{t('stylist.contextLabel')}: {m.payload.weather_summary}{m.payload.calendar_summary ? ` · ${m.payload.calendar_summary}` : ''}</div>
                         )}
-                        {m.audioUrl && <WaveformAudioPlayer src={m.audioUrl} />}
+                        {m.audioUrl ? (
+                          <WaveformAudioPlayer src={m.audioUrl} />
+                        ) : ttsSupportedRef.current && m.spokenText ? (
+                          <div className="flex items-center gap-2">
+                            {speakingId === m.id ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={stopLocalSpeech}
+                                className="h-8 rounded-full"
+                                data-testid={`stylist-stop-speak-${m.id}`}
+                              >
+                                <VolumeX className="h-3.5 w-3.5 me-1" />
+                                {t('stylist.stopSpeaking')}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => playLocalSpeech(m.id, m.spokenText)}
+                                className="h-8 rounded-full"
+                                data-testid={`stylist-play-speak-${m.id}`}
+                              >
+                                <Volume2 className="h-3.5 w-3.5 me-1" />
+                                {t('stylist.playReply')}
+                              </Button>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -190,6 +348,14 @@ export default function Stylist() {
                     <div className="h-3 rounded shimmer w-5/6" />
                   </div>
                   <p className="text-xs text-muted-foreground mt-3">{t('stylist.thinkingSub')}</p>
+                </div>
+              </div>
+            )}
+            {recording && interim && (
+              <div className="flex justify-end" data-testid="stylist-interim-transcript">
+                <div className="max-w-[85%] rounded-2xl border border-dashed border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/5 px-4 py-3">
+                  <div className="caps-label text-[hsl(var(--accent))] mb-1">{t('stylist.listening')}</div>
+                  <p className="text-sm whitespace-pre-wrap italic">{interim}</p>
                 </div>
               </div>
             )}
@@ -239,11 +405,25 @@ export default function Stylist() {
               </span>
             </label>
             {recording ? (
-              <Button size="icon" variant="destructive" onClick={stopRecording} className="h-11 w-11 rounded-xl" data-testid="stylist-composer-mic-button">
+              <Button
+                size="icon"
+                variant="destructive"
+                onClick={stopRecording}
+                className="h-11 w-11 rounded-xl"
+                aria-label={t('stylist.tapToStop')}
+                data-testid="stylist-composer-mic-button"
+              >
                 <Square className="h-5 w-5" />
               </Button>
             ) : (
-              <Button size="icon" variant="secondary" onClick={startRecording} className="h-11 w-11 rounded-xl" data-testid="stylist-composer-mic-button" aria-label={t('stylist.recordVoice')}>
+              <Button
+                size="icon"
+                variant="secondary"
+                onClick={startRecording}
+                className="h-11 w-11 rounded-xl"
+                data-testid="stylist-composer-mic-button"
+                aria-label={t('stylist.recordVoice')}
+              >
                 <Mic className="h-5 w-5" />
               </Button>
             )}

@@ -1,34 +1,46 @@
 [
   {
-    "content": "Translate Transactions page",
+    "content": "Explore existing Stylist.jsx STT/TTS flow + backend speech endpoints",
     "status": "completed"
   },
   {
-    "content": "Translate Marketplace + ListingDetail + CreateListing",
+    "content": "Create /app/frontend/src/lib/speech.js (Web Speech API wrapper with feature detection)",
     "status": "completed"
   },
   {
-    "content": "Translate Stylist chat page",
+    "content": "Add skip_tts flag to backend stylist route",
     "status": "completed"
   },
   {
-    "content": "Translate AddItem form (header + dropzone + buttons + key toasts)",
+    "content": "Refactor Stylist.jsx to use local STT with graceful Groq fallback",
     "status": "completed"
   },
   {
-    "content": "Translate ItemDetail page",
+    "content": "Refactor Stylist.jsx to use local TTS with graceful Deepgram fallback (locale-aware voice)",
     "status": "completed"
   },
   {
-    "content": "Translate Admin dashboard header + tabs",
+    "content": "Add i18n keys for speech UI states (mic on/off, unsupported, etc.)",
     "status": "completed"
   },
   {
-    "content": "Extend en.json + he.json with 80+ new keys (AR & 9 other langs use EN fallback for new keys)",
+    "content": "Lint frontend + esbuild compile check",
     "status": "completed"
   },
   {
-    "content": "Verify compile + screenshot pass (Hebrew RTL across all pages)",
+    "content": "Backend smoke test: stylist skip_tts path returns no audio",
     "status": "completed"
+  },
+  {
+    "content": "Frontend screenshot verification on /stylist",
+    "status": "completed"
+  },
+  {
+    "content": "Call testing_agent for full Phase M backend validation",
+    "status": "in_progress"
+  },
+  {
+    "content": "Update plan.md Phase M status to COMPLETED",
+    "status": "pending"
   }
 ]

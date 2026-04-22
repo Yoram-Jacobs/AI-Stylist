@@ -221,7 +221,13 @@
     "outfitN": "Outfit {{n}}",
     "doDont": "Do / don't",
     "voiceNote": "[voice note]",
-    "contextLabel": "Context"
+    "contextLabel": "Context",
+    "listening": "Listening…",
+    "tapToStop": "Tap to stop",
+    "speechUnsupported": "Speech not supported on this browser",
+    "nativeSpeech": "Native speech",
+    "stopSpeaking": "Stop speaking",
+    "playReply": "Play reply"
   },
   "market": {
     "title": "Marketplace",

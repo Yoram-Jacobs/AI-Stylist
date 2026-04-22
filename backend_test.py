@@ -1939,6 +1939,382 @@ class DressAppAPITester:
         else:
             self.log_test("Provider Activity Tracking", False, f"Analyze call failed: {status}")
 
+    # ==================== PHASE M: SYSTEM-NATIVE SPEECH TESTS ====================
+    
+    def test_stylist_skip_tts_true(self):
+        """Test POST /stylist with skip_tts=true returns no audio but has spoken_reply"""
+        if not self.dev_token:
+            self.log_test("Stylist Skip TTS True", False, "No dev token available")
+            return
+            
+        data = {
+            'text': 'What should I wear today for work?',
+            'skip_tts': 'true'
+        }
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with skip_tts=true (this may take 15-25 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            tts_audio_base64 = advice.get('tts_audio_base64')
+            spoken_reply = advice.get('spoken_reply', '')
+            reasoning_summary = advice.get('reasoning_summary', '')
+            
+            # Key requirements: no audio, but has spoken content
+            no_audio = tts_audio_base64 is None or tts_audio_base64 == ""
+            has_spoken_reply = len(spoken_reply.strip()) > 0
+            has_reasoning = len(reasoning_summary.strip()) > 0
+            
+            all_valid = no_audio and has_spoken_reply and has_reasoning
+            self.log_test("Stylist Skip TTS True", all_valid, 
+                         f"No audio: {no_audio}, Spoken reply: {len(spoken_reply)} chars, Reasoning: {len(reasoning_summary)} chars")
+        else:
+            self.log_test("Stylist Skip TTS True", False, f"Status: {status}, Data: {response_data}")
+    
+    def test_stylist_skip_tts_default(self):
+        """Test POST /stylist without skip_tts (default false) returns audio"""
+        if not self.dev_token:
+            self.log_test("Stylist Skip TTS Default", False, "No dev token available")
+            return
+            
+        data = {'text': 'What should I wear today for work?'}
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with default skip_tts (this may take 15-25 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            tts_audio_base64 = advice.get('tts_audio_base64', '')
+            spoken_reply = advice.get('spoken_reply', '')
+            
+            # Key requirements: has audio and spoken content
+            has_audio = len(tts_audio_base64.strip()) > 0
+            has_spoken_reply = len(spoken_reply.strip()) > 0
+            
+            all_valid = has_audio and has_spoken_reply
+            self.log_test("Stylist Skip TTS Default", all_valid, 
+                         f"Has audio: {has_audio} ({len(tts_audio_base64)} chars), Spoken reply: {len(spoken_reply)} chars")
+        else:
+            self.log_test("Stylist Skip TTS Default", False, f"Status: {status}, Data: {response_data}")
+    
+    def test_stylist_skip_tts_false_explicit(self):
+        """Test POST /stylist with skip_tts=false explicitly set includes audio"""
+        if not self.dev_token:
+            self.log_test("Stylist Skip TTS False Explicit", False, "No dev token available")
+            return
+            
+        data = {
+            'text': 'What should I wear today for work?',
+            'skip_tts': 'false'
+        }
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with skip_tts=false explicit (this may take 15-25 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            tts_audio_base64 = advice.get('tts_audio_base64', '')
+            spoken_reply = advice.get('spoken_reply', '')
+            
+            # Key requirements: has audio and spoken content (parity with default)
+            has_audio = len(tts_audio_base64.strip()) > 0
+            has_spoken_reply = len(spoken_reply.strip()) > 0
+            
+            all_valid = has_audio and has_spoken_reply
+            self.log_test("Stylist Skip TTS False Explicit", all_valid, 
+                         f"Has audio: {has_audio} ({len(tts_audio_base64)} chars), Spoken reply: {len(spoken_reply)} chars")
+        else:
+            self.log_test("Stylist Skip TTS False Explicit", False, f"Status: {status}, Data: {response_data}")
+    
+    def test_stylist_voice_audio_with_skip_tts(self):
+        """Test POST /stylist with voice_audio AND skip_tts=true still transcribes"""
+        if not self.dev_token:
+            self.log_test("Stylist Voice Audio Skip TTS", False, "No dev token available")
+            return
+            
+        # Create a minimal WebM audio file (just headers, won't actually work for transcription but tests the flow)
+        # This is a minimal WebM container with Opus audio track
+        webm_bytes = bytes([
+            0x1A, 0x45, 0xDF, 0xA3,  # EBML header
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F,  # EBML header size
+            0x42, 0x86, 0x81, 0x01,  # EBMLVersion = 1
+            0x42, 0xF7, 0x81, 0x01,  # EBMLReadVersion = 1
+            0x42, 0xF2, 0x81, 0x04,  # EBMLMaxIDLength = 4
+            0x42, 0xF3, 0x81, 0x08,  # EBMLMaxSizeLength = 8
+            0x42, 0x82, 0x84, 0x77, 0x65, 0x62, 0x6D,  # DocType = "webm"
+            0x42, 0x87, 0x81, 0x02,  # DocTypeVersion = 2
+            0x42, 0x85, 0x81, 0x02   # DocTypeReadVersion = 2
+        ])
+        
+        files = {'voice_audio': ('test.webm', webm_bytes, 'audio/webm')}
+        data = {'skip_tts': 'true'}
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with voice_audio + skip_tts=true (this may take 15-25 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, files=files, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        # This test might fail due to invalid audio, but we're testing the flow
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            transcript = advice.get('transcript', '')
+            tts_audio_base64 = advice.get('tts_audio_base64')
+            
+            # Key requirements: attempted transcription, no audio output
+            has_transcript_field = 'transcript' in advice  # Even if empty due to bad audio
+            no_audio = tts_audio_base64 is None or tts_audio_base64 == ""
+            
+            all_valid = has_transcript_field and no_audio
+            self.log_test("Stylist Voice Audio Skip TTS", all_valid, 
+                         f"Transcript field present: {has_transcript_field}, No audio: {no_audio}")
+        elif status == 400:
+            # Expected if audio is invalid - test that it doesn't 500
+            self.log_test("Stylist Voice Audio Skip TTS", True, 
+                         f"Graceful 400 error for invalid audio: {response_data}")
+        else:
+            self.log_test("Stylist Voice Audio Skip TTS", False, f"Status: {status}, Data: {response_data}")
+    
+    def test_stylist_skip_tts_invalid_value(self):
+        """Test POST /stylist with invalid skip_tts value doesn't 500"""
+        if not self.dev_token:
+            self.log_test("Stylist Skip TTS Invalid Value", False, "No dev token available")
+            return
+            
+        data = {
+            'text': 'What should I wear today for work?',
+            'skip_tts': 'banana'  # Invalid value
+        }
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist with invalid skip_tts value...")
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        # Should either reject with 4xx or coerce cleanly, but NOT 500
+        if success:
+            not_500 = status != 500
+            if status == 200:
+                # If it coerced cleanly, check the response is valid
+                advice = response_data.get('advice', {})
+                has_reasoning = bool(advice.get('reasoning_summary'))
+                coerced_cleanly = has_reasoning
+                self.log_test("Stylist Skip TTS Invalid Value", not_500 and coerced_cleanly, 
+                             f"Status: {status}, Coerced cleanly: {coerced_cleanly}")
+            elif 400 <= status < 500:
+                # Rejected with 4xx - also acceptable
+                self.log_test("Stylist Skip TTS Invalid Value", True, 
+                             f"Rejected with 4xx: {status}")
+            else:
+                self.log_test("Stylist Skip TTS Invalid Value", not_500, 
+                             f"Status: {status} (not 500)")
+        else:
+            self.log_test("Stylist Skip TTS Invalid Value", False, f"Request failed: {response_data}")
+    
+    def test_stylist_hebrew_localization_skip_tts(self):
+        """Test POST /stylist with language='he' + skip_tts=true localizes without audio"""
+        if not self.dev_token:
+            self.log_test("Stylist Hebrew Skip TTS", False, "No dev token available")
+            return
+            
+        data = {
+            'text': 'What should I wear today for work?',
+            'language': 'he',
+            'skip_tts': 'true'
+        }
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing stylist Hebrew localization with skip_tts=true (this may take 30-60 seconds)...")
+        
+        try:
+            response = requests.post(url, data=data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success = True
+            status = response.status_code
+        except Exception as e:
+            success = False
+            response_data = {"error": str(e)}
+            status = 0
+        
+        if success and status == 200:
+            advice = response_data.get('advice', {})
+            reasoning_summary = advice.get('reasoning_summary', '')
+            spoken_reply = advice.get('spoken_reply', '')
+            tts_audio_base64 = advice.get('tts_audio_base64')
+            
+            # Check if content appears to be in Hebrew (contains Hebrew characters)
+            hebrew_chars = any('\u0590' <= char <= '\u05FF' for char in reasoning_summary + spoken_reply)
+            has_content = bool(reasoning_summary and spoken_reply)
+            no_audio = tts_audio_base64 is None or tts_audio_base64 == ""
+            
+            all_valid = hebrew_chars and has_content and no_audio
+            self.log_test("Stylist Hebrew Skip TTS", all_valid,
+                         f"Hebrew chars: {hebrew_chars}, Has content: {has_content}, No audio: {no_audio}")
+        else:
+            self.log_test("Stylist Hebrew Skip TTS", False, f"Status: {status}, Data: {response_data}")
+    
+    def test_stylist_history_regression(self):
+        """Test GET /stylist/history still works unchanged (regression test)"""
+        if not self.dev_token:
+            self.log_test("Stylist History Regression", False, "No dev token available")
+            return
+            
+        success, data, status = self.make_request('GET', '/stylist/history', token=self.dev_token)
+        
+        if success and status == 200:
+            # Check expected structure
+            has_session_id = 'session_id' in data
+            has_messages = 'messages' in data and isinstance(data['messages'], list)
+            
+            all_valid = has_session_id and has_messages
+            self.log_test("Stylist History Regression", all_valid, 
+                         f"Session ID: {has_session_id}, Messages: {len(data.get('messages', []))}")
+        else:
+            self.log_test("Stylist History Regression", False, f"Status: {status}, Data: {data}")
+    
+    def test_phase_l_language_persistence_regression(self):
+        """Test PATCH /users/me with preferred_language='he' persists and stylist respects it"""
+        if not self.dev_token:
+            self.log_test("Phase L Language Persistence", False, "No dev token available")
+            return
+            
+        # Set preferred language to Hebrew
+        update_data = {"preferred_language": "he"}
+        success, data, status = self.make_request('PATCH', '/users/me', update_data, token=self.dev_token)
+        
+        if not (success and status == 200):
+            self.log_test("Phase L Language Persistence", False, f"PATCH failed: {status}")
+            return
+            
+        # Verify persistence
+        success2, data2, status2 = self.make_request('GET', '/users/me', token=self.dev_token)
+        
+        if not (success2 and status2 == 200):
+            self.log_test("Phase L Language Persistence", False, f"GET failed: {status2}")
+            return
+            
+        persisted_lang = data2.get('preferred_language')
+        if persisted_lang != 'he':
+            self.log_test("Phase L Language Persistence", False, f"Language not persisted: {persisted_lang}")
+            return
+        
+        # Make stylist call to verify it respects the preference
+        stylist_data = {'text': 'What should I wear today?'}
+        headers = {'Authorization': f'Bearer {self.dev_token}'}
+        url = f"{self.base_url}/api/v1/stylist"
+        
+        print("🔄 Testing Phase L language persistence with stylist call (this may take 30-60 seconds)...")
+        
+        try:
+            response = requests.post(url, data=stylist_data, headers=headers, timeout=120)
+            response_data = response.json() if response.content else {}
+            success3 = True
+            status3 = response.status_code
+        except Exception as e:
+            success3 = False
+            response_data = {"error": str(e)}
+            status3 = 0
+        
+        if success3 and status3 == 200:
+            advice = response_data.get('advice', {})
+            reasoning_summary = advice.get('reasoning_summary', '')
+            spoken_reply = advice.get('spoken_reply', '')
+            
+            # Check if content appears to be in Hebrew
+            hebrew_chars = any('\u0590' <= char <= '\u05FF' for char in reasoning_summary + spoken_reply)
+            has_content = bool(reasoning_summary and spoken_reply)
+            
+            all_valid = hebrew_chars and has_content
+            self.log_test("Phase L Language Persistence", all_valid,
+                         f"Persisted: {persisted_lang}, Hebrew chars: {hebrew_chars}, Has content: {has_content}")
+        else:
+            self.log_test("Phase L Language Persistence", False, f"Stylist call failed: {status3}")
+        
+        # Reset to English
+        update_data = {"preferred_language": "en"}
+        self.make_request('PATCH', '/users/me', update_data, token=self.dev_token)
+    
+    def test_closet_analyze_regression(self):
+        """Test /closet/analyze endpoint unchanged (regression test)"""
+        if not self.dev_token:
+            self.log_test("Closet Analyze Regression", False, "No dev token available")
+            return
+            
+        # Use a small test image for analysis
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        analyze_data = {
+            "image_base64": test_image_b64,
+            "multi": False  # Single-item analysis
+        }
+        
+        print("🔄 Testing closet analyze regression (this may take 30-60 seconds)...")
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Check expected fields are present
+            has_title = 'title' in data
+            has_category = 'category' in data
+            has_colors = 'colors' in data
+            
+            all_valid = has_title and has_category and has_colors
+            self.log_test("Closet Analyze Regression", all_valid, 
+                         f"Title: {has_title}, Category: {has_category}, Colors: {has_colors}")
+        else:
+            self.log_test("Closet Analyze Regression", False, f"Status: {status}, Data: {data}")
+
     def run_all_tests(self):
         """Run all test suites"""
         print("🚀 Starting DressApp Backend API Tests")
@@ -2021,6 +2397,18 @@ class DressAppAPITester:
         self.test_closet_marketplace_intent_swap()
         self.test_schema_fields_roundtrip()
         self.test_provider_activity_tracking()
+        
+        # PHASE M: SYSTEM-NATIVE SPEECH TESTS
+        print("\n🎤 Running Phase M: System-Native Speech Tests...")
+        self.test_stylist_skip_tts_true()
+        self.test_stylist_skip_tts_default()
+        self.test_stylist_skip_tts_false_explicit()
+        self.test_stylist_voice_audio_with_skip_tts()
+        self.test_stylist_skip_tts_invalid_value()
+        self.test_stylist_hebrew_localization_skip_tts()
+        self.test_stylist_history_regression()
+        self.test_phase_l_language_persistence_regression()
+        self.test_closet_analyze_regression()
         
         return self.generate_report()
 

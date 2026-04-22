@@ -40,6 +40,7 @@ async def stylist_endpoint(
     language: str = Form(default="en"),
     voice_id: str = Form(default="aura-2-thalia-en"),
     occasion: str | None = Form(default=None),
+    skip_tts: bool = Form(default=False),
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     if not text and not voice_audio:
@@ -132,6 +133,7 @@ async def stylist_endpoint(
             cultural_rules=None,
             user_profile=user_profile,
             closet_summary=closet,
+            synthesize_tts=not skip_tts,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

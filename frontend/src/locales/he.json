@@ -221,7 +221,13 @@
     "outfitN": "תלבושת {{n}}",
     "doDont": "כדאי / לא כדאי",
     "voiceNote": "[הודעה קולית]",
-    "contextLabel": "הקשר"
+    "contextLabel": "הקשר",
+    "listening": "מאזין…",
+    "tapToStop": "הקישו לעצירה",
+    "speechUnsupported": "הדיבור אינו נתמך בדפדפן זה",
+    "nativeSpeech": "דיבור מקומי",
+    "stopSpeaking": "עצור דיבור",
+    "playReply": "השמע תשובה"
   },
   "market": {
     "title": "שוק",
