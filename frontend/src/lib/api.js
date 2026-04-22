@@ -62,6 +62,8 @@ export const api = {
   createItem: (body) => client.post('/closet', body).then((r) => r.data),
   analyzeItemImage: (body) =>
     client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
+  searchCloset: (body) =>
+    client.post('/closet/search', body, { timeout: 30000 }).then((r) => r.data),
   patchItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),
   deleteItem: (id) => client.delete(`/closet/${id}`).then((r) => r.data),
   editItemImage: (id, prompt) =>
@@ -77,6 +79,8 @@ export const api = {
       .get('/listings/fee-preview', { params: { list_price_cents: cents } })
       .then((r) => r.data),
   getListing: (id) => client.get(`/listings/${id}`).then((r) => r.data),
+  getSimilarListings: (id, params = {}) =>
+    client.get(`/listings/${id}/similar`, { params }).then((r) => r.data),
   createListing: (body) => client.post('/listings', body).then((r) => r.data),
   patchListing: (id, body) =>
     client.patch(`/listings/${id}`, body).then((r) => r.data),

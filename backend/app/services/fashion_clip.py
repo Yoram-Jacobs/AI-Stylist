@@ -98,7 +98,10 @@ class FashionClipService:
                 img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
                 inputs = self._processor(images=img, return_tensors="pt").to(self._device)
                 with torch.inference_mode():
-                    feats = self._model.get_image_features(**inputs)
+                    out = self._model.get_image_features(**inputs)
+                    # transformers 5.x returns a ModelOutput with
+                    # .pooler_output; older versions returned a tensor.
+                    feats = getattr(out, "pooler_output", out)
                     feats = feats / feats.norm(p=2, dim=-1, keepdim=True)
                 return feats.cpu().numpy().astype("float32")[0].tolist()
 
@@ -132,7 +135,8 @@ class FashionClipService:
                     text=[text], return_tensors="pt", padding=True, truncation=True
                 ).to(self._device)
                 with torch.inference_mode():
-                    feats = self._model.get_text_features(**inputs)
+                    out = self._model.get_text_features(**inputs)
+                    feats = getattr(out, "pooler_output", out)
                     feats = feats / feats.norm(p=2, dim=-1, keepdim=True)
                 return feats.cpu().numpy().astype("float32")[0].tolist()
 

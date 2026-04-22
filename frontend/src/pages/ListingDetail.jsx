@@ -4,8 +4,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
+import { Badge } from '@/components/ui/badge';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
-import { ArrowLeft, Eye, Loader2 } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -20,12 +21,25 @@ export default function ListingDetail() {
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState(false);
+  const [similar, setSimilar] = useState([]);
+  const [similarMode, setSimilarMode] = useState(null); // 'embedding' | 'category' | null
+  const [similarLoading, setSimilarLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
+    setSimilarLoading(true);
     api.getListing(id)
       .then(setListing)
       .catch(() => { toast.error('Listing not found'); nav('/market'); })
       .finally(() => setLoading(false));
+
+    api.getSimilarListings(id, { limit: 6 })
+      .then((res) => {
+        setSimilar(res.items || []);
+        setSimilarMode(res.mode || null);
+      })
+      .catch(() => { /* non-fatal — quietly skip the section */ })
+      .finally(() => setSimilarLoading(false));
   }, [id, nav]);
 
   const onBuy = async () => {
@@ -108,6 +122,84 @@ export default function ListingDetail() {
           )}
         </div>
       </div>
+
+      {/* Items like this — FashionCLIP-driven when seed item has an embedding */}
+      {(similarLoading || similar.length > 0) && (
+        <section
+          className="mt-10"
+          aria-labelledby="similar-listings-heading"
+          data-testid="listing-similar-section"
+        >
+          <div className="flex items-end justify-between mb-4">
+            <div>
+              <div className="caps-label text-muted-foreground flex items-center gap-1.5">
+                {similarMode === 'embedding' ? (
+                  <><Sparkles className="h-3 w-3 text-[hsl(var(--accent))]" /> Visually similar</>
+                ) : similarMode === 'category' ? (
+                  <>Popular in this category</>
+                ) : (
+                  <>You might also like</>
+                )}
+              </div>
+              <h2 id="similar-listings-heading" className="font-display text-2xl mt-1">
+                Items like this
+              </h2>
+            </div>
+            <Button asChild variant="ghost" size="sm" className="rounded-lg">
+              <Link to="/market">See all</Link>
+            </Button>
+          </div>
+
+          {similarLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="aspect-[3/4] w-full rounded-[calc(var(--radius)+6px)]" />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4"
+              data-testid="listing-similar-grid"
+            >
+              {similar.map((s) => {
+                const sm = s.financial_metadata || {};
+                return (
+                  <Link
+                    key={s.id}
+                    to={`/market/${s.id}`}
+                    className="block group"
+                    data-testid="listing-similar-card"
+                  >
+                    <Card className="rounded-[calc(var(--radius)+6px)] overflow-hidden border-border shadow-editorial group-hover:shadow-editorial-md transition-shadow">
+                      <AspectRatio ratio={3/4} className="bg-secondary relative">
+                        {(s.images || [])[0]
+                          ? <img src={s.images[0]} alt={s.title} className="w-full h-full object-cover" />
+                          : <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">No image</div>}
+                        {typeof s._score === 'number' && (
+                          <Badge
+                            variant="outline"
+                            className="absolute top-2 right-2 bg-background/85 backdrop-blur text-[10px] border-[hsl(var(--accent))]/50 flex items-center gap-1"
+                            data-testid="listing-similar-score"
+                          >
+                            <Sparkles className="h-2.5 w-2.5 text-[hsl(var(--accent))]" />
+                            {Math.round(s._score * 100)}%
+                          </Badge>
+                        )}
+                      </AspectRatio>
+                      <CardContent className="p-3">
+                        <div className="font-medium text-sm truncate">{s.title}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {fmt(sm.list_price_cents, sm.currency)}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

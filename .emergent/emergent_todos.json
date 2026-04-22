@@ -1,34 +1,18 @@
 [
   {
-    "content": "Verify HF Inference availability for Gemma multimodal (Featherless flaky)",
+    "content": "Add POST /listings/{id}/similar endpoint (embedding-based recommendations)",
     "status": "completed"
   },
   {
-    "content": "Create HF Gemma analyzer path (opt-in via env flag, ready for user's fine-tune)",
+    "content": "Add semantic search toggle to /closet (Keyword vs Meaning) + score badges",
     "status": "completed"
   },
   {
-    "content": "Wire provider dispatch in /analyze (keep Gemini default until Gemma fine-tune lands)",
+    "content": "Add 'Items like this' section to ListingDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Create FashionCLIP embedding service + persist embeddings on closet create",
-    "status": "completed"
-  },
-  {
-    "content": "Add /closet/search endpoint (text + image, cosine similarity)",
-    "status": "completed"
-  },
-  {
-    "content": "Add native camera capture on AddItem page (mobile-first)",
-    "status": "completed"
-  },
-  {
-    "content": "Run testing agent on new /closet/search + Gemma dispatch + camera UI",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md with Phase A milestone",
+    "content": "Test both flows end-to-end",
     "status": "completed"
   }
 ]

@@ -19,6 +19,7 @@ from app.models.schemas import (
 )
 from app.services import repos
 from app.services.auth import get_current_user, get_current_user_optional
+from app.services.fashion_clip import fashion_clip_service
 from app.services.fees import compute_fees
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,90 @@ async def get_listing(listing_id: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     return listing
+
+
+@router.get("/{listing_id}/similar")
+async def get_similar_listings(
+    listing_id: str,
+    limit: int = Query(default=6, ge=1, le=24),
+    min_score: float = Query(default=0.22, ge=0.0, le=1.0),
+) -> dict[str, Any]:
+    """Return listings whose underlying closet item is visually similar.
+
+    Powered by FashionCLIP embeddings persisted on each closet item.
+    Falls back to category-only matching when embeddings are missing so
+    the UI can still show something useful on legacy rows.
+    """
+    db = get_db()
+    seed = await repos.find_one(db.listings, {"id": listing_id})
+    if not seed:
+        raise HTTPException(404, "Listing not found")
+    seed_item_id = seed.get("closet_item_id")
+    seed_item: dict[str, Any] | None = None
+    if seed_item_id:
+        seed_item = await repos.find_one(db.closet_items, {"id": seed_item_id})
+    seed_vec = (seed_item or {}).get("clip_embedding")
+
+    # Candidates: all active listings in the same marketplace (including
+    # other categories) except this listing itself.
+    cand_query: dict[str, Any] = {
+        "status": "active",
+        "id": {"$ne": listing_id},
+    }
+    candidates = await repos.find_many(
+        db.listings, cand_query, sort=[("created_at", -1)], limit=500
+    )
+    if not candidates:
+        return {"items": [], "total": 0, "mode": "none"}
+
+    # Batch-fetch the embeddings for every candidate's underlying item.
+    item_ids = [c["closet_item_id"] for c in candidates if c.get("closet_item_id")]
+    vec_map: dict[str, list[float]] = {}
+    cat_map: dict[str, str | None] = {}
+    if item_ids:
+        docs = await repos.find_many(
+            db.closet_items,
+            {"id": {"$in": item_ids}},
+            sort=[("created_at", -1)],
+            limit=len(item_ids),
+        )
+        for d in docs:
+            ce = d.get("clip_embedding")
+            if isinstance(ce, list) and ce:
+                vec_map[d["id"]] = ce
+            cat_map[d["id"]] = d.get("category")
+
+    mode = "embedding"
+    scored: list[dict[str, Any]] = []
+    if fashion_clip_service is not None and seed_vec:
+        for c in candidates:
+            vec = vec_map.get(c.get("closet_item_id") or "")
+            if not vec:
+                continue
+            score = fashion_clip_service.cosine(seed_vec, vec)
+            if score < min_score:
+                continue
+            c2 = dict(c)
+            c2["_score"] = round(score, 4)
+            scored.append(c2)
+        scored.sort(key=lambda r: r["_score"], reverse=True)
+    else:
+        # Embedding fallback: show active listings in the same category,
+        # newest first. Marks the response so the UI can render a subtler
+        # "popular in this category" label rather than "items like this".
+        mode = "category"
+        seed_cat = (seed_item or {}).get("category") or seed.get("category")
+        for c in candidates:
+            cat = cat_map.get(c.get("closet_item_id") or "") or c.get("category")
+            if seed_cat and cat and cat != seed_cat:
+                continue
+            scored.append(dict(c))
+    return {
+        "items": scored[: max(1, limit)],
+        "total": len(scored),
+        "mode": mode,
+        "seed_has_embedding": bool(seed_vec),
+    }
 
 
 @router.patch("/{listing_id}")

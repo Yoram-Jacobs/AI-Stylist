@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
-  Square, Loader2, ListChecks,
+  Square, Loader2, ListChecks, Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import {
@@ -29,6 +30,10 @@ export default function Closet() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ category: 'all', source: 'all', search: '' });
+  // Search mode: 'keyword' uses Mongo text search, 'meaning' calls FashionCLIP.
+  const [searchMode, setSearchMode] = useState('keyword');
+  const [semanticActive, setSemanticActive] = useState(false); // true while the current list is semantic results
+  const [semanticIndexed, setSemanticIndexed] = useState(0);
 
   // Selection state
   const [selectMode, setSelectMode] = useState(false);
@@ -38,6 +43,7 @@ export default function Closet() {
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
+    setSemanticActive(false);
     try {
       const params = {};
       if (filters.category !== 'all') params.category = filters.category;
@@ -51,10 +57,38 @@ export default function Closet() {
     } finally { setLoading(false); }
   }, [filters.category, filters.source, filters.search]);
 
+  const fetchSemantic = useCallback(async (text) => {
+    setLoading(true);
+    try {
+      const res = await api.searchCloset({ text, limit: 48, min_score: 0.18 });
+      setItems(res.items || []);
+      setTotal(res.total || 0);
+      setSemanticIndexed(res.indexed || 0);
+      setSemanticActive(true);
+      if ((res.items || []).length === 0) {
+        toast.message('No meaningful matches found \u2014 try different words.');
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Semantic search failed.');
+      setSemanticActive(false);
+    } finally { setLoading(false); }
+  }, []);
+
   useEffect(() => { fetchItems(); }, [filters.category, filters.source, fetchItems]);
 
   const onSearch = (e) => {
     e.preventDefault();
+    const q = filters.search.trim();
+    if (searchMode === 'meaning' && q) {
+      fetchSemantic(q);
+    } else {
+      fetchItems();
+    }
+  };
+
+  const clearSemantic = () => {
+    setSemanticActive(false);
+    setFilters((f) => ({ ...f, search: '' }));
     fetchItems();
   };
 
@@ -176,15 +210,56 @@ export default function Closet() {
         data-testid="closet-filter-bar"
       >
         <div className="flex flex-wrap gap-2 items-center">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="relative flex-1 min-w-[220px]">
+            {searchMode === 'meaning' ? (
+              <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[hsl(var(--accent))]" />
+            ) : (
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            )}
             <Input
               value={filters.search}
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-              placeholder="Search by title, brand, tag"
-              className="pl-9 rounded-xl"
+              placeholder={
+                searchMode === 'meaning'
+                  ? 'Describe what you want — e.g. “blue flowy summer tops”'
+                  : 'Search by title, brand, tag'
+              }
+              className="pl-9 pr-24 rounded-xl"
               data-testid="closet-search-input"
             />
+            {/* In-input mode switch */}
+            <div
+              className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center rounded-lg bg-secondary/70 p-0.5"
+              role="radiogroup"
+              aria-label="Search mode"
+            >
+              <button
+                type="button"
+                onClick={() => setSearchMode('keyword')}
+                aria-pressed={searchMode === 'keyword'}
+                data-testid="closet-search-mode-keyword"
+                className={`text-[11px] px-2 py-1 rounded-md transition-colors ${
+                  searchMode === 'keyword'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Keyword
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchMode('meaning')}
+                aria-pressed={searchMode === 'meaning'}
+                data-testid="closet-search-mode-meaning"
+                className={`text-[11px] px-2 py-1 rounded-md transition-colors flex items-center gap-1 ${
+                  searchMode === 'meaning'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Sparkles className="h-3 w-3" /> Meaning
+              </button>
+            </div>
           </div>
           <Select value={filters.category} onValueChange={(v) => setFilters((f) => ({ ...f, category: v }))}>
             <SelectTrigger className="w-[140px] rounded-xl" data-testid="closet-category-select">
@@ -202,11 +277,43 @@ export default function Closet() {
               {SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button type="submit" variant="secondary" className="rounded-xl" data-testid="closet-search-button">
+          <Button
+            type="submit"
+            variant={searchMode === 'meaning' ? 'default' : 'secondary'}
+            className="rounded-xl"
+            data-testid="closet-search-button"
+          >
+            {searchMode === 'meaning' ? <Sparkles className="h-4 w-4 mr-1.5" /> : null}
             Search
           </Button>
         </div>
       </form>
+
+      {/* Semantic-results banner \u2014 only shown after a successful meaning search */}
+      {semanticActive && (
+        <div
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-border bg-[hsl(var(--accent))]/10"
+          data-testid="closet-semantic-banner"
+        >
+          <div className="flex items-center gap-2 text-sm">
+            <Sparkles className="h-4 w-4 text-[hsl(var(--accent))]" />
+            <span>
+              Showing <span className="font-medium">{items.length}</span> semantic match
+              {items.length === 1 ? '' : 'es'} across <span className="font-medium">{semanticIndexed}</span> indexed items.
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={clearSemantic}
+            className="rounded-lg"
+            data-testid="closet-semantic-clear"
+          >
+            <X className="h-4 w-4 mr-1.5" /> Back to full closet
+          </Button>
+        </div>
+      )}
 
       {/* Selection action bar */}
       {selectMode && (
@@ -312,7 +419,7 @@ export default function Closet() {
                     isSelected ? 'ring-2 ring-[hsl(var(--accent))]' : ''
                   }`}
                 >
-                  <ItemCardInner item={it} isSelected={isSelected} showCheckbox />
+                  <ItemCardInner item={it} isSelected={isSelected} showCheckbox score={it._score} />
                 </button>
               );
             }
@@ -323,7 +430,7 @@ export default function Closet() {
                 className="block group"
                 data-testid="closet-item-card"
               >
-                <ItemCardInner item={it} />
+                <ItemCardInner item={it} score={it._score} />
               </Link>
             );
           })}
@@ -377,7 +484,7 @@ export default function Closet() {
 }
 
 /* -------------------- shared card body -------------------- */
-function ItemCardInner({ item, isSelected, showCheckbox }) {
+function ItemCardInner({ item, isSelected, showCheckbox, score }) {
   return (
     <Card
       className={`rounded-[calc(var(--radius)+6px)] overflow-hidden border-border shadow-editorial group-hover:shadow-editorial-md transition-shadow ${
@@ -395,6 +502,16 @@ function ItemCardInner({ item, isSelected, showCheckbox }) {
           <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">
             No image
           </div>
+        )}
+        {typeof score === 'number' && (
+          <Badge
+            variant="outline"
+            className="absolute top-2 right-2 bg-background/85 backdrop-blur text-[10px] border-[hsl(var(--accent))]/50 flex items-center gap-1"
+            data-testid="closet-item-score"
+          >
+            <Sparkles className="h-2.5 w-2.5 text-[hsl(var(--accent))]" />
+            {Math.round(score * 100)}%
+          </Badge>
         )}
         {showCheckbox && (
           <div
