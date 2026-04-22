@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Mic, Image as ImgIcon, Send, CloudSun, Calendar as CalIcon, Square, Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ const base64ToUrl = (b64, mime = 'audio/mpeg') => {
 };
 
 export default function Stylist() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
@@ -70,7 +72,7 @@ export default function Stylist() {
       mediaRecorderRef.current = mr;
       setRecording(true);
     } catch {
-      toast.error('Microphone permission denied');
+      toast.error(t('stylist.micDenied'));
     }
   };
 
@@ -95,7 +97,7 @@ export default function Stylist() {
     const optimistic = {
       id: `tmp-${Date.now()}`,
       role: 'user',
-      transcript: voiceBlob ? '[voice note]' : text,
+      transcript: voiceBlob ? t('stylist.voiceNote') : text,
       imagePreview: imageFile ? URL.createObjectURL(imageFile) : null,
     };
     setMessages((m) => [...m, optimistic]);
@@ -111,7 +113,7 @@ export default function Stylist() {
           transcript: advice.reasoning_summary, payload: advice, audioUrl },
       ]);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Stylist failed');
+      toast.error(err?.response?.data?.detail || t('stylist.errorAdvice'));
     } finally { setBusy(false); }
   };
 
@@ -119,11 +121,11 @@ export default function Stylist() {
     <div className="container-px max-w-3xl mx-auto pt-4 md:pt-8 flex flex-col h-[calc(100dvh-180px)] md:h-[calc(100dvh-140px)]">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="caps-label text-muted-foreground">Stylist</div>
-          <h1 className="font-display text-2xl md:text-3xl">Ask anything fashion</h1>
+          <div className="caps-label text-muted-foreground">{t('stylist.label')}</div>
+          <h1 className="font-display text-2xl md:text-3xl">{t('stylist.hero')}</h1>
         </div>
         <div className="hidden md:flex items-center gap-2">
-          <Badge variant="outline" className="caps-label rounded-full bg-card"><CloudSun className="h-3 w-3 mr-1" /> Weather-aware</Badge>
+          <Badge variant="outline" className="caps-label rounded-full bg-card"><CloudSun className="h-3 w-3 me-1" /> {t('stylist.weatherAware')}</Badge>
         </div>
       </div>
 
@@ -133,8 +135,8 @@ export default function Stylist() {
             {messages.length === 0 && !busy && (
               <div className="text-center py-10">
                 <Sparkles className="h-10 w-10 mx-auto mb-3 text-[hsl(var(--accent))]" />
-                <p className="font-display text-xl">What's the occasion?</p>
-                <p className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto">Attach a photo or press the mic and tell us. We'll build an outfit from your closet.</p>
+                <p className="font-display text-xl">{t('stylist.askAnything')}</p>
+                <p className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto">{t('stylist.askAnythingSub')}</p>
               </div>
             )}
             <AnimatePresence initial={false}>
@@ -152,7 +154,7 @@ export default function Stylist() {
                       <div className="mt-3 space-y-3">
                         {(m.payload.outfit_recommendations || []).map((rec, i) => (
                           <div key={i} className="rounded-xl bg-secondary/60 border border-border p-3">
-                            <div className="caps-label text-[hsl(var(--accent))]">Outfit {i + 1}</div>
+                            <div className="caps-label text-[hsl(var(--accent))]">{t('stylist.outfitN', { n: i + 1 })}</div>
                             <div className="font-display text-base mt-1">{rec.name}</div>
                             <ul className="text-xs text-muted-foreground list-disc pl-5 mt-2 space-y-0.5">
                               {(rec.items || []).map((it, j) => <li key={j}>{it.description || it.role}</li>)}
@@ -162,14 +164,14 @@ export default function Stylist() {
                         ))}
                         {m.payload.do_dont?.length > 0 && (
                           <div className="text-xs text-muted-foreground">
-                            <div className="caps-label mb-1">Do / don’t</div>
+                            <div className="caps-label mb-1">{t('stylist.doDont')}</div>
                             <ul className="list-disc pl-5 space-y-0.5">
                               {m.payload.do_dont.map((d, k) => <li key={k}>{d}</li>)}
                             </ul>
                           </div>
                         )}
                         {m.payload.weather_summary && (
-                          <div className="caps-label text-muted-foreground">Context: {m.payload.weather_summary}{m.payload.calendar_summary ? ` · ${m.payload.calendar_summary}` : ''}</div>
+                          <div className="caps-label text-muted-foreground">{t('stylist.contextLabel')}: {m.payload.weather_summary}{m.payload.calendar_summary ? ` · ${m.payload.calendar_summary}` : ''}</div>
                         )}
                         {m.audioUrl && <WaveformAudioPlayer src={m.audioUrl} />}
                       </div>
@@ -181,13 +183,13 @@ export default function Stylist() {
             {busy && (
               <div className="flex justify-start" data-testid="stylist-thinking">
                 <div className="max-w-[85%] rounded-2xl border border-border bg-card p-4">
-                  <div className="caps-label text-muted-foreground mb-2">Drafting your look</div>
+                  <div className="caps-label text-muted-foreground mb-2">{t('stylist.thinking')}</div>
                   <div className="space-y-2">
                     <div className="h-3 rounded shimmer w-3/4" />
                     <div className="h-3 rounded shimmer w-1/2" />
                     <div className="h-3 rounded shimmer w-5/6" />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-3">Pulling your closet, weather, and calendar context. This can take 15–25 seconds.</p>
+                  <p className="text-xs text-muted-foreground mt-3">{t('stylist.thinkingSub')}</p>
                 </div>
               </div>
             )}
@@ -199,7 +201,7 @@ export default function Stylist() {
             <div className="flex items-center gap-2">
               <Switch checked={includeCalendar} onCheckedChange={setIncludeCalendar} id="inc-cal" data-testid="stylist-include-calendar-switch" />
               <label htmlFor="inc-cal" className="text-xs text-muted-foreground inline-flex items-center gap-1">
-                <CalIcon className="h-3.5 w-3.5" /> Include calendar
+                <CalIcon className="h-3.5 w-3.5" /> {t('stylist.includeCalendar')}
               </label>
               {includeCalendar && calendarConnected && (
                 <Badge
@@ -207,13 +209,13 @@ export default function Stylist() {
                   className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[10px] py-0 h-5"
                   data-testid="stylist-calendar-live-badge"
                 >
-                  Live Google Calendar
+                  {t('stylist.liveCalendar')}
                 </Badge>
               )}
             </div>
             {includeCalendar && !calendarConnected && (
               <input value={occasion} onChange={(e) => setOccasion(e.target.value)}
-                placeholder="e.g. Client pitch"
+                placeholder={t('stylist.occasionPlaceholder')}
                 className="text-xs bg-secondary border border-border rounded-lg px-2 py-1"
                 data-testid="stylist-occasion-input" />
             )}
@@ -221,15 +223,15 @@ export default function Stylist() {
               <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-1 text-xs" data-testid="stylist-attached-image">
                 <img src={URL.createObjectURL(imageFile)} alt="" className="h-6 w-6 rounded object-cover" />
                 <span className="truncate max-w-[140px]">{imageFile.name}</span>
-                <button onClick={() => setImageFile(null)} aria-label="Remove" data-testid="stylist-remove-image"><X className="h-3.5 w-3.5" /></button>
+                <button onClick={() => setImageFile(null)} aria-label={t('stylist.removeImage')} data-testid="stylist-remove-image"><X className="h-3.5 w-3.5" /></button>
               </div>
             )}
           </div>
           <div className="flex items-end gap-2">
             <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={2}
-              placeholder="Tell your stylist what you need..." className="rounded-xl resize-none"
+              placeholder={t('stylist.composerPlaceholder')} className="rounded-xl resize-none"
               data-testid="stylist-composer-textarea" />
-            <label className="inline-flex cursor-pointer" aria-label="Attach image" data-testid="stylist-composer-attach-button">
+            <label className="inline-flex cursor-pointer" aria-label={t('stylist.attachPhoto')} data-testid="stylist-composer-attach-button">
               <input type="file" accept="image/*" className="hidden"
                 onChange={(e) => setImageFile(e.target.files?.[0] || null)} />
               <span className="inline-flex items-center justify-center h-11 w-11 rounded-xl border border-border bg-card hover:bg-secondary">
@@ -241,12 +243,12 @@ export default function Stylist() {
                 <Square className="h-5 w-5" />
               </Button>
             ) : (
-              <Button size="icon" variant="secondary" onClick={startRecording} className="h-11 w-11 rounded-xl" data-testid="stylist-composer-mic-button" aria-label="Record voice">
+              <Button size="icon" variant="secondary" onClick={startRecording} className="h-11 w-11 rounded-xl" data-testid="stylist-composer-mic-button" aria-label={t('stylist.recordVoice')}>
                 <Mic className="h-5 w-5" />
               </Button>
             )}
             <Button onClick={() => sendTurn({})} disabled={busy || (!text.trim() && !imageFile)} className="h-11 rounded-xl" data-testid="stylist-composer-send-button">
-              <Send className="h-5 w-5 mr-0 md:mr-2" /><span className="hidden md:inline">Send</span>
+              <Send className="h-5 w-5 mr-0 md:me-2" /><span className="hidden md:inline">{t('stylist.send')}</span>
             </Button>
           </div>
         </div>

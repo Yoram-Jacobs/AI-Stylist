@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,7 @@ const tone = (errorRate) => {
 };
 
 export default function Admin() {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = (user?.roles || []).includes('admin');
   if (user && !isAdmin) return <Navigate to="/home" replace />;
@@ -48,27 +50,26 @@ export default function Admin() {
     <div className="container-px max-w-7xl mx-auto pt-6 md:pt-10 pb-20" data-testid="admin-page">
       <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
         <div>
-          <div className="caps-label text-muted-foreground">Operations</div>
-          <h1 className="font-display text-3xl sm:text-4xl mt-1">Admin Dashboard</h1>
+          <div className="caps-label text-muted-foreground">{t('admin.title')}</div>
+          <h1 className="font-display text-3xl sm:text-4xl mt-1">{t('admin.title')}</h1>
           <p className="text-sm text-muted-foreground mt-2 max-w-xl">
-            Live ops surface for users, marketplace, AI providers, and the
-            Trend-Scout agent. All actions are scoped to admin role.
+            {t('admin.subtitle')}
           </p>
         </div>
         <Button asChild variant="outline" className="rounded-xl" data-testid="admin-back-home">
-          <Link to="/home">Back to app</Link>
+          <Link to="/home">{t('common.back')}</Link>
         </Button>
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="rounded-xl flex-wrap h-auto p-1" data-testid="admin-tabs">
-          <TabsTrigger value="overview" data-testid="admin-tab-overview">Overview</TabsTrigger>
-          <TabsTrigger value="providers" data-testid="admin-tab-providers">Providers</TabsTrigger>
-          <TabsTrigger value="trends" data-testid="admin-tab-trends">Trend-Scout</TabsTrigger>
-          <TabsTrigger value="users" data-testid="admin-tab-users">Users</TabsTrigger>
-          <TabsTrigger value="listings" data-testid="admin-tab-listings">Listings</TabsTrigger>
-          <TabsTrigger value="transactions" data-testid="admin-tab-transactions">Transactions</TabsTrigger>
-          <TabsTrigger value="system" data-testid="admin-tab-system">System</TabsTrigger>
+          <TabsTrigger value="overview" data-testid="admin-tab-overview">{t('admin.overview')}</TabsTrigger>
+          <TabsTrigger value="providers" data-testid="admin-tab-providers">{t('admin.providers')}</TabsTrigger>
+          <TabsTrigger value="trends" data-testid="admin-tab-trends">{t('admin.trendScout')}</TabsTrigger>
+          <TabsTrigger value="users" data-testid="admin-tab-users">{t('admin.users')}</TabsTrigger>
+          <TabsTrigger value="listings" data-testid="admin-tab-listings">{t('admin.listings')}</TabsTrigger>
+          <TabsTrigger value="transactions" data-testid="admin-tab-transactions">{t('admin.transactions')}</TabsTrigger>
+          <TabsTrigger value="system" data-testid="admin-tab-system">{t('admin.system')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-6"><OverviewSection /></TabsContent>

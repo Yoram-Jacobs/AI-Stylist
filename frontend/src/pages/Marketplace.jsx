@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,6 +19,7 @@ const SOURCES = ['all', 'Shared', 'Retail'];
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
 
 export default function Marketplace() {
+  const { t } = useTranslation();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ source: 'all', category: 'all' });
@@ -31,7 +33,7 @@ export default function Marketplace() {
       const res = await api.listListings(params);
       setItems(res.items || []);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to load marketplace');
+      toast.error(err?.response?.data?.detail || t('market.loadFailed'));
     } finally { setLoading(false); }
   };
 
@@ -42,30 +44,30 @@ export default function Marketplace() {
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="caps-label text-muted-foreground">Marketplace</div>
-          <h1 className="font-display text-3xl sm:text-4xl mt-1">Shop, swap, donate</h1>
+          <div className="caps-label text-muted-foreground">{t('market.title')}</div>
+          <h1 className="font-display text-3xl sm:text-4xl mt-1">{t('market.hero')}</h1>
         </div>
         <Button asChild className="rounded-xl" data-testid="marketplace-create-listing">
-          <Link to="/market/create"><Plus className="h-4 w-4 mr-2" /> Create listing</Link>
+          <Link to="/market/create"><Plus className="h-4 w-4 me-2" /> {t('market.createListing')}</Link>
         </Button>
       </div>
 
       <Tabs defaultValue="browse" className="w-full">
         <TabsList className="rounded-xl" data-testid="marketplace-tabs">
-          <TabsTrigger value="browse" data-testid="marketplace-tab-browse">Browse</TabsTrigger>
-          <TabsTrigger value="mine" data-testid="marketplace-tab-mine">My listings</TabsTrigger>
-          <TabsTrigger value="tx" data-testid="marketplace-tab-transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="browse" data-testid="marketplace-tab-browse">{t('market.browse')}</TabsTrigger>
+          <TabsTrigger value="mine" data-testid="marketplace-tab-mine">{t('market.myListings')}</TabsTrigger>
+          <TabsTrigger value="tx" data-testid="marketplace-tab-transactions">{t('market.transactionsTab')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="browse" className="mt-4">
           <div className="flex flex-wrap gap-2 mb-4">
             <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-source-select"><SelectValue /></SelectTrigger>
-              <SelectContent>{SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+              <SelectContent>{SOURCES.map((s) => <SelectItem key={s} value={s}>{s === 'all' ? t('common.all') : s}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={filters.category} onValueChange={(v) => setFilters((f) => ({ ...f, category: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-category-select"><SelectValue /></SelectTrigger>
-              <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c === 'all' ? t('common.all') : c}</SelectItem>)}</SelectContent>
             </Select>
           </div>
 
@@ -79,8 +81,8 @@ export default function Marketplace() {
 
           {!loading && items.length === 0 && (
             <div className="text-center py-16" data-testid="marketplace-empty-state">
-              <h2 className="font-display text-2xl">Nothing matching yet</h2>
-              <p className="text-sm text-muted-foreground mt-2">Try widening your filters or check back after today's Trend-Scout update.</p>
+              <h2 className="font-display text-2xl">{t('market.noMatching')}</h2>
+              <p className="text-sm text-muted-foreground mt-2">{t('market.noMatchingSub')}</p>
             </div>
           )}
 
@@ -92,7 +94,7 @@ export default function Marketplace() {
                     <AspectRatio ratio={3 / 4} className="bg-secondary">
                       {(l.images || [])[0]
                         ? <img src={l.images[0]} alt={l.title} className="w-full h-full object-cover" />
-                        : <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">No image</div>}
+                        : <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">{t('market.noImage')}</div>}
                     </AspectRatio>
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between gap-2">
@@ -101,7 +103,9 @@ export default function Marketplace() {
                       </div>
                       <div className="mt-1 flex items-center justify-between">
                         <div className="font-display text-lg">{fmt(l.financial_metadata?.list_price_cents)}</div>
-                        <div className="text-[11px] text-muted-foreground">net {fmt(l.financial_metadata?.estimated_seller_net_cents)}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {t('market.netShort', { amount: fmt(l.financial_metadata?.estimated_seller_net_cents) })}
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -112,13 +116,14 @@ export default function Marketplace() {
         </TabsContent>
 
         <TabsContent value="mine"><MyListings /></TabsContent>
-        <TabsContent value="tx"><Transactions /></TabsContent>
+        <TabsContent value="tx"><InlineTransactions /></TabsContent>
       </Tabs>
     </div>
   );
 }
 
 function MyListings() {
+  const { t } = useTranslation();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -131,15 +136,15 @@ function MyListings() {
       finally { setLoading(false); }
     })();
   }, []);
-  if (loading) return <div className="py-10 caps-label text-muted-foreground">Loading…</div>;
-  if (items.length === 0) return <div className="py-10 text-sm text-muted-foreground">You have no listings yet.</div>;
+  if (loading) return <div className="py-10 caps-label text-muted-foreground">{t('market.loading')}</div>;
+  if (items.length === 0) return <div className="py-10 text-sm text-muted-foreground">{t('market.noMyListings')}</div>;
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" data-testid="market-my-listings-grid">
       {items.map((l) => (
         <Link key={l.id} to={`/market/${l.id}`}>
           <Card className="rounded-[calc(var(--radius)+6px)] overflow-hidden shadow-editorial">
-            <AspectRatio ratio={3/4} className="bg-secondary">
-              {(l.images||[])[0] ? <img src={l.images[0]} alt={l.title} className="w-full h-full object-cover"/> : null}
+            <AspectRatio ratio={3 / 4} className="bg-secondary">
+              {(l.images || [])[0] ? <img src={l.images[0]} alt={l.title} className="w-full h-full object-cover" /> : null}
             </AspectRatio>
             <CardContent className="p-3">
               <div className="flex items-center justify-between gap-2">
@@ -155,7 +160,8 @@ function MyListings() {
   );
 }
 
-function Transactions() {
+function InlineTransactions() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState('buyer');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -166,25 +172,29 @@ function Transactions() {
   return (
     <div className="pt-2">
       <div className="flex gap-2 mb-4">
-        {['buyer', 'seller'].map((t) => (
-          <Button key={t} size="sm" variant={tab === t ? 'default' : 'secondary'}
-            onClick={() => setTab(t)} className="rounded-full capitalize" data-testid={`tx-tab-${t}`}>{t}</Button>
+        {['buyer', 'seller'].map((role) => (
+          <Button key={role} size="sm" variant={tab === role ? 'default' : 'secondary'}
+            onClick={() => setTab(role)} className="rounded-full capitalize" data-testid={`tx-tab-${role}`}>
+            {role === 'buyer' ? t('transactions.buyer') : t('transactions.seller')}
+          </Button>
         ))}
       </div>
-      {loading ? <div className="caps-label text-muted-foreground">Loading…</div>
-        : items.length === 0 ? <div className="text-sm text-muted-foreground">No transactions yet.</div>
+      {loading ? <div className="caps-label text-muted-foreground">{t('market.loading')}</div>
+        : items.length === 0 ? <div className="text-sm text-muted-foreground">{t('market.noTx')}</div>
         : (
           <div className="space-y-3" data-testid="tx-list">
-            {items.map((t) => (
-              <Card key={t.id} className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            {items.map((tx) => (
+              <Card key={tx.id} className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
                 <CardContent className="p-4 flex items-center justify-between">
                   <div>
-                    <div className="font-medium text-sm">Listing {t.listing_id.slice(0, 8)}…</div>
-                    <div className="text-xs text-muted-foreground">{t.status} · {new Date(t.created_at).toLocaleString()}</div>
+                    <div className="font-medium text-sm">{t('transactions.listingShort', { id: tx.listing_id.slice(0, 8) })}</div>
+                    <div className="text-xs text-muted-foreground">{tx.status} · {new Date(tx.created_at).toLocaleString()}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-display text-lg">{fmt(t.financial?.gross_cents, t.currency)}</div>
-                    <div className="text-[11px] text-muted-foreground">platform {fmt(t.financial?.platform_fee_cents, t.currency)} · seller {fmt(t.financial?.seller_net_cents, t.currency)}</div>
+                    <div className="font-display text-lg">{fmt(tx.financial?.gross_cents, tx.currency)}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {t('market.platformFee')}: {fmt(tx.financial?.platform_fee_cents, tx.currency)} · {t('market.sellerNet')}: {fmt(tx.financial?.seller_net_cents, tx.currency)}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, Upload, Plus, Loader2, Eye, Wand2, Shirt, Store,
   HandCoins, Gift, Repeat, Trash2, Save, Tag, AlertTriangle,
@@ -78,6 +79,7 @@ const hydrate = (a) => ({
 
 /* -------------------- page -------------------- */
 export default function AddItem() {
+  const { t } = useTranslation();
   const nav = useNavigate();
   const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error}]
   const [saving, setSaving] = useState(false);
@@ -185,11 +187,11 @@ export default function AddItem() {
         return [...prev.slice(0, idx), ...newCards, ...prev.slice(idx + 1)];
       });
       toast.success(
-        `Detected ${items.length} items in that photo — review each card below.`
+        t('addItem.detected', { count: items.length })
       );
     } catch (err) {
       clearInterval(tick);
-      const msg = err?.response?.data?.detail || 'Could not analyse this image';
+      const msg = err?.response?.data?.detail || t('addItem.analyzeFailed');
       setCards((prev) =>
         prev.map((c) =>
           c.id === card.id ? { ...c, status: 'error', progress: 0, error: msg } : c
@@ -222,7 +224,7 @@ export default function AddItem() {
 
   const saveAll = async () => {
     const ready = cards.filter((c) => c.status === 'ready' || c.status === 'error' /* still savable if user fills */);
-    if (!ready.length) { toast.error('Nothing to save yet'); return; }
+    if (!ready.length) { toast.error(t('addItem.nothingToSave')); return; }
     setSaving(true);
     let ok = 0; let fail = 0;
     for (const card of ready) {
@@ -243,9 +245,9 @@ export default function AddItem() {
       }
     }
     setSaving(false);
-    if (ok && !fail) toast.success(`${ok} item${ok === 1 ? '' : 's'} saved to your closet`);
-    else if (ok && fail) toast.message(`Saved ${ok}, failed ${fail}`);
-    else toast.error('No items were saved');
+    if (ok && !fail) toast.success(t('addItem.savedCount', { count: ok }));
+    else if (ok && fail) toast.message(`${t('addItem.savedCount', { count: ok })} · ${fail} ${t('common.error')}`);
+    else toast.error(t('addItem.noneSaved'));
     if (ok && !fail) setTimeout(() => nav('/closet'), 800);
   };
 
@@ -253,11 +255,11 @@ export default function AddItem() {
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10 pb-28" data-testid="add-item-page">
       <div className="flex items-center gap-2 mb-6">
         <Button variant="ghost" size="sm" onClick={() => nav(-1)} className="rounded-full" data-testid="add-item-back">
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back
+          <ArrowLeft className="h-4 w-4 me-2 rtl:rotate-180" /> {t('common.back')}
         </Button>
         <div className="flex-1" />
         <Button onClick={pickFiles} variant="outline" className="rounded-xl" data-testid="add-item-add-more">
-          <Plus className="h-4 w-4 mr-2" /> Add photos
+          <Plus className="h-4 w-4 me-2" /> {t('addItem.addPhotos')}
         </Button>
         <Button
           onClick={saveAll}
@@ -265,17 +267,16 @@ export default function AddItem() {
           className="rounded-xl"
           data-testid="add-item-save-all"
         >
-          {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-          Save all
+          {saving ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Save className="h-4 w-4 me-2" />}
+          {t('addItem.saveAll')}
         </Button>
       </div>
 
       <div className="mb-6">
-        <div className="caps-label text-muted-foreground">Add to closet</div>
-        <h1 className="font-display text-3xl sm:text-4xl mt-1">Upload &amp; auto-fill</h1>
+        <div className="caps-label text-muted-foreground">{t('addItem.label')}</div>
+        <h1 className="font-display text-3xl sm:text-4xl mt-1">{t('addItem.title')}</h1>
         <p className="text-sm text-muted-foreground mt-2 max-w-2xl">
-          Pick one or many photos. <span className="font-medium">The Eyes</span> will scan each
-          piece and pre-fill every field — you review, tweak, and tag for the marketplace.
+          {t('addItem.subtitle')}
         </p>
       </div>
 
@@ -309,10 +310,9 @@ export default function AddItem() {
           <div className="h-14 w-14 rounded-full bg-secondary flex items-center justify-center mb-3">
             <Eye className="h-6 w-6" />
           </div>
-          <div className="font-display text-xl">Let The Eyes see your pieces</div>
+          <div className="font-display text-xl">{t('addItem.dropzoneTitle')}</div>
           <div className="text-sm text-muted-foreground mt-1 max-w-md">
-            Snap a quick shot with your camera or upload existing photos. JPG, PNG, HEIC supported —
-            each piece is analysed in parallel.
+            {t('addItem.dropzoneBody')}
           </div>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
             <Button
@@ -321,7 +321,7 @@ export default function AddItem() {
               onClick={openCamera}
               data-testid="add-item-open-camera-button"
             >
-              <Camera className="h-4 w-4 mr-2" /> Take photo
+              <Camera className="h-4 w-4 me-2" /> {t('addItem.takePhoto')}
             </Button>
             <Button
               type="button"
@@ -330,7 +330,7 @@ export default function AddItem() {
               onClick={pickFiles}
               data-testid="add-item-pick-files-button"
             >
-              <Upload className="h-4 w-4 mr-2" /> Upload photos
+              <Upload className="h-4 w-4 me-2" /> {t('addItem.uploadPhotos')}
             </Button>
           </div>
         </div>
@@ -345,7 +345,7 @@ export default function AddItem() {
               onClick={openCamera}
               data-testid="add-item-camera-more-button"
             >
-              <Camera className="h-4 w-4 mr-1.5" /> Take another
+              <Camera className="h-4 w-4 me-1.5" /> {t('addItem.takePhoto')}
             </Button>
             <Button
               type="button"
@@ -355,7 +355,7 @@ export default function AddItem() {
               onClick={pickFiles}
               data-testid="add-item-upload-more-button"
             >
-              <Plus className="h-4 w-4 mr-1.5" /> Add more
+              <Plus className="h-4 w-4 me-1.5" /> {t('addItem.addPhotos')}
             </Button>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="add-item-cards-grid">
