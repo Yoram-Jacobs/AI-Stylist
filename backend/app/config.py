@@ -66,6 +66,18 @@ class Settings:
     GARMENT_VISION_MODEL: str = os.environ.get(
         "GARMENT_VISION_MODEL", "gemini-2.5-pro"
     )
+    # When set, the HF path hits this OpenAI-compatible endpoint URL
+    # instead of going through HF Inference Providers routing. Use this
+    # to point at your own deployed Gemma 4 endpoint (HF Dedicated
+    # Endpoint, llama.cpp --server, Modal, Replicate, etc.). Example:
+    #   GARMENT_VISION_ENDPOINT_URL=https://xxx.endpoints.huggingface.cloud/v1
+    #   GARMENT_VISION_ENDPOINT_KEY=hf_xxxx    # optional, defaults to HF_TOKEN
+    GARMENT_VISION_ENDPOINT_URL: str | None = (
+        os.environ.get("GARMENT_VISION_ENDPOINT_URL") or None
+    )
+    GARMENT_VISION_ENDPOINT_KEY: str | None = (
+        os.environ.get("GARMENT_VISION_ENDPOINT_KEY") or None
+    )
     # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"

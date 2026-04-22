@@ -42,10 +42,16 @@ except Exception:  # noqa: BLE001
     _HFInferenceClient = None  # type: ignore[assignment]
 
 
-def _hf_client(token: str | None) -> Any:
+def _hf_client(token: str | None, *, base_url: str | None = None) -> Any:
     if _HFInferenceClient is None:
         raise RuntimeError("huggingface_hub is not installed.")
-    return _HFInferenceClient(token=token)
+    kwargs: dict[str, Any] = {"token": token}
+    if base_url:
+        # Lets us talk to a custom OpenAI-compatible endpoint (HF
+        # Dedicated Endpoint, llama.cpp --server, vLLM, Modal, etc.)
+        # without routing through HF Inference Providers.
+        kwargs["base_url"] = base_url
+    return _HFInferenceClient(**kwargs)
 
 
 async def _hf_chat_json(
@@ -60,16 +66,21 @@ async def _hf_chat_json(
 ) -> str:
     """Fire a single multimodal chat_completion at an HF-hosted model.
 
-    Runs on a worker thread to keep the event loop free. Returns the raw
-    string content of the assistant message; callers parse it with
-    ``_extract_json``.
+    Picks the custom endpoint when ``GARMENT_VISION_ENDPOINT_URL`` is
+    set \u2014 this is how we target the user's deployed Gemma 4 fine-tune
+    after they push from the Phase-6 notebook. Otherwise falls through
+    to the HF Inference Providers routing.
     """
-    token = settings.HF_TOKEN
+    endpoint_url = settings.GARMENT_VISION_ENDPOINT_URL
+    if endpoint_url:
+        token = settings.GARMENT_VISION_ENDPOINT_KEY or settings.HF_TOKEN
+    else:
+        token = settings.HF_TOKEN
     if not token:
-        raise RuntimeError("HF_TOKEN is not configured; HF analyzer unavailable.")
+        raise RuntimeError("HF_TOKEN (or endpoint key) is not configured.")
 
     def _call() -> str:
-        client = _hf_client(token)
+        client = _hf_client(token, base_url=endpoint_url)
         # Gemma's HF Inference route requires strict user/assistant
         # alternation with no top-level `system` role; we fold the
         # system prompt into the first user message.
