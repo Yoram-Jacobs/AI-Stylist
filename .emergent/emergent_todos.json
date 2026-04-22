@@ -1,30 +1,18 @@
 [
   {
-    "content": "Explore Closet.jsx multi-select pattern, fashion_clip.py, gemini_stylist.py, closet.py",
+    "content": "Backend: add weighted centroid (by anchor order) to complete-outfit endpoint",
     "status": "completed"
   },
   {
-    "content": "Design complete-outfit schema (request/response Pydantic models)",
+    "content": "Backend: add weather hook — fetch home_location weather and inject into stylist prompt",
     "status": "completed"
   },
   {
-    "content": "Implement POST /api/v1/closet/complete-outfit backend endpoint",
+    "content": "Frontend: add anchor reorder UI (up/down arrows) in OutfitCompletionSheet",
     "status": "completed"
   },
   {
-    "content": "Add api.completeOutfit() helper to frontend api.js",
-    "status": "completed"
-  },
-  {
-    "content": "Create OutfitCompletionSheet.jsx component",
-    "status": "completed"
-  },
-  {
-    "content": "Wire 'Complete the Outfit' button into Closet multi-select toolbar",
-    "status": "completed"
-  },
-  {
-    "content": "Add i18n keys (en + he)",
+    "content": "i18n: translate outfitCompletion.* keys into ar, es, fr, de, it, pt, ru, zh, ja, hi",
     "status": "completed"
   },
   {
@@ -32,15 +20,15 @@
     "status": "completed"
   },
   {
-    "content": "Backend smoke test the new endpoint",
+    "content": "Backend smoke test: weighting + weather",
     "status": "completed"
   },
   {
-    "content": "Frontend screenshot verification",
+    "content": "Frontend screenshot verification of reorder + localized sheet",
     "status": "completed"
   },
   {
-    "content": "Update plan.md Phase P status to COMPLETED",
+    "content": "Update plan.md with polish additions",
     "status": "completed"
   }
 ]

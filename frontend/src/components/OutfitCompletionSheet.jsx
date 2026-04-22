@@ -1,6 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, ShoppingBag, X, Loader2, ExternalLink, Volume2, VolumeX } from 'lucide-react';
+import {
+  Sparkles,
+  ShoppingBag,
+  X,
+  Loader2,
+  ExternalLink,
+  Volume2,
+  VolumeX,
+  CloudSun,
+  ArrowUp,
+  ArrowDown,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
   Sheet,
@@ -76,17 +87,46 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
   const [includeMarketplace, setIncludeMarketplace] = useState(false);
   const [occasion, setOccasion] = useState('');
   const [speaking, setSpeaking] = useState(false);
+  // Order-aware anchor list (1st = highest centroid weight server-side).
+  // Seeded from anchorsHint each time the sheet opens so the user can
+  // reshuffle priority without leaving Closet.
+  const [orderedAnchors, setOrderedAnchors] = useState([]);
 
   const ttsSupported = isTTSSupported();
   const userLang = user?.preferred_language || 'en';
 
+  // Re-seed the order every time the caller passes a new anchor set.
+  // We key off the joined ids so drifting React re-renders don't wipe
+  // the user's manual reorder while the sheet stays open.
+  useEffect(() => {
+    if (!open) return;
+    const hintIds = anchorsHint.map((a) => a.id).join('|');
+    const currentIds = orderedAnchors.map((a) => a.id).join('|');
+    if (hintIds !== currentIds) {
+      setOrderedAnchors(anchorsHint);
+      setResult(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, anchorsHint]);
+
+  const moveAnchor = (idx, dir) => {
+    setOrderedAnchors((prev) => {
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
   const runCompletion = async () => {
-    if (!anchorIds.length) return;
+    const ids = (orderedAnchors.length ? orderedAnchors.map((a) => a.id) : anchorIds);
+    if (!ids.length) return;
     setLoading(true);
     setResult(null);
     try {
       const data = await api.completeOutfit({
-        itemIds: anchorIds,
+        itemIds: ids,
         includeMarketplace,
         occasion: occasion.trim() || null,
         limit: 6,
@@ -147,15 +187,60 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
 
         <ScrollArea className="flex-1">
           <div className="p-5 space-y-5">
-            {/* Anchors preview (using hinted client-side items while we wait for the server) */}
-            {anchorsHint.length > 0 && (
+            {/* Anchors preview (order-aware — first anchor has highest weight) */}
+            {orderedAnchors.length > 0 && (
               <div>
-                <div className="caps-label text-muted-foreground mb-2">
-                  {t('outfitCompletion.anchorsLabel')}
+                <div className="flex items-baseline justify-between mb-2">
+                  <div className="caps-label text-muted-foreground">
+                    {t('outfitCompletion.anchorsLabel')}
+                  </div>
+                  {orderedAnchors.length > 1 && (
+                    <div className="caps-label text-[10px] text-muted-foreground">
+                      {t('outfitCompletion.priorityHint')}
+                    </div>
+                  )}
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                  {anchorsHint.map((a) => (
-                    <ItemThumb key={a.id} item={a} />
+                <div
+                  className="grid grid-cols-3 sm:grid-cols-4 gap-3"
+                  data-testid="outfit-completion-anchor-grid"
+                >
+                  {orderedAnchors.map((a, idx) => (
+                    <div key={a.id} className="relative">
+                      <ItemThumb item={a} />
+                      {/* Priority pill */}
+                      <div
+                        className="absolute top-2 start-2 h-5 min-w-[20px] px-1.5 rounded-full bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] text-[10px] font-semibold flex items-center justify-center"
+                        aria-label={t('outfitCompletion.priorityLabel', { n: idx + 1 })}
+                        data-testid={`outfit-completion-anchor-priority-${idx}`}
+                      >
+                        {idx + 1}
+                      </div>
+                      {/* Reorder controls (only when >1 anchors) */}
+                      {orderedAnchors.length > 1 && (
+                        <div className="absolute top-2 end-2 flex flex-col gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveAnchor(idx, -1)}
+                            disabled={idx === 0}
+                            aria-label={t('outfitCompletion.moveUp')}
+                            data-testid={`outfit-completion-anchor-up-${idx}`}
+                            className="h-6 w-6 rounded-full bg-background/90 border border-border backdrop-blur flex items-center justify-center disabled:opacity-40 hover:bg-secondary transition-colors"
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveAnchor(idx, 1)}
+                            disabled={idx === orderedAnchors.length - 1}
+                            aria-label={t('outfitCompletion.moveDown')}
+                            data-testid={`outfit-completion-anchor-down-${idx}`}
+                            className="h-6 w-6 rounded-full bg-background/90 border border-border backdrop-blur flex items-center justify-center disabled:opacity-40 hover:bg-secondary transition-colors"
+                          >
+                            <ArrowDown className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -219,6 +304,18 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
 
             {result && !loading && (
               <div className="space-y-5" data-testid="outfit-completion-result">
+                {result.weather_summary && (
+                  <div
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/60 px-3 py-1.5 text-xs"
+                    data-testid="outfit-completion-weather-badge"
+                  >
+                    <CloudSun className="h-3.5 w-3.5 text-[hsl(var(--accent))]" />
+                    <span className="caps-label text-muted-foreground">
+                      {t('stylist.weatherAware')}
+                    </span>
+                    <span className="font-medium">{result.weather_summary}</span>
+                  </div>
+                )}
                 {/* Rationale */}
                 {result.rationale && (
                   <div className="rounded-2xl border border-border bg-card p-4">

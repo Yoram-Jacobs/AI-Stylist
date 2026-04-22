@@ -451,6 +451,15 @@ class CompleteOutfitIn(BaseModel):
     occasion: str | None = None
     limit: int = Field(default=6, ge=1, le=12)
     min_score: float = Field(default=0.10, ge=0.0, le=1.0)
+    # When True (default) the server builds an order-weighted centroid:
+    # the 1st anchor in `item_ids` gets the heaviest weight, the last
+    # gets the lightest (linear decay, normalised to sum=1). Set False
+    # for a plain equal-weight mean.
+    weighted: bool = True
+    # Optional client-supplied coordinates override user.home_location
+    # for the weather hook.
+    lat: float | None = None
+    lng: float | None = None
 
 
 def _slim_item(it: dict[str, Any]) -> dict[str, Any]:
@@ -494,44 +503,57 @@ async def complete_outfit(
     rationale grounded in the anchors + shortlist.
     """
     db = get_db()
-    # ------- 1. Fetch & validate anchors -------
-    anchors = await repos.find_many(
+    # ------- 1. Fetch & validate anchors (preserve client-supplied order) -------
+    fetched = await repos.find_many(
         db.closet_items,
         {"id": {"$in": payload.item_ids}, "user_id": user["id"]},
         limit=len(payload.item_ids),
     )
-    if not anchors:
+    if not fetched:
         raise HTTPException(404, "None of the selected items were found.")
-    if len(anchors) != len(payload.item_ids):
-        missing = set(payload.item_ids) - {a["id"] for a in anchors}
+    if len(fetched) != len(payload.item_ids):
+        missing = set(payload.item_ids) - {a["id"] for a in fetched}
         raise HTTPException(
             404,
             f"{len(missing)} item(s) were not found in your closet.",
         )
+    # Re-order to match `payload.item_ids` so the first anchor supplied by
+    # the client is anchor[0] (drives weighting + stylist narrative).
+    by_id = {a["id"]: a for a in fetched}
+    anchors = [by_id[i] for i in payload.item_ids if i in by_id]
 
-    # ------- 2. Build anchor centroid (mean of available embeddings) -------
-    anchor_vecs = [
-        a["clip_embedding"]
-        for a in anchors
-        if isinstance(a.get("clip_embedding"), list) and a["clip_embedding"]
-    ]
+    # ------- 2. Build anchor centroid (optionally order-weighted) -------
+    anchor_vecs: list[tuple[list[float], float]] = []
+    if fashion_clip_service is not None:
+        n = len(anchors)
+        for idx, a in enumerate(anchors):
+            vec = a.get("clip_embedding")
+            if isinstance(vec, list) and vec:
+                if payload.weighted and n > 1:
+                    # Linear decay: weight = n-idx, then normalise later.
+                    weight = float(n - idx)
+                else:
+                    weight = 1.0
+                anchor_vecs.append((vec, weight))
     anchor_categories = {a.get("category") for a in anchors if a.get("category")}
 
     centroid: list[float] | None = None
-    if anchor_vecs and fashion_clip_service is not None:
-        dim = len(anchor_vecs[0])
+    if anchor_vecs:
+        dim = len(anchor_vecs[0][0])
         sums = [0.0] * dim
-        for v in anchor_vecs:
-            if len(v) != dim:
+        total_w = 0.0
+        for vec, w in anchor_vecs:
+            if len(vec) != dim:
                 continue
-            for i, x in enumerate(v):
-                sums[i] += float(x)
-        n = float(len(anchor_vecs))
-        mean = [s / n for s in sums]
-        # L2-normalise so cosine is still a straight dot product.
-        norm = sum(x * x for x in mean) ** 0.5
-        if norm > 0:
-            centroid = [x / norm for x in mean]
+            for i, x in enumerate(vec):
+                sums[i] += float(x) * w
+            total_w += w
+        if total_w > 0:
+            mean = [s / total_w for s in sums]
+            # L2-normalise so cosine is still a straight dot product.
+            norm = sum(x * x for x in mean) ** 0.5
+            if norm > 0:
+                centroid = [x / norm for x in mean]
 
     # ------- 3. Score closet candidates -------
     closet_suggestions: list[dict[str, Any]] = []
@@ -611,7 +633,27 @@ async def complete_outfit(
         m_scored.sort(key=lambda r: r["_score"], reverse=True)
         market_suggestions = m_scored[: payload.limit]
 
-    # ------- 5. Stylist rationale (Gemini) -------
+    # ------- 5. Weather hook (optional, soft-fail) -------
+    from app.services.weather_service import weather_service
+
+    weather_ctx: dict[str, Any] | None = None
+    weather_summary_text: str | None = None
+    home = user.get("home_location") or {}
+    lat = payload.lat if payload.lat is not None else home.get("lat")
+    lng = payload.lng if payload.lng is not None else home.get("lng")
+    if lat is not None and lng is not None and weather_service is not None:
+        try:
+            weather_ctx = await weather_service.fetch(float(lat), float(lng))
+            if weather_ctx:
+                weather_summary_text = (
+                    f"{weather_ctx.get('temp_c')}°C "
+                    f"{weather_ctx.get('condition')} in "
+                    f"{weather_ctx.get('city')}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Complete-outfit weather fetch failed: %s", exc)
+
+    # ------- 6. Stylist rationale (Gemini) -------
     from app.services.gemini_stylist import gemini_stylist_service
 
     rationale = ""
@@ -644,15 +686,26 @@ async def complete_outfit(
                 }
                 for lg in market_suggestions
             ]
+            weather_line = (
+                f"\nWEATHER: {weather_summary_text}"
+                if weather_summary_text
+                else ""
+            )
             request_text = (
                 "Complete this outfit using the user's ANCHOR pieces as the "
-                "starting point. Choose complementary items from the "
-                "CLOSET_CANDIDATES first (preferred); only reach into "
-                "MARKET_CANDIDATES if a key complementary category is missing. "
-                "Return ONE or TWO outfit recommendations. In `why`, explain "
-                "the reasoning in 1-2 sentences.\n\n"
-                f"OCCASION: {payload.occasion or 'unspecified (casual by default)'}\n\n"
-                f"ANCHORS: {json.dumps(anchors_pretty, ensure_ascii=False)}\n\n"
+                "starting point. The anchors are listed in priority order "
+                "(first = most important). Choose complementary items from "
+                "the CLOSET_CANDIDATES first (preferred); only reach into "
+                "MARKET_CANDIDATES if a key complementary category is "
+                "missing. Return ONE or TWO outfit recommendations. In "
+                "`why`, explain the reasoning in 1-2 sentences. If weather "
+                "context is provided AND the occasion sounds outdoor, "
+                "prioritise weather-appropriate layers/footwear and call "
+                "that out in the rationale.\n\n"
+                f"OCCASION: {payload.occasion or 'unspecified (casual by default)'}"
+                f"{weather_line}\n\n"
+                f"ANCHORS (priority order): "
+                f"{json.dumps(anchors_pretty, ensure_ascii=False)}\n\n"
                 f"CLOSET_CANDIDATES: {json.dumps(closet_short, ensure_ascii=False)}\n\n"
                 f"MARKET_CANDIDATES: {json.dumps(market_short, ensure_ascii=False)}"
             )
@@ -664,6 +717,7 @@ async def complete_outfit(
                 session_id=f"complete-outfit:{user['id']}",
                 user_text=request_text,
                 image_base64=None,
+                weather=weather_ctx,
                 user_profile=user_profile,
                 closet_summary=closet_short + [{"is_anchor": True, **a} for a in anchors_pretty],
             )
@@ -684,6 +738,7 @@ async def complete_outfit(
         "do_dont": do_dont,
         "spoken_reply": spoken_reply,
         "has_embeddings": centroid is not None,
+        "weather_summary": weather_summary_text,
     }
 
 

@@ -457,8 +457,8 @@ Goal: swap the Stylist LLM from Gemini 2.5 Pro/Flash to the user's fine-tuned Ge
 
 ---
 
-### Phase P — Outfit Completion Task (Closet) **(P1 / COMPLETE)**
-Adds a first-class "Complete the outfit" action in the Closet. Given 1–N user-selected items, the backend builds a FashionCLIP centroid from the anchors' embeddings, ranks complementary closet items (with a category-diversity filter that excludes anchor categories), optionally extends the search to active marketplace listings, then asks the Stylist for a short rationale + outfit recommendations grounded in the ranked shortlist + occasion.
+### Phase P — Outfit Completion Task (Closet) **(P1 / COMPLETE, +polish)**
+Adds a first-class "Complete the outfit" action in the Closet. Given 1–N user-selected items, the backend builds a FashionCLIP centroid from the anchors' embeddings (optionally **order-weighted** by priority), ranks complementary closet items (with a category-diversity filter that excludes anchor categories), optionally extends the search to active marketplace listings, hydrates live **weather** from the user's `home_location`, then asks the Stylist for a weather- and occasion-aware rationale + outfit recommendations grounded in the ranked shortlist.
 
 **User stories**
 1. ✅ In `/closet`, user multi-selects 1–N items (leveraging existing multi-select mode) and taps **"Complete the outfit"**.
@@ -510,6 +510,14 @@ Adds a first-class "Complete the outfit" action in the Closet. Given 1–N user-
 - ✅ Suggestions respect category diversity (anchor categories excluded from suggestions).
 - ✅ Localized rationale through Phase L directive (Hebrew / Spanish / etc. verified via existing Phase L test report).
 - ✅ No regression in existing closet flows.
+
+**Polish pass (post-MVP, shipped in the same phase)**
+- ✅ **Full i18n coverage**: `outfitCompletion.*` block now translated into **all 12 locales** (`en`, `he`, `ar`, `es`, `fr`, `de`, `it`, `pt`, `ru`, `zh`, `ja`, `hi`) with 18 keys each (including the new `priorityHint`, `priorityLabel`, `moveUp`, `moveDown`). No more silent English fallbacks on this screen. JSON parse-validated.
+- ✅ **Weather-aware rationale**: backend calls `weather_service.fetch()` using the user's `home_location` (or client-supplied `lat`/`lng` override), injects the summary into the Stylist prompt with an explicit outdoor-occasion directive, and returns a `weather_summary` field. The sheet renders a **"WEATHER-AWARE {temp}°C {condition} in {city}"** badge. Soft-fails the weather call so the endpoint never errors if OpenWeather is unreachable.
+  - Verified: `home_location=New York` → `weather_summary: "11.63°C Clouds in New York"`; rationale explicitly says "perfect for today's cool weather" + "Don't: Forget an umbrella! Rain is in the forecast for later today."
+- ✅ **Order-weighted centroid**: new `weighted: bool = True` + `lat`/`lng` fields on the request. Anchors are re-ordered to match the client-supplied `item_ids` order (MongoDB `$in` doesn't preserve input order), then the centroid is built as the **L2-normalised weighted mean** with linear-decay weights `[n, n-1, …, 1]`. The first anchor in the list dominates the centroid, so reordering actually shifts which suggestions rank highest.
+  - Verified: 2 identical anchors, different order → same suggestion receives score **0.7152** vs **0.5751** depending on which anchor is first. Proof the weighting is live.
+- ✅ **Anchor reorder UI**: each anchor in the sheet now shows a **priority pill (1, 2, 3…)** and **up/down arrow controls** (Playwright verified: 3 pills, 6 arrow buttons, `first-up` disabled, `last-down` disabled). Reorder state is preserved across re-renders of the sheet and clears `result` so the user re-runs with the new priority order.
 
 ---
 
