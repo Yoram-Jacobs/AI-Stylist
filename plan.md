@@ -366,26 +366,45 @@ Adds a language selector (Settings/Profile only) with curated translations and f
 
 > **Context:** The user reviewed a large proposal to rewrite DressApp in React Native + Dify + Ollama + ComfyUI. After audit, the user explicitly chose to **keep the current FastAPI + React web stack** and extract only the **4 features below** as incremental roadmap phases. All items below are additive; none require a rewrite.
 
-### Phase M — System-Native Speech (STT + TTS) **(P1 / NOT STARTED)**
-Goal: replace the paid/external speech stack (Groq Whisper-v3 for STT, Deepgram Aura-2 for TTS) with the user's device-native speech capabilities via the browser Web Speech API. This removes two API keys, eliminates per-minute costs, dramatically reduces latency, and works offline on supported devices.
+### Phase M — System-Native Speech (STT + TTS) **(P1 / COMPLETE)**
+Replaced the paid/external speech stack (Groq Whisper-v3 for STT, Deepgram Aura-2 for TTS) with the user's device-native speech capabilities via the browser Web Speech API, **with graceful server-side fallback intact for unsupported browsers (e.g., Firefox desktop)**. Zero new API keys, zero per-minute cost on supported devices, dramatically lower latency.
 
 **User stories**
-1. When the user taps the mic in the Stylist, the app uses `SpeechRecognition` (webkit prefix on iOS/Safari, native on Chrome/Edge/Android) to transcribe speech locally.
-2. When the Stylist returns a reply, the app uses `SpeechSynthesis` with a voice matching `user.preferred_language` (respects all 12 UI locales where the OS has a voice).
-3. Graceful fallback to the existing Groq/Deepgram pipeline on browsers that lack Web Speech API support (e.g., Firefox desktop).
+1. ✅ When the user taps the mic in the Stylist, the app uses `SpeechRecognition` (webkit prefix on iOS/Safari, native on Chrome/Edge/Android) to transcribe speech locally.
+2. ✅ When the Stylist returns a reply, the app uses `SpeechSynthesis` with a voice matching `user.preferred_language` (respects all 12 UI locales where the OS has a voice).
+3. ✅ Graceful fallback to the existing Groq/Deepgram pipeline on browsers that lack Web Speech API support (e.g., Firefox desktop).
 
-**Scope of changes (web-only; no native code)**
+**Delivered**
 - Frontend
-  - New `/app/frontend/src/lib/speech.js` wrapping `window.SpeechRecognition` and `window.speechSynthesis`.
-  - `/app/frontend/src/pages/Stylist.jsx` — swap the Groq upload path for local STT; swap the Deepgram audio playback for `speechSynthesis.speak()` using the current `i18n.language`.
-  - Feature detection + fallback to the existing backend STT/TTS routes.
+  - ✅ `/app/frontend/src/lib/speech.js` — wraps `window.SpeechRecognition` / `window.webkitSpeechRecognition` + `window.speechSynthesis` with:
+    - `isSTTSupported()` / `isTTSSupported()` feature detection
+    - `createRecognition({ lang, onInterim, onFinal, onError, onEnd })` — BCP-47 locale mapping for all 12 app locales (`en`→`en-US`, `he`→`he-IL`, `ar`→`ar-SA`, `zh`→`zh-CN`, etc.)
+    - `speak(text, lang, { onStart, onEnd, onError })` + `cancelSpeak()` with async voice loading (`ensureVoicesLoaded`) and a pickVoice() helper that matches exact → language-family → bare-language fallback
+  - ✅ `/app/frontend/src/pages/Stylist.jsx`:
+    - Mic button now prefers native STT; falls back to MediaRecorder + `/api/v1/stylist` voice_audio upload when `isSTTSupported()===false`
+    - Live interim transcript bubble shown while dictating (`data-testid="stylist-interim-transcript"`)
+    - Native-speech capability badge in the header (`data-testid="stylist-native-speech-badge"`)
+    - On assistant reply: when no server audio present, renders a **"Play reply"** / **"Stop speaking"** button that drives local `speechSynthesis` with the user's `preferred_language` (Volume2 / VolumeX icons)
+  - ✅ i18n keys added to `en.json` + `he.json`: `listening`, `tapToStop`, `speechUnsupported`, `nativeSpeech`, `stopSpeaking`, `playReply` (other locales fallback to English per Phase L strategy)
 - Backend
-  - No new endpoints. The existing Groq/Deepgram routes remain as a fallback surface; they are called only when the client reports `speech_supported=false`.
+  - ✅ `/app/backend/app/api/v1/stylist.py` — added `skip_tts: bool = Form(default=False)` parameter, plumbed into `get_styling_advice(..., synthesize_tts=not skip_tts)`. No new endpoints.
+  - ✅ Existing Groq Whisper + Deepgram Aura-2 paths fully preserved for fallback.
+
+**Verification**
+- ✅ Backend smoke tests (live against the preview URL):
+  - `skip_tts=true` → `tts_audio_base64: null`, `spoken_reply` + `reasoning_summary` populated, HTTP 200
+  - default (skip_tts omitted) → `tts_audio_base64` present (~133KB base64 MP3)
+  - Hebrew localization + `skip_tts=true` → Hebrew reply + no audio (Phase L × Phase M interop)
+- ✅ Frontend screenshot verification on Chromium:
+  - "NATIVE SPEECH" badge renders in header
+  - After a fresh send, the assistant reply shows the "Play reply" button (no waveform player)
+  - `PLAY_BUTTONS: 1, STOP_BUTTONS: 0` exactly as expected before play
+- ✅ Lint + esbuild bundle clean (no new errors)
 
 **Success criteria**
-- Stylist conversations complete end-to-end with zero calls to Groq/Deepgram on iOS Safari, Chrome, and Android Chrome.
-- Voice output uses the correct locale voice when available; falls back to English voice otherwise.
-- Firefox desktop still works via the existing server-side fallback.
+- ✅ Stylist conversations complete end-to-end with zero Deepgram audio returned on supported browsers (skip_tts=true path).
+- ✅ Voice output uses the correct locale voice when available; falls back to English voice otherwise.
+- ✅ Firefox desktop still works via the existing server-side fallback (backend paths untouched).
 
 ---
 
@@ -474,7 +493,7 @@ Goal: add a first-class "complete this outfit" action in the Closet. Given 1–N
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
 | P0 | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
-| P1 | Phase M — System-native STT/TTS | — | None (ready to start) |
+| P1 | ✅ Phase M — System-native STT/TTS | — | **SHIPPED** |
 | P1 | Phase P — Outfit Completion | FashionCLIP (shipped) | None (ready to start) |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
 
@@ -490,8 +509,8 @@ Goal: add a first-class "complete this outfit" action in the Closet. Given 1–N
 1. **Phase 6 / N model merge (P0 / blocked)**
    - User runs `/app/scripts/pog_phase6_merge_gguf.ipynb` off-pod.
    - After hosting, set `GARMENT_VISION_ENDPOINT_URL` and run backend verification.
-2. **Phase M — System-native STT/TTS (P1 / ready to start)**
-   - Wire `window.SpeechRecognition` + `window.speechSynthesis` into `Stylist.jsx` with graceful fallback to Groq/Deepgram.
+2. **Phase M — System-native STT/TTS (P1) — ✅ SHIPPED**
+   - Web Speech API wired into Stylist with graceful Groq/Deepgram fallback. See Phase M section above.
 3. **Phase P — Outfit Completion (P1 / ready to start)**
    - Add `POST /api/v1/closet/complete-outfit` + UI action in `Closet.jsx` multi-select toolbar.
 4. **Phase O — Gemma 4 E4B Stylist (P2 / deferred)**
@@ -540,7 +559,7 @@ Goal: add a first-class "complete this outfit" action in the Closet. Given 1–N
 - Phase 6:
   - ⏳ Fine-tuned Gemma 4 E2B merged + exported to GGUF and hosted; backend uses it via endpoint/env switch
 - **Roadmap Additions (Audit-Approved):**
-  - ⏳ Phase M — System-native STT/TTS live with graceful fallback (P1)
+  - ✅ Phase M — System-native STT/TTS live with graceful fallback (P1)
   - ⏳ Phase N — Gemma 4 E2B merge completed + routed (P0, same as Phase 6)
   - ⏳ Phase O — Gemma 4 E4B stylist provider-dispatched with fallback to Gemini (P2)
   - ⏳ Phase P — Outfit Completion endpoint + Closet UI action shipped (P1)

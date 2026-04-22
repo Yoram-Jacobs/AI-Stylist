@@ -37,10 +37,10 @@
   },
   {
     "content": "Call testing_agent for full Phase M backend validation",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Update plan.md Phase M status to COMPLETED",
-    "status": "pending"
+    "status": "completed"
   }
 ]
