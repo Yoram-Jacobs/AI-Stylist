@@ -25,7 +25,7 @@
 - ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
 - ✅ **Phase T shipped**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
 - ✅ **Phase U shipped**: **Experts Pool + Ads/Campaigns + AdTicker + Ask-a-Professional directory** — backend 16/16, frontend 17/17.
-- 🎯 **Payments shipped**: **PayPal** (Smart Buttons Orders v2) + **PayPal Payouts** + **prepaid ad credits** with multi-currency support. Running in **MOCK MODE** pending valid sandbox credentials (the keys provided returned `invalid_client`). Full backend suite 17/17 features passing.
+- 🎯 **Payments shipped**: **PayPal** (Smart Buttons Orders v2) + **PayPal Payouts** + **prepaid ad credits** with multi-currency support. **LIVE on sandbox** (`PAYPAL_MOCK_MODE=false`) as of 2026-04-23. OAuth2 token returns scope including checkout, invoicing, and payouts. Real sandbox order `54G424177R8903615` for USD 10.00 was created + verified against PayPal REST API with correct brand name, merchant ID, payee `dev@dressapp.io`.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -105,7 +105,7 @@ Delivered previously; unchanged.
 **Goal**: Replace deferred PayPlus plan with **PayPal Smart Buttons** (Orders v2) for checkout and **PayPal Payouts** for seller disbursement, plus **prepaid ad-credit balance** for professionals. Support **sandbox + live** via `PAYPAL_ENV`. Support **multi-currency MVP**.
 
 **Shipped**:
-- `paypal_client.py` — httpx REST v2 wrapper with OAuth2 token cache, mock fallback when creds invalid (current state — user's sandbox keys return `invalid_client`).
+- `paypal_client.py` — httpx REST v2 wrapper with OAuth2 token cache, mock fallback available for dev/demo (currently disabled — `PAYPAL_MOCK_MODE=false`).
 - Orders: `POST /v1/paypal/orders` create + capture, webhook handler with duplicate-event dedupe + signature verify hook.
 - Credits: prepaid balance per (user, currency). Endpoints: `GET/POST /v1/credits/balance|balances|history|topup|topup/{id}/capture`. Packs: $10, $25, $50, Custom ($1–$1000).
 - Ads billing: impression/click deduct 1¢/5¢ atomically from credit balance; campaigns auto-pause with `status_reason='insufficient_funds'` when broke.
@@ -114,7 +114,7 @@ Delivered previously; unchanged.
 - i18n: EN/HE/AR for credits, payouts, buy-for, paypalDisclosure.
 - Tests: 17/17 backend feature tests passing (93% overall including edge cases).
 
-> **Note**: Keys provided by user (sandbox: `AAeAZLoVI6…`, secret: `EPGPe972…`) are rejected by PayPal with `invalid_client`. `PAYPAL_MOCK_MODE=true` keeps all flows demo-able. Paste corrected keys (from the app's own dashboard page on https://developer.paypal.com/dashboard/applications/sandbox) to flip to real PayPal.
+> **Status**: Live on sandbox. `PAYPAL_MOCK_MODE=false`. Real sandbox orders verified end-to-end. Live keys also authenticated successfully and are staged (env flip via `PAYPAL_ENV=live`). Webhook IDs still blank — register webhook at `https://ai-stylist-api.preview.emergentagent.com/api/v1/paypal/webhook` in both sandbox and live apps, then paste the resulting webhook IDs.
 
 **Known credentials status**
 - ✅ Sandbox keys received.
