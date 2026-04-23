@@ -13,6 +13,7 @@ import {
   VolumeX,
   MessageSquare,
   PanelRight,
+  UserRound,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
 import { WaveformAudioPlayer } from '@/components/WaveformAudioPlayer';
 import { ConversationSidebar } from '@/components/stylist/ConversationSidebar';
 import { FashionScoutPanel } from '@/components/stylist/FashionScoutPanel';
@@ -34,6 +36,7 @@ import { OutfitRecommendationCard } from '@/components/stylist/OutfitRecommendat
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
+import { useLocation as useAppLocation } from '@/lib/location';
 import {
   isSTTSupported,
   isTTSSupported,
@@ -55,6 +58,7 @@ const base64ToUrl = (b64, mime = 'audio/mpeg') => {
 export default function Stylist() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const loc = useAppLocation();
 
   // Conversation state
   const [sessions, setSessions] = useState([]);
@@ -317,6 +321,13 @@ export default function Stylist() {
     body.append('voice_id', user?.preferred_voice_id || 'aura-2-thalia-en');
     if (activeSessionId) body.append('session_id', activeSessionId);
     if (ttsSupportedRef.current) body.append('skip_tts', 'true');
+    // Augment the turn with the device coordinates so the stylist can
+    // ground weather + regional context without waiting for a background
+    // call. Falls back to the user's saved home_location server-side.
+    if (loc?.coords?.lat != null && loc?.coords?.lng != null) {
+      body.append('lat', String(loc.coords.lat));
+      body.append('lng', String(loc.coords.lng));
+    }
     if (includeCalendar) {
       body.append('include_calendar', 'true');
       if (occasion) body.append('occasion', occasion);
@@ -468,6 +479,7 @@ export default function Stylist() {
                           key={i}
                           rec={rec}
                           index={i}
+                          sessionId={activeSessionId}
                         />
                       ))}
                       {m.payload.do_dont?.length > 0 && (
@@ -612,6 +624,32 @@ export default function Stylist() {
               </button>
             </div>
           )}
+          <div className="ms-auto">
+            <button
+              type="button"
+              disabled
+              title={
+                loc?.coords
+                  ? t('stylist.askProfessionalLocal')
+                  : t('stylist.askProfessionalSoon')
+              }
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs',
+                'border border-dashed border-[hsl(var(--accent))]/40 text-[hsl(var(--accent))]',
+                'opacity-70 cursor-not-allowed',
+              )}
+              data-testid="stylist-ask-professional-btn"
+            >
+              <UserRound className="h-3.5 w-3.5" />
+              {t('stylist.askProfessional')}
+              <Badge
+                variant="outline"
+                className="ms-1 text-[9px] py-0 h-4 px-1 rounded-sm bg-card"
+              >
+                {t('common.comingSoon')}
+              </Badge>
+            </button>
+          </div>
         </div>
         <div className="flex items-end gap-2">
           <Textarea

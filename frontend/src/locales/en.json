@@ -348,7 +348,14 @@
     "untitledConversation": "Untitled chat",
     "todayLabel": "Today",
     "yesterdayLabel": "Yesterday",
-    "earlierLabel": "Earlier"
+    "earlierLabel": "Earlier",
+    "askProfessional": "Ask a professional",
+    "askProfessionalSoon": "Coming soon — connect with a stylist.",
+    "askProfessionalLocal": "Coming soon — connect with a local stylist.",
+    "shareOutfit": "Share outfit",
+    "shareCopied": "Link copied",
+    "shareOutfitSubject": "Check out this outfit I'm considering",
+    "shareOutfitBody": "My DressApp stylist suggested this. What do you think?"
   },
   "outfitCompletion": {
     "cta": "Complete the outfit",
@@ -414,7 +421,13 @@
     "netShort": "net {{amount}}",
     "sourceFilter": "Source",
     "categoryFilter": "Category",
-    "noImage": "No image"
+    "noImage": "No image",
+    "nearYou": "Near you",
+    "anyDistance": "Any distance",
+    "radius": "Radius",
+    "radiusKm": "{{km}} km",
+    "distanceKmAway": "{{km}} km away",
+    "needLocationForNearby": "Enable location to sort by nearest"
   },
   "createListing": {
     "title": "Create a listing",
@@ -508,7 +521,11 @@
     "signOut": "Sign out",
     "profileSaved": "Profile saved",
     "saveFailed": "Save failed",
-    "languageUpdated": "Language updated"
+    "languageUpdated": "Language updated",
+    "inviteFriends": "Invite friends",
+    "inviteSubject": "Join me on DressApp",
+    "inviteBody": "I'm using DressApp to organize my wardrobe with an AI stylist. Join me here:",
+    "inviteCopied": "Invite link copied"
   },
   "admin": {
     "title": "Admin",
@@ -740,5 +757,24 @@
       "crossbody_bag": "Crossbody bag",
       "clutch": "Clutch"
     }
+  },
+  "location": {
+    "title": "Use your location?",
+    "rationale": "Location powers weather-aware styling, nearby stores, local marketplace results, and regional fashion trends. We only send your coordinates to the Stylist and never share them with other users.",
+    "allow": "Use my location",
+    "notNow": "Not now",
+    "retry": "Retry",
+    "denied": "Location blocked by your browser",
+    "deniedHint": "Enable location in your browser's site settings to re-prompt.",
+    "granted": "Location active",
+    "unavailable": "Location isn't available on this device.",
+    "lastKnown": "Last known",
+    "forget": "Forget my location",
+    "forgotten": "Location cleared",
+    "sectionTitle": "Location",
+    "cityLabel": "City",
+    "accuracyLabel": "Accuracy",
+    "metersShort": "m",
+    "kmShort": "km"
   }
 }

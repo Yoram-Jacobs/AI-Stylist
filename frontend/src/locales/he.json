@@ -348,7 +348,14 @@
     "untitledConversation": "שיחה ללא שם",
     "todayLabel": "היום",
     "yesterdayLabel": "אתמול",
-    "earlierLabel": "קודם לכן"
+    "earlierLabel": "קודם לכן",
+    "askProfessional": "שאל מומחה",
+    "askProfessionalSoon": "בקרוב — התחברות לסטייליסט.",
+    "askProfessionalLocal": "בקרוב — סטייליסט מקומי בסביבתך.",
+    "shareOutfit": "שתף תלבושת",
+    "shareCopied": "הקישור הועתק",
+    "shareOutfitSubject": "תלבושת שאני שוקלת — דעה?",
+    "shareOutfitBody": "הסטייליסט של DressApp הציע את זה. מה דעתך?"
   },
   "outfitCompletion": {
     "cta": "השלם את הלוק",
@@ -414,7 +421,13 @@
     "netShort": "נטו {{amount}}",
     "sourceFilter": "מקור",
     "categoryFilter": "קטגוריה",
-    "noImage": "אין תמונה"
+    "noImage": "אין תמונה",
+    "nearYou": "קרוב אליך",
+    "anyDistance": "כל מרחק",
+    "radius": "רדיוס",
+    "radiusKm": "{{km}} ק״מ",
+    "distanceKmAway": "במרחק {{km}} ק״מ",
+    "needLocationForNearby": "אפשרי מיקום כדי למיין לפי קרבה"
   },
   "createListing": {
     "title": "צור מודעה",
@@ -508,7 +521,11 @@
     "signOut": "יציאה",
     "profileSaved": "הפרופיל נשמר",
     "saveFailed": "השמירה נכשלה",
-    "languageUpdated": "השפה עודכנה"
+    "languageUpdated": "השפה עודכנה",
+    "inviteFriends": "הזמן חברים",
+    "inviteSubject": "הצטרף אליי ל-DressApp",
+    "inviteBody": "אני משתמש ב-DressApp כדי לארגן את הארון עם סטייליסט AI. הצטרף גם אתה:",
+    "inviteCopied": "קישור ההזמנה הועתק"
   },
   "admin": {
     "title": "ניהול",
@@ -740,5 +757,24 @@
       "crossbody_bag": "תיק צד",
       "clutch": "קלאץ׳"
     }
+  },
+  "location": {
+    "title": "להשתמש במיקום שלך?",
+    "rationale": "המיקום מפעיל סטייליסט מודע לאקלים, חנויות בסביבה, תוצאות מרקטפלייס מקומיות וטרנדים אזוריים. הקואורדינטות נשלחות רק לסטייליסט ואינן משותפות עם משתמשים אחרים.",
+    "allow": "השתמש במיקום שלי",
+    "notNow": "לא עכשיו",
+    "retry": "נסה שוב",
+    "denied": "המיקום חסום בדפדפן",
+    "deniedHint": "אפשרו מיקום בהגדרות האתר בדפדפן כדי לבקש שוב.",
+    "granted": "המיקום פעיל",
+    "unavailable": "המיקום אינו זמין במכשיר זה.",
+    "lastKnown": "נקודה אחרונה",
+    "forget": "שכח את המיקום שלי",
+    "forgotten": "המיקום נוקה",
+    "sectionTitle": "מיקום",
+    "cityLabel": "עיר",
+    "accuracyLabel": "דיוק",
+    "metersShort": "מ׳",
+    "kmShort": "ק״מ"
   }
 }

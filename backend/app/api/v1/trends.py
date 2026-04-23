@@ -27,10 +27,14 @@ async def get_latest_trends(
 @router.get("/fashion-scout")
 async def get_fashion_scout_feed(
     limit: int = Query(default=12, ge=1, le=50),
+    language: str | None = Query(default=None, max_length=8),
+    country: str | None = Query(default=None, max_length=4),
 ) -> dict[str, Any]:
     """Newest-first flat feed for the Stylist right-panel news-flash."""
-    cards = await fashion_scout_feed(limit=limit)
-    return {"cards": cards, "count": len(cards)}
+    cards = await fashion_scout_feed(
+        limit=limit, language=language, country=country
+    )
+    return {"cards": cards, "count": len(cards), "language": language or "en"}
 
 
 @router.post("/run-now")

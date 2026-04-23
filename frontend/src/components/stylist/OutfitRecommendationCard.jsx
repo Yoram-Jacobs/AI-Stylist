@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { labelForRole } from '@/lib/taxonomy';
 import { cn } from '@/lib/utils';
+import { ShareOutfitButton } from '@/components/stylist/ShareOutfitButton';
 
 /**
  * Renders a single outfit recommendation. When recommendation items include
@@ -14,7 +15,7 @@ import { cn } from '@/lib/utils';
  * Image fetching is lazy and memoized per card instance to avoid hammering
  * the API when the chat thread re-renders.
  */
-export function OutfitRecommendationCard({ rec, index }) {
+export function OutfitRecommendationCard({ rec, index, sessionId }) {
   const { t } = useTranslation();
   const items = rec.items || [];
   const ids = items
@@ -135,6 +136,9 @@ export function OutfitRecommendationCard({ rec, index }) {
           ))}
         </ul>
         {rec.why ? <p className="text-xs mt-2 italic">{rec.why}</p> : null}
+        <div className="mt-3 flex items-center justify-end">
+          <ShareOutfitButton rec={rec} sessionId={sessionId} />
+        </div>
       </div>
     </div>
   );

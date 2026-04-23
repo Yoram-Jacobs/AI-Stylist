@@ -126,6 +126,9 @@ async def browse_listings(
     status: ListingStatus = Query(default="active"),
     limit: int = Query(default=30, le=100),
     skip: int = Query(default=0, ge=0),
+    lat: float | None = Query(default=None, ge=-90, le=90),
+    lng: float | None = Query(default=None, ge=-180, le=180),
+    radius_km: float | None = Query(default=None, ge=1, le=20037),
     user: dict | None = Depends(get_current_user_optional),
 ) -> dict[str, Any]:
     db = get_db()
@@ -146,6 +149,34 @@ async def browse_listings(
         query.setdefault("financial_metadata.list_price_cents", {})["$lte"] = (
             max_price_cents
         )
+
+    # Geo-ranked browse: when the caller provides coordinates we run a
+    # $geoNear aggregation so listings near the user float to the top and
+    # every result carries its `distance_km` for the UI badge.
+    if lat is not None and lng is not None:
+        max_meters = (radius_km * 1000) if radius_km else 200_000
+        pipeline = [
+            {
+                "$geoNear": {
+                    "near": {"type": "Point", "coordinates": [lng, lat]},
+                    "distanceField": "distance_m",
+                    "maxDistance": max_meters,
+                    "query": query,
+                    "spherical": True,
+                }
+            },
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$project": {"_id": 0}},
+        ]
+        cursor = db.listings.aggregate(pipeline)
+        items: list[dict[str, Any]] = []
+        async for doc in cursor:
+            if "distance_m" in doc:
+                doc["distance_km"] = round(doc["distance_m"] / 1000, 1)
+            items.append(doc)
+        total = await repos.count(db.listings, query)
+        return {"items": items, "total": total, "limit": limit, "skip": skip}
 
     items = await repos.find_many(
         db.listings, query, sort=[("created_at", -1)], limit=limit, skip=skip

@@ -79,8 +79,17 @@ async def ensure_indexes() -> None:
         [("region", 1), ("religion", 1), ("occasion", 1)]
     )
     await db.trend_reports.create_index([("date", -1), ("bucket", 1)])
+    # Phase R+S: multi-language cards. Legacy unique index didn't include
+    # `language` — drop and replace so we can persist per-(bucket,date,lang).
+    try:
+        await db.trend_reports.drop_index("bucket_1_date_1")
+    except Exception:  # noqa: BLE001
+        pass
     await db.trend_reports.create_index(
-        [("bucket", 1), ("date", 1)], unique=True
+        [("bucket", 1), ("date", 1), ("language", 1)], unique=True, sparse=True
+    )
+    await db.trend_reports.create_index(
+        [("origin_id", 1), ("language", 1)], sparse=True
     )
     logger.info("MongoDB indexes ensured")
 

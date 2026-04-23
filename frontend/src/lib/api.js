@@ -144,10 +144,32 @@ export const api = {
   // trend-scout
   trendsLatest: (perBucket = 1) =>
     client.get('/trends/latest', { params: { per_bucket: perBucket } }).then((r) => r.data),
-  fashionScoutFeed: (limit = 12) =>
-    client.get('/trends/fashion-scout', { params: { limit } }).then((r) => r.data),
+  fashionScoutFeed: (limit = 12, params = {}) =>
+    client
+      .get('/trends/fashion-scout', {
+        params: {
+          limit,
+          ...(params.language ? { language: params.language } : {}),
+          ...(params.country ? { country: params.country } : {}),
+        },
+      })
+      .then((r) => r.data),
   trendsRunNowDev: (force = true) =>
     client.post('/trends/run-now-dev', null, { params: { force } }).then((r) => r.data),
+
+  // share — mint a read-only snapshot link for an outfit recommendation
+  createSharedOutfit: (body) =>
+    client.post('/share/outfit', body).then((r) => {
+      const data = r.data;
+      // Convenience: attach the fully-qualified share URL so callers can
+      // drop it straight into `navigator.share`.
+      if (data?.id && typeof window !== 'undefined') {
+        data.share_url = `${window.location.origin}/shared/${data.id}`;
+      }
+      return data;
+    }),
+  getSharedOutfit: (id) =>
+    client.get(`/share/outfit/${id}`).then((r) => r.data),
 
   // admin
   adminOverview: () => client.get('/admin/overview').then((r) => r.data),

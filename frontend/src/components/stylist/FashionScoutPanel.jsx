@@ -8,6 +8,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
+import { useLocation as useAppLocation } from '@/lib/location';
 
 /**
  * Each bucket renders with its own analogous-color gradient so the absence
@@ -131,21 +133,36 @@ function ScoutCard({ card, t }) {
 }
 
 export function FashionScoutPanel() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { user } = useAuth();
+  const loc = useAppLocation();
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Regionalize the feed: user's preferred UI language + best-available
+  // country code (live device > persisted home_location).
+  const language = (user?.preferred_language || i18n.language || 'en')
+    .split('-')[0]
+    .toLowerCase();
+  const country =
+    (loc?.country_code || user?.home_location?.country_code || '')
+      .toString()
+      .toUpperCase() || null;
+
   const load = useCallback(async () => {
     try {
-      const { cards: rows } = await api.fashionScoutFeed(12);
+      const { cards: rows } = await api.fashionScoutFeed(12, {
+        language,
+        country,
+      });
       setCards(rows || []);
     } catch {
       // non-fatal; keep whatever we had
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [language, country]);
 
   useEffect(() => {
     load();

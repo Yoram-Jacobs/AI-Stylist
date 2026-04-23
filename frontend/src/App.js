@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth';
+import { LocationProvider } from '@/lib/location';
 import { AppLayout } from '@/components/AppLayout';
 import { PublicOnly } from '@/components/PublicOnly';
 import { SeoBase } from '@/components/SeoBase';
@@ -25,7 +26,8 @@ function App() {
   return (
     <HelmetProvider>
       <AuthProvider>
-        <BrowserRouter>
+        <LocationProvider>
+          <BrowserRouter>
           <SeoBase />
           <a
             href="#main-content"
@@ -56,7 +58,8 @@ function App() {
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
           <Toaster position="top-center" richColors closeButton />
-        </BrowserRouter>
+          </BrowserRouter>
+        </LocationProvider>
       </AuthProvider>
     </HelmetProvider>
   );

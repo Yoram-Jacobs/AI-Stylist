@@ -222,7 +222,14 @@
     "untitledConversation": "محادثة بدون عنوان",
     "todayLabel": "اليوم",
     "yesterdayLabel": "أمس",
-    "earlierLabel": "سابقًا"
+    "earlierLabel": "سابقًا",
+    "askProfessional": "اسأل مختصًا",
+    "askProfessionalSoon": "قريبًا — التواصل مع مصمم.",
+    "askProfessionalLocal": "قريبًا — تواصل مع مصمم محلي.",
+    "shareOutfit": "شارك الإطلالة",
+    "shareCopied": "تم نسخ الرابط",
+    "shareOutfitSubject": "ما رأيك بهذه الإطلالة؟",
+    "shareOutfitBody": "اقترح مصمم DressApp هذه الإطلالة. ما رأيك؟"
   },
   "outfitCompletion": {
     "cta": "أكمل الإطلالة",
@@ -261,7 +268,13 @@
     "processingFee": "رسوم المعالجة",
     "description": "الوصف",
     "priceLabel": "السعر",
-    "status": "الحالة"
+    "status": "الحالة",
+    "nearYou": "بالقرب منك",
+    "anyDistance": "أي مسافة",
+    "radius": "نصف القطر",
+    "radiusKm": "{{km}} كم",
+    "distanceKmAway": "على بعد {{km}} كم",
+    "needLocationForNearby": "فعّل الموقع للفرز بالأقرب"
   },
   "createListing": {
     "title": "إنشاء إعلان",
@@ -316,7 +329,11 @@
     "signOut": "تسجيل الخروج",
     "profileSaved": "تم حفظ الملف",
     "saveFailed": "فشل الحفظ",
-    "languageUpdated": "تم تحديث اللغة"
+    "languageUpdated": "تم تحديث اللغة",
+    "inviteFriends": "ادعُ الأصدقاء",
+    "inviteSubject": "انضم إليّ على DressApp",
+    "inviteBody": "أستخدم DressApp لتنظيم خزانتي بمساعدة مصمم ذكي. انضم إليّ:",
+    "inviteCopied": "تم نسخ رابط الدعوة"
   },
   "admin": {
     "title": "الإدارة",
@@ -548,5 +565,24 @@
       "crossbody_bag": "Crossbody bag",
       "clutch": "Clutch"
     }
+  },
+  "location": {
+    "title": "استخدام موقعك؟",
+    "rationale": "الموقع يدعم التنسيق المراعي للطقس والمتاجر القريبة ونتائج السوق المحلية واتجاهات الموضة الإقليمية. نرسل إحداثياتك للمصمم فقط ولا نشاركها مع مستخدمين آخرين.",
+    "allow": "استخدم موقعي",
+    "notNow": "ليس الآن",
+    "retry": "حاول مجددًا",
+    "denied": "المتصفح يحجب الموقع",
+    "deniedHint": "فعّل الموقع من إعدادات الموقع بالمتصفح ثم حاول مجددًا.",
+    "granted": "الموقع مفعّل",
+    "unavailable": "الموقع غير متاح على هذا الجهاز.",
+    "lastKnown": "آخر موقع معروف",
+    "forget": "أنسَ موقعي",
+    "forgotten": "تم مسح الموقع",
+    "sectionTitle": "الموقع",
+    "cityLabel": "المدينة",
+    "accuracyLabel": "الدقة",
+    "metersShort": "م",
+    "kmShort": "كم"
   }
 }

@@ -12,6 +12,8 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useNavigate } from 'react-router-dom';
 import { CalendarConnect } from '@/components/CalendarConnect';
+import { LocationCard } from '@/components/LocationCard';
+import { InviteFriendsButton } from '@/components/InviteFriendsButton';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 
 const VOICES = [
@@ -140,6 +142,14 @@ export default function Profile() {
 
       <div className="mb-6">
         <CalendarConnect />
+      </div>
+
+      <div className="mb-6">
+        <LocationCard />
+      </div>
+
+      <div className="mb-6">
+        <InviteFriendsButton />
       </div>
 
       <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">

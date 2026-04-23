@@ -1,42 +1,38 @@
 [
   {
-    "content": "Extend StylistSession schema (title, snippet) + stylist_memory helpers (list/create/get/delete)",
+    "content": "LocationProvider + useLocation hook (permission state, geolocation, reverse geocode, persist to home_location)",
     "status": "completed"
   },
   {
-    "content": "Update /stylist endpoint to accept session_id + generate session title on first turn",
+    "content": "LocationBanner / first-run prompt + Profile location section",
     "status": "completed"
   },
   {
-    "content": "Add /stylist/sessions CRUD routes + update /stylist/history to take session_id",
+    "content": "Marketplace: backend geoNear + frontend radius/distance chip",
     "status": "completed"
   },
   {
-    "content": "Extend trend_scout buckets + schema (image_url, source_url, source_name, video_url)",
+    "content": "Fashion Scout localization: per (bucket, date, language, country) cache + Gemini translation on demand",
     "status": "completed"
   },
   {
-    "content": "Add GET /trends/fashion-scout endpoint",
+    "content": "Ask a Professional disabled CTA on Stylist composer",
     "status": "completed"
   },
   {
-    "content": "Add API helpers in frontend api.js",
+    "content": "ShareOutfitButton + InviteFriendsButton using Web Share API with fallback",
     "status": "completed"
   },
   {
-    "content": "Build ConversationSidebar component",
+    "content": "Backend /share/outfit endpoint for public snapshot (minimal)",
     "status": "completed"
   },
   {
-    "content": "Build FashionScoutPanel component",
+    "content": "i18n keys in en/he/ar for new strings",
     "status": "completed"
   },
   {
-    "content": "Redesign Stylist.jsx to 3-panel layout + embed closet images in recommendation cards",
-    "status": "completed"
-  },
-  {
-    "content": "Lint + screenshot QA in Hebrew and English — all green",
+    "content": "Lint + screenshot QA in Hebrew + English (all green)",
     "status": "completed"
   }
 ]

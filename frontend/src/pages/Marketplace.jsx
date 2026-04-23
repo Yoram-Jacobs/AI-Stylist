@@ -8,9 +8,11 @@ import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
-import { Plus } from 'lucide-react';
+import { Plus, MapPin } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { labelForCategory, labelForSource } from '@/lib/taxonomy';
+import { useLocation as useAppLocation } from '@/lib/location';
 import { toast } from 'sonner';
 
 const fmt = (cents, cur = 'USD') =>
@@ -18,12 +20,14 @@ const fmt = (cents, cur = 'USD') =>
 
 const SOURCES = ['all', 'Shared', 'Retail'];
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
+const RADIUS_OPTIONS = ['any', '5', '25', '50', '200'];
 
 export default function Marketplace() {
   const { t } = useTranslation();
+  const loc = useAppLocation();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ source: 'all', category: 'all' });
+  const [filters, setFilters] = useState({ source: 'all', category: 'all', radius: 'any' });
 
   const load = async () => {
     setLoading(true);
@@ -31,6 +35,13 @@ export default function Marketplace() {
       const params = { status: 'active' };
       if (filters.source !== 'all') params.source = filters.source;
       if (filters.category !== 'all') params.category = filters.category;
+      // Attach coords whenever we have them so the server can rank results
+      // by proximity; honour the user's radius filter when it's not "any".
+      if (loc?.coords?.lat != null && loc?.coords?.lng != null) {
+        params.lat = loc.coords.lat;
+        params.lng = loc.coords.lng;
+        if (filters.radius !== 'any') params.radius_km = Number(filters.radius);
+      }
       const res = await api.listListings(params);
       setItems(res.items || []);
     } catch (err) {
@@ -39,7 +50,7 @@ export default function Marketplace() {
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [filters.source, filters.category]);
+  useEffect(() => { load(); }, [filters.source, filters.category, filters.radius, loc?.coords?.lat, loc?.coords?.lng]);
 
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
@@ -70,6 +81,38 @@ export default function Marketplace() {
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-category-select"><SelectValue /></SelectTrigger>
               <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{labelForCategory(c, t)}</SelectItem>)}</SelectContent>
             </Select>
+            {loc?.coords ? (
+              <Select
+                value={filters.radius}
+                onValueChange={(v) => setFilters((f) => ({ ...f, radius: v }))}
+              >
+                <SelectTrigger
+                  className="w-[160px] rounded-xl"
+                  data-testid="market-radius-select"
+                >
+                  <MapPin className="h-3.5 w-3.5 me-1 text-[hsl(var(--accent))]" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RADIUS_OPTIONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r === 'any'
+                        ? t('market.anyDistance')
+                        : t('market.radiusKm', { km: r })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge
+                variant="outline"
+                className="text-[11px] rounded-full bg-card"
+                data-testid="market-location-hint"
+              >
+                <MapPin className="h-3 w-3 me-1" />
+                {t('market.needLocationForNearby')}
+              </Badge>
+            )}
           </div>
 
           {loading && (
@@ -108,6 +151,16 @@ export default function Marketplace() {
                           {t('market.netShort', { amount: fmt(l.financial_metadata?.estimated_seller_net_cents) })}
                         </div>
                       </div>
+                      {typeof l.distance_km === 'number' ? (
+                        <Badge
+                          variant="outline"
+                          className="mt-2 text-[10px] rounded-full bg-card gap-1"
+                          data-testid="marketplace-item-distance"
+                        >
+                          <MapPin className="h-2.5 w-2.5" />
+                          {t('market.distanceKmAway', { km: l.distance_km })}
+                        </Badge>
+                      ) : null}
                     </CardContent>
                   </Card>
                 </Link>
