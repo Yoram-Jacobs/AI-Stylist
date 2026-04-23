@@ -24,7 +24,7 @@
 - ✅ **Phase R shipped**: **Multi-session Stylist + Fashion Scout side panel + chat image evidence**.
 - ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
 - ✅ **Phase T shipped**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
-- 🟡 **Phase U (NEW / NEXT)**: **Experts Pool + Ads/Campaigns + Ad Ticker + Ask-a-Professional directory**.
+- ✅ **Phase U shipped**: **Experts Pool + Ads/Campaigns + AdTicker + Ask-a-Professional directory** — backend 16/16, frontend 17/17.
 - 🎯 **Payments next**: PayPlus payments integration — deferred until API credentials are available.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
@@ -228,94 +228,37 @@ DressApp is currently a web app:
 
 ---
 
-### Phase U — Experts Pool + Ad Campaigns + Ticker **(P0 / NOT STARTED)**
+### Phase U — Experts Pool + Ad Campaigns + Ticker **(P0 / COMPLETE)**
 
-**Goal**: Let users self-enlist as professional fashion experts, appear in a regional directory, and run paid campaigns. “Ask a Professional” routes to the directory. Regional ads render as a running ticker on Home footer and Experts page.
+**Shipped (see commit summary below).** Backend verified 16/16, frontend 17/17.
 
-#### Phase U.A — Experts Pool schema + profile UI (P0)
-**Backend**
-- Add `User.professional` nested doc:
-  - `is_professional: bool`
-  - `profession: str` (e.g., Stylist, Barber, Fashion designer)
-  - `business: { name, address, phone, email, website, description }`
-  - `approval_status: 'self' | 'hidden'` (MVP; default 'self')
-  - `created_at`, `updated_at`
-- Extend `PATCH /users/me` to accept `professional`.
-- Admin endpoint to flag/hide:
-  - `POST /admin/professionals/{user_id}/hide`
-  - `POST /admin/professionals/{user_id}/unhide`
+**Delivered**
+- Backend:
+  - `User.professional` sub-doc: `{is_professional, profession, business:{name,address,phone,email,website,description}, approval_status}`
+  - `PATCH /users/me` accepts `professional`
+  - `GET /professionals?country=&region=&profession=&q=` + `GET /professionals/{id}` (404 on hidden)
+  - `POST/GET/PATCH/DELETE /ads/campaigns` (pros only, owner-scoped; admin can view any)
+  - `GET /ads/ticker?country=&region=&limit=` — weighted by `bid_cents * pacing` (pacing halves weight after daily budget spent)
+  - `POST /ads/impression/{id}` (+1¢), `POST /ads/click/{id}` (+5¢)
+  - Admin: `GET /admin/professionals`, `hide/unhide`, `GET /admin/ads/campaigns`, `disable/enable`
+  - Indexes: `users(professional.is_professional, approval_status)`, `users(professional.profession)`, `ad_campaigns(owner_id, created_at)`, `ad_campaigns(status, target_country, target_region)`
+- Frontend:
+  - `ProfileDetailsCard` → **Professional** accordion (Switch + all business fields + inline visibility note)
+  - `/experts` directory: filter bar, grid of expert cards, website/call/email CTAs, region-aware AdTicker footer
+  - `/ads` campaigns manager: gated for non-pros, full CRUD dialog, pause/resume, metrics (impressions/clicks/spent)
+  - `AdTicker` running strip (auto-rotate 5s, impression tracking, CTA click-through tracking) on Home + Experts
+  - Stylist **Ask a Professional** CTA now navigates to `/experts?country=&region=`
+  - TopNav: `Experts` link; Avatar dropdown: `My ads` for pros only
+  - EN/HE/AR i18n coverage for all new surfaces
 
-**Frontend**
-- Add “Professional” accordion section to Profile:
-  - Checkbox “Professional fashion expert?” reveals Profession + Business Details fields.
-  - Inline note: “Visible in Experts directory” when enabled.
-- i18n keys for the entire section (EN/HE/AR curated).
-
-#### Phase U.B — Professionals directory endpoints (P0)
-**Backend**
-- `GET /professionals` with filters:
-  - `country`, `region`, `profession`
-  - exclude `approval_status='hidden'`
-  - optionally require `is_professional=true`
-- `GET /professionals/{id}`
-
-**Frontend**
-- New `/experts` directory page:
-  - Filter bar (region, profession)
-  - Grid cards (name, profession, business name, city, website/contact CTA)
-  - Details modal or details route.
-
-#### Phase U.C — Ads / campaigns (Facebook-inspired, one-level) (P0)
-**Backend**
-- New collection `ad_campaigns`:
-  - `{ id, owner_id, name, profession, creative {headline, body, image_url, cta_url}, daily_budget_cents, bid_cents, start_date, end_date, target_country, target_region, status, impressions, clicks, spent_cents }`
-- CRUD endpoints (owner-only):
-  - `POST /ads/campaigns`
-  - `GET /ads/campaigns`
-  - `GET /ads/campaigns/{id}`
-  - `PATCH /ads/campaigns/{id}`
-  - `DELETE /ads/campaigns/{id}`
-- Auction-lite serving:
-  - `GET /ads/ticker?country=…&region=…&limit=5`
-  - Eligibility: active + within dates + region match + budget remaining
-  - Selection: weighted by `bid_cents` with budget pacing (e.g. weight = bid * remaining_daily_budget)
-- Tracking:
-  - `POST /ads/impression/{id}`
-  - `POST /ads/click/{id}`
-
-**Admin**
-- Admin hide/disable campaign endpoint:
-  - `POST /admin/ads/campaigns/{id}/disable`
-
-> **Billing note:** PayPlus is not yet integrated; Phase U will track impressions/clicks/spend counters but will not charge real money until PayPlus ships.
-
-#### Phase U.D — Frontend Ads Manager (P0)
-- New `/ads` page (for professionals only):
-  - List campaigns, create/edit form, pause/resume, delete.
-  - Creative preview tile.
-  - Basic analytics: impressions, clicks, spent.
-
-#### Phase U.E — AdTicker component + placements (P0)
-- `AdTicker` running strip:
-  - Visible on Home footer + Experts page.
-  - Region-aware (uses device/home location country/region).
-  - Auto-rotating cards: creative headline + small image + CTA.
-
-#### Phase U.F — Wire Stylist “Ask a Professional” CTA (P0)
-- Enable the CTA (currently disabled scaffold) to route to `/experts`.
-- When location available, pre-filter directory to user’s country/region.
-
-#### Phase U.G — QA  i18n (P0)
-- EN/HE/AR translations for all new Professional/Ads UI.
-- RTL layout checks.
-- Screenshot audit: Profile, Experts directory, Ads manager, Home ticker, Stylist CTA.
+> **Billing note:** PayPlus still deferred — impressions/clicks/spent remain virtual counters for the MVP.
 
 ---
 
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
-| **P0** | **Phase U — Experts Pool + Ads + Ticker** | Phase S (location), Phase T (profile UI) | None |
+| ✅ | **Phase U — Experts Pool + Ads + Ticker** | Phase S (location), Phase T (profile UI) | Shipped |
 | **P0** | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
 | **P1** | Phase 4 (Part 3) — PayPlus payments | PayPlus credentials | User credentials |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
@@ -386,11 +329,11 @@ DressApp is currently a web app:
   - ✅ Profile UI supports all required sections (Identity/Contact/Demographics/Units/Photos/Measurements/Hair)
   - ✅ Camera/upload photos stored (downscaled) and reloaded correctly
   - ✅ i18n coverage for new fields (EN/HE/AR curated)
-- **Phase U (NEW)**
-  - ⏳ Users can self-certify as professional; profile fields saved; admin can hide
-  - ⏳ `/experts` directory lists professionals filtered by region/profession
-  - ⏳ Professionals can create ad campaigns; auction-lite ticker serves region-matched creatives
-  - ⏳ Home footer ticker + Experts page ticker render ads; impressions/clicks tracked
-  - ⏳ Stylist “Ask a Professional” CTA routes to `/experts` and pre-filters by region
+- **Phase U (COMPLETE)**
+  - ✅ Users can self-certify as professional; profile fields saved; admin can hide
+  - ✅ `/experts` directory lists professionals filtered by region/profession
+  - ✅ Professionals can create ad campaigns; auction-lite ticker serves region-matched creatives
+  - ✅ Home footer ticker + Experts page ticker render ads; impressions/clicks tracked
+  - ✅ Stylist “Ask a Professional” CTA routes to `/experts` and pre-filters by region
 - Phase 6 / N:
   - ⏳ Fine-tuned Gemma 4 E2B merged + hosted; `/api/v1/closet/analyze` uses it via endpoint/env switch
