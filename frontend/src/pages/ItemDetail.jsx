@@ -55,6 +55,8 @@ import {
   labelForQuality,
   labelForIntent,
   labelForFormality,
+  labelForSubCategory,
+  labelForItemType,
 } from '@/lib/taxonomy';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
@@ -252,6 +254,26 @@ function ChipList({ value, onChange, placeholder, disabled, testidPrefix }) {
           <Plus className="h-3 w-3" />
         </Button>
       )}
+    </div>
+  );
+}
+
+/* -------------------- localized-display hint -------------------- */
+/**
+ * Shows a small secondary line below free-text taxonomy inputs (sub_category,
+ * item_type) with the localized display when the raw DB value matches a
+ * known taxonomy token. Hidden otherwise.
+ */
+function LocalizedHint({ raw, translated }) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed || !translated || translated === trimmed) return null;
+  return (
+    <div
+      className="mt-1 text-[11px] text-muted-foreground flex items-center gap-1 truncate"
+      data-testid="localized-display-hint"
+    >
+      <span aria-hidden="true">·</span>
+      <span>{translated}</span>
     </div>
   );
 }
@@ -728,6 +750,7 @@ export default function ItemDetail() {
                   className="rounded-xl"
                   data-testid="item-edit-field-sub_category"
                 />
+                <LocalizedHint raw={form.sub_category} translated={labelForSubCategory(form.sub_category, t)} />
               </Field>
               <Field label={t('itemDetail.edit.itemType')} htmlFor="f-itemtype">
                 <Input
@@ -737,6 +760,7 @@ export default function ItemDetail() {
                   className="rounded-xl"
                   data-testid="item-edit-field-item_type"
                 />
+                <LocalizedHint raw={form.item_type} translated={labelForItemType(form.item_type, t)} />
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label={t('itemDetail.edit.gender')}>

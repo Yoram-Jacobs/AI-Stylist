@@ -27,6 +27,7 @@ import {
   labelForCondition,
   labelForQuality,
   labelForIntent,
+  labelForItemType,
 } from '@/lib/taxonomy';
 import { toast } from 'sonner';
 
@@ -521,7 +522,7 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
                   className="bg-background/85 backdrop-blur text-[10px] capitalize border-border/60 flex items-center gap-1"
                 >
                   <Sparkles className="h-2.5 w-2.5 text-[hsl(var(--accent))]" />
-                  {card.label}
+                  {labelForItemType(card.label, t)}
                 </Badge>
               </div>
             )}

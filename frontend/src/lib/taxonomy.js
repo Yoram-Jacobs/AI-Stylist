@@ -108,6 +108,38 @@ export const labelForRole = (code, t) => {
   return fallback(t, key, code);
 };
 
+/**
+ * Sub-category / item-type labels.
+ *
+ * Backend stores these as free-form English text (e.g., "Pants", "Shorts",
+ * "Oxford shirt"). We normalize to a slug and look up a localized label; if
+ * we don't have a translation we return the raw value unchanged so non-
+ * dictionary garments (e.g., brand-specific nomenclature) still render.
+ */
+const itemSlug = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .replace(/[\s\/\-]+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+
+export const labelForSubCategory = (raw, t) => {
+  if (!raw) return '';
+  const slug = itemSlug(raw);
+  if (!slug) return raw;
+  const key = `taxonomy.sub_category.${slug}`;
+  return fallback(t, key, raw);
+};
+
+export const labelForItemType = (raw, t) => {
+  if (!raw) return '';
+  const slug = itemSlug(raw);
+  if (!slug) return raw;
+  const key = `taxonomy.item_type.${slug}`;
+  return fallback(t, key, raw);
+};
+
 /** Generic helper to map an array of codes into translated Select-ready objects. */
 export const makeLabeledOptions = (codes, labelFn, t) =>
   (codes || []).map((code) => ({ value: code, label: labelFn(code, t) }));

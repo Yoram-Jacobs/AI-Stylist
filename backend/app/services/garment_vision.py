@@ -175,12 +175,12 @@ def _language_directive(code: str | None) -> str:
         return ""
     return (
         "\n\nLANGUAGE DIRECTIVE: Write the free-text fields (`name`, "
-        f"`title`, `caption`, `repair_advice`, `tags`, "
-        f"`colors[*].name`, `fabric_materials[*].name`) in natural, "
-        f"idiomatic {name} (code: {code}). All other JSON keys and "
-        f"all enum-ish values (category, sub_category, item_type, "
-        f"gender, dress_code, season, pattern, state, condition, "
-        f"quality) MUST stay in English exactly as specified."
+        f"`title`, `caption`, `repair_advice`, `tags`, `sub_category`, "
+        f"`item_type`, `colors[*].name`, `fabric_materials[*].name`) in "
+        f"natural, idiomatic {name} (code: {code}). Keep all JSON keys in "
+        f"English. Keep the enum-ish values (`category`, `gender`, "
+        f"`dress_code`, `season`, `pattern`, `state`, `condition`, "
+        f"`quality`) in English exactly as specified."
     )
 
 

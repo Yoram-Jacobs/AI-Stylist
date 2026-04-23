@@ -82,7 +82,11 @@ async def stylist_endpoint(
     closet = await closet_summary_for(user["id"], limit=40)
 
     user_profile = {
-        "preferred_language": user.get("preferred_language", "en"),
+        # Prefer the language explicitly sent by the client (live UI selection)
+        # and fall back to the persisted user preference. This ensures Gemini
+        # receives the right directive even if the client-side locale hasn't
+        # been flushed to the DB yet.
+        "preferred_language": (language or user.get("preferred_language") or "en").lower(),
         "preferred_voice_id": user.get("preferred_voice_id", voice_id),
         "style_profile": user.get("style_profile"),
         "cultural_context": user.get("cultural_context"),
