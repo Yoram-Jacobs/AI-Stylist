@@ -114,7 +114,14 @@ Delivered previously; unchanged.
 - i18n: EN/HE/AR for credits, payouts, buy-for, paypalDisclosure.
 - Tests: 17/17 backend feature tests passing (93% overall including edge cases).
 
-> **Status**: Live on sandbox. `PAYPAL_MOCK_MODE=false`. Real sandbox orders verified end-to-end. Live keys also authenticated successfully and are staged (env flip via `PAYPAL_ENV=live`). Webhook IDs still blank — register webhook at `https://ai-stylist-api.preview.emergentagent.com/api/v1/paypal/webhook` in both sandbox and live apps, then paste the resulting webhook IDs.
+> **Status**: LIVE on sandbox. `PAYPAL_MOCK_MODE=false`, `PAYPAL_SKIP_WEBHOOK_VERIFY=false`. Real sandbox orders verified end-to-end.
+>
+> **Webhooks registered** (subscribed to capture completed/denied/refunded/reversed + all payouts-item + payouts-batch events):
+> - Sandbox Webhook ID: `7FG04442026793247`
+> - Live Webhook ID: `2U7003892N5293405`
+> - Endpoint: `https://ai-stylist-api.preview.emergentagent.com/api/v1/paypal/webhook`
+>
+> Signature verification is active and unsigned payloads are rejected with `{ok:false, reason:'signature_not_verified'}`. Live keys are staged; flip via `PAYPAL_ENV=live` when ready to do a real-money certification.
 
 **Known credentials status**
 - ✅ Sandbox keys received.
