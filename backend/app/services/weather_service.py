@@ -23,13 +23,24 @@ class WeatherService:
             raise RuntimeError("OPENWEATHER_API_KEY is not configured.")
         self.api_key = settings.OPENWEATHER_API_KEY
 
-    async def fetch(self, lat: float, lng: float, units: str = "metric") -> dict[str, Any]:
-        params = {
+    async def fetch(
+        self,
+        lat: float,
+        lng: float,
+        units: str = "metric",
+        lang: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
             "lat": lat,
             "lon": lng,
             "units": units,
             "appid": self.api_key,
         }
+        # OpenWeather returns localized `description` strings when `lang` is
+        # passed. It accepts BCP-47-style 2-letter codes (en, he, ar, es, …)
+        # which is exactly the shape of our `preferred_language`.
+        if lang:
+            params["lang"] = lang.lower()[:2]
         async with httpx.AsyncClient(timeout=15.0) as client:
             from app.services import provider_activity
 

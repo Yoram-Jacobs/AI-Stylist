@@ -175,7 +175,8 @@ def _language_directive(code: str | None) -> str:
         return ""
     return (
         "\n\nLANGUAGE DIRECTIVE: Write the free-text fields (`name`, "
-        f"`title`, `caption`, `repair_advice`, `tags`) in natural, "
+        f"`title`, `caption`, `repair_advice`, `tags`, "
+        f"`colors[*].name`, `fabric_materials[*].name`) in natural, "
         f"idiomatic {name} (code: {code}). All other JSON keys and "
         f"all enum-ish values (category, sub_category, item_type, "
         f"gender, dress_code, season, pattern, state, condition, "

@@ -346,9 +346,9 @@ export default function Closet() {
               className="rounded-lg"
             >
               {allVisibleSelected ? (
-                <><Square className="h-4 w-4 mr-1.5" /> Clear</>
+                <><Square className="h-4 w-4 mr-1.5" /> {t('common.clear')}</>
               ) : (
-                <><CheckSquare className="h-4 w-4 mr-1.5" /> Select all</>
+                <><CheckSquare className="h-4 w-4 mr-1.5" /> {t('common.selectAll')}</>
               )}
             </Button>
             <Button

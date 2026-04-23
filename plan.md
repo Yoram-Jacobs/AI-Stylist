@@ -607,6 +607,50 @@ Fixes the "cropped images only show part of the item" pain point. Every garment 
 
 ---
 
+### i18n Consistency Sweep **(COMPLETE)**
+Addresses a reported gap where "only the item's name and caption, created by Gemini, respected the language preference." Audit found several pockets of hard-coded English introduced during Phases M/P/Q; all closed in one pass.
+
+**Backend fixes**
+- ✅ **Weather summary localization** — `weather_service.fetch(lat, lng, lang=)` now forwards the user's `preferred_language` to OpenWeather's `lang=` query param, returning a localized `description` string (e.g. `"שמיים בהירים"` / `"bewölkt"` / `"cielo despejado"`). Both callers updated:
+  - `gemini_stylist` hydration in `logic.py`
+  - `complete-outfit` endpoint in `api/v1/closet.py`
+  - Both now emit `f"{temp_c}°C · {description} · {city}"` using a language-neutral `·` separator instead of the English connector `" in "`. Before: `"11.63°C Clouds in New York"`. After: `"9.61°C · שמיים בהירים · ניו יורק"`.
+- ✅ **Garment Vision language directive widened** — `colors[*].name` and `fabric_materials[*].name` free-text fields now explicitly included in the directive (previously only `name`, `title`, `caption`, `repair_advice`, `tags`). So in Hebrew mode a black cotton shirt's color list will read `["שחור"]` instead of `["Black"]`.
+
+**Frontend fixes**
+- ✅ `Closet.jsx` — `"Clear"` / `"Select all"` toolbar buttons now use `t('common.clear')` / `t('common.selectAll')`.
+- ✅ `AddItem.jsx` (ItemCard) — Phase Q badge + toggle wired through `useTranslation`:
+  - Badge label `"AI-repaired"` / `"Original crop"` → `t('itemDetail.repair.showingRepaired' | 'showingOriginal')`
+  - Toggle button text `"AI"` / `"Original"` → `t('itemDetail.repair.toggleAI' | 'toggleOriginal')`
+  - `aria-label` → `t('itemDetail.repair.ariaShowRepaired' | 'ariaShowOriginal')`
+- ✅ `ItemDetail.jsx`:
+  - **Reasons badge** was showing raw heuristic tokens (`manual_repair, with_hint`); now maps each reason through `t(itemDetail.repair.reasons.${code})` with a defaultValue fallback to the raw token (so future reason codes still render safely).
+  - `tradition` placeholder `"arabic, jewish, …"` → `t('itemDetail.edit.traditionPlaceholder')`.
+
+**New i18n keys (en + he)**
+- `common.selectAll` — "Select all" / "בחר הכל"
+- `itemDetail.edit.traditionPlaceholder` — "arabic, jewish, …" / "ערבית, יהודית, …"
+- `itemDetail.repair.toggleAI / toggleOriginal / ariaShowOriginal / ariaShowRepaired` — Phase Q toggle labels + aria text.
+- `itemDetail.repair.reasons.{manual_repair, with_hint, edge_touch_top/bottom/left/right, aspect_mismatch_dress/outerwear/bottom, undersized_crop, whole_frame_skip}` — full localised labels for every heuristic trigger.
+- 14 new keys total in each of `en.json` + `he.json`. Other 10 locales fall back to English per Phase L strategy.
+
+**Verification (live, Hebrew mode)**
+- ✅ Closet page: RTL mirror, full nav + filters + selection bar localized.
+  - `SELECT_ALL_TEXT: "בחר הכל"` ✓ (was "Select all")
+- ✅ Item Detail edit page: RTL mirror, every section header + field label + button localized.
+  - `REPAIR_REASONS_HE: "תיקון ידני, עם רמז"` ✓ (was raw `"manual_repair, with_hint"`)
+  - `REPAIRED_BADGE_HE: "שחזור AI"` ✓
+  - `TOGGLE_BTN_HE: "הצג מקורי"` ✓
+  - `TRADITION_PLACEHOLDER_HE: "ערבית, יהודית, …"` ✓
+  - `SAVE_BTN_HE: "שמור"` ✓
+- ✅ `/complete-outfit` endpoint: Hebrew rationale + `weather_summary: "9.61°C · שמיים בהירים · ניו יורק"` — zero English leakage.
+
+**Known residual scope (low-priority, existing pre-fix, not introduced by the Phase M/P/Q work)**
+- AddItem form placeholders like `"Cream Linen Blazer"` and `"Select…"` remain in English; these are pre-Phase-M and require a broader retranslation pass across all 12 locales.
+- Other 10 locales (ar, es, fr, de, it, pt, ru, zh, ja, hi) still use English fallbacks for the 14 new keys introduced in this sweep.
+
+---
+
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |

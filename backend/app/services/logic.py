@@ -125,11 +125,20 @@ async def get_styling_advice(
     if lat is not None and lng is not None and weather_service is not None:
         t0 = time.perf_counter()
         try:
-            weather = await weather_service.fetch(lat, lng)
-            result["weather_summary"] = (
-                f"{weather.get('temp_c')}°C {weather.get('condition')} in "
-                f"{weather.get('city')}"
+            weather = await weather_service.fetch(lat, lng, lang=language)
+            # Prefer OpenWeather's localized `description` (it honors the
+            # `lang` query param) and use `·` as a language-neutral
+            # separator so we don't mix a localized string with an English
+            # connector like "in".
+            localized_cond = (
+                weather.get("description") or weather.get("condition") or ""
             )
+            parts = [
+                f"{weather.get('temp_c')}°C",
+                localized_cond,
+                weather.get("city") or "",
+            ]
+            result["weather_summary"] = " · ".join(p for p in parts if p)
             weather_ctx = weather
         except Exception as exc:  # noqa: BLE001
             logger.warning("Weather fetch failed: %s", exc)

@@ -404,6 +404,7 @@ export default function AddItem() {
 
 /* -------------------- item card -------------------- */
 function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
+  const { t } = useTranslation();
   const { fields, status, progress, previewUrl, error } = card;
   const isBusy = status === 'scanning';
   const saved = status === 'saved';
@@ -435,7 +436,9 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
                 data-testid="add-item-repaired-badge"
               >
                 <Wand2 className="h-3 w-3 text-[hsl(var(--accent))]" />
-                {showingReconstructed ? 'AI-repaired' : 'Original crop'}
+                {showingReconstructed
+                  ? t('itemDetail.repair.showingRepaired')
+                  : t('itemDetail.repair.showingOriginal')}
               </div>
             )}
             {hasReconstruction && !isBusy && (
@@ -449,12 +452,14 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
                 })}
                 className="absolute top-2 end-2 inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur border border-border px-2 py-1 text-[10px] font-medium hover:bg-secondary transition-colors"
                 data-testid="add-item-toggle-reconstruction"
-                aria-label={showingReconstructed ? 'Show original crop' : 'Show AI-repaired image'}
+                aria-label={showingReconstructed
+                  ? t('itemDetail.repair.ariaShowOriginal')
+                  : t('itemDetail.repair.ariaShowRepaired')}
               >
                 {showingReconstructed ? (
-                  <><RefreshCw className="h-3 w-3" /> Original</>
+                  <><RefreshCw className="h-3 w-3" /> {t('itemDetail.repair.toggleOriginal')}</>
                 ) : (
-                  <><Wand2 className="h-3 w-3" /> AI</>
+                  <><Wand2 className="h-3 w-3" /> {t('itemDetail.repair.toggleAI')}</>
                 )}
               </button>
             )}

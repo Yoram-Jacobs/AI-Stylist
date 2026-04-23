@@ -681,13 +681,26 @@ async def complete_outfit(
     lng = payload.lng if payload.lng is not None else home.get("lng")
     if lat is not None and lng is not None and weather_service is not None:
         try:
-            weather_ctx = await weather_service.fetch(float(lat), float(lng))
+            weather_ctx = await weather_service.fetch(
+                float(lat),
+                float(lng),
+                lang=(user.get("preferred_language") or "en"),
+            )
             if weather_ctx:
-                weather_summary_text = (
-                    f"{weather_ctx.get('temp_c')}°C "
-                    f"{weather_ctx.get('condition')} in "
-                    f"{weather_ctx.get('city')}"
+                # Prefer the localized `description` field (e.g. "bewölkt",
+                # "מעונן") over the English `condition`. Strip the
+                # hardcoded " in " connector to avoid mixing languages.
+                localized_cond = (
+                    weather_ctx.get("description")
+                    or weather_ctx.get("condition")
+                    or ""
                 )
+                parts = [
+                    f"{weather_ctx.get('temp_c')}°C",
+                    localized_cond,
+                    weather_ctx.get("city") or "",
+                ]
+                weather_summary_text = " · ".join(p for p in parts if p)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Complete-outfit weather fetch failed: %s", exc)
 

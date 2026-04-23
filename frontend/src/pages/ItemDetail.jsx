@@ -598,7 +598,11 @@ export default function ItemDetail() {
                 </div>
                 {reconstructionReasons.length > 0 && (
                   <Badge variant="outline" className="text-[10px] py-0 h-5 rounded-full" data-testid="item-repair-reasons-badge">
-                    {reconstructionReasons.join(', ')}
+                    {reconstructionReasons
+                      .map((r) =>
+                        t(`itemDetail.repair.reasons.${r}`, { defaultValue: r })
+                      )
+                      .join(', ')}
                   </Badge>
                 )}
               </div>
@@ -755,7 +759,7 @@ export default function ItemDetail() {
                   value={form.tradition}
                   onChange={(e) => setField('tradition', e.target.value)}
                   className="rounded-xl"
-                  placeholder="arabic, jewish, …"
+                  placeholder={t('itemDetail.edit.traditionPlaceholder')}
                   data-testid="item-edit-field-tradition"
                 />
               </Field>
