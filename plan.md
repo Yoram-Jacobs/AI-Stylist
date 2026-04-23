@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Phase S kickoff)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Phase T completion)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
@@ -22,8 +22,9 @@
 - ✅ **Phase Q Wardrobe Reconstructor**: HF FLUX outpainting + category-drift validation + manual Repair workflow.
 - ✅ **Item Detail Edit Page**: full manual editor for closet items.
 - ✅ **Phase R shipped**: **Multi-session Stylist + Fashion Scout side panel + chat image evidence**.
-- 🎯 **Current milestone (NEW)**: **Phase S — Device Access (Location + Contacts UX) + Region-aware Fashion Scout + Professionals scaffold**.
-- 🎯 **Next after Phase S**: PayPlus payments integration — deferred until API credentials are available.
+- ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
+- ✅ **Phase T shipped (NEW)**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
+- 🎯 **Next after Phase T**: PayPlus payments integration — deferred until API credentials are available.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -159,120 +160,112 @@ Delivered previously; unchanged.
 
 ---
 
-### Phase S — Device Access + Contacts UX + Region-aware Scout + Professionals scaffold **(P0 / NOT STARTED)**
+### Phase S — Device Access + Contacts UX + Region-aware Scout + Professionals scaffold **(P0 / COMPLETE)**
 
-#### Phase S.0 — Product constraints (web vs native)
+#### Phase S.0 — Product constraints (web vs native) **(ACKNOWLEDGED)**
 DressApp is currently a web app:
 - ✅ **Location**: supported via `navigator.geolocation` on HTTPS.
-- ⚠️ **Contacts**: full device address-book access is *not* available on the web across browsers.
-  - Best-effort on web: **Contact Picker API** (`navigator.contacts.select`) is mostly Chromium-on-Android.
-  - Universal alternative: **Web Share API** (`navigator.share`) + copy link + manual entry.
-- ✅ This Phase S will implement a web-first permission [design that can later map 1:1 to native permissions when wrapped (Capacitor/Expo).
+- ⚠️ **Contacts**: full device address-book access is not available cross-browser on the web.
+  - Best-effort (Android Chrome): Contact Picker API (`navigator.contacts.select`).
+  - Universal: Web Share API (`navigator.share`) + clipboard fallback.
 
-#### Phase S.A — Location permission + propagation (P0)
-**Goal**: On mobile, request location on first run; use it for Marketplace proximity, weather context, nearby stores (future), Professionals (future), and Fashion Scout regionalization.
+#### Phase S.A — Location permission + propagation **(COMPLETE)**
+- ✅ `LocationProvider` + `useLocation()` hook (`/app/frontend/src/lib/location.jsx`)
+  - Permission state + local caching + reverse geocode (Nominatim)
+  - Persists to `users.home_location`
+- ✅ In-app first-run banner (`LocationBanner`) on Home/Stylist/Market
+- ✅ Profile Location settings card (refresh + forget)
 
-**Scope**
-1. Frontend: `LocationProvider` + `useLocation()` hook
-   - Tracks permission state: `prompt | granted | denied | unavailable`.
-   - Stores `{ coords, accuracy_m, city, country_code, lastUpdatedAt }`.
-   - First-run prompt logic (mobile-friendly): show a single in-app explanation screen that triggers `navigator.geolocation.getCurrentPosition()`.
-   - Persist the "asked" state in `localStorage` per-device.
+#### Phase S.B — Marketplace proximity **(COMPLETE)**
+- ✅ Backend: `/listings` supports `lat,lng,radius_km` via `$geoNear` and returns `distance_km`.
+- ✅ Frontend: radius selector + distance chips.
 
-2. Frontend: first-run permission UX
-   - Trigger on first visit after installation (practically: first app run on that browser profile).
-   - Display rationale: Marketplace nearby, weather-aware stylist, local stores, Professional matching (later), Fashion Scout localization.
-   - Provide "Not now" and "Try again".
+#### Phase S.C — Region-aware Fashion Scout localization **(COMPLETE)**
+- ✅ `trend_reports` now supports per-language cards with cached translation on-demand (Gemini Flash).
+- ✅ API: `GET /trends/fashion-scout?language=…&country=…`
+- ✅ Frontend: Fashion Scout panel passes user language + device/home country code.
 
-3. Backend/user persistence
-   - Persist location to `users.home_location` via existing `PATCH /users/me`.
-   - Add/confirm `home_location` shape: `{ lat, lng, city, country_code, updated_at }`.
+#### Phase S.D — Contacts UX (web-first) + Share/Invite **(COMPLETE)**
+- ✅ `ShareOutfitButton` on outfit recommendations (Web Share API + clipboard fallback).
+- ✅ `InviteFriendsButton` on Profile (Web Share API + clipboard fallback).
+- ✅ Minimal share backend:
+  - `POST /share/outfit` and `GET /share/outfit/{id}`
 
-4. Reverse geocoding
-   - Use Nominatim (no key) with aggressive caching (rounded lat/lng) to avoid rate limits.
+#### Phase S.E — Professionals scaffold **(COMPLETE)**
+- ✅ Disabled "Ask a professional" CTA on Stylist composer + location-aware copy.
 
-5. Marketplace proximity
-   - Extend marketplace/listings read endpoints to accept `lat`, `lng`, `radius_km`.
-   - Sort by proximity and return `distance_km`.
-   - Frontend: radius selector + "Near you" chip on each card.
+---
 
-#### Phase S.B — Region-aware Fashion Scout localization (P0)
-**Goal**: localize Fashion Scout cards by language + country.
+### Phase T — Extended Profile & Settings **(P0 / COMPLETE)**
 
-**Scope**
-1. Data model updates
-   - Extend `trend_reports` docs with `language` (default: `en`) and optional `country_code`.
+**Goal**: Build a complete Profile & Settings experience matching the required signup/profile layout, with selective autofill from OAuth.
 
-2. API
-   - Update `GET /trends/fashion-scout` to accept `language` and `country` query params.
-   - If localized cards exist for today: return them.
-   - Else: translate/regionalize from canonical English cards using Gemini Flash and upsert per `(bucket, date, language, country)`.
-   - Fail-soft: return English when translation fails.
+#### Phase T.A — Backend schema + update API **(COMPLETE)**
+- ✅ User doc extended:
+  - `first_name`, `last_name`, `phone`, `date_of_birth`, `sex`, `personal_status`
+  - `address` (nested)
+  - `units` (weight/length)
+  - `face_photo_url`, `body_photo_url`
+  - `body_measurements` (nested)
+  - `hair` (nested)
+- ✅ `UpdateUserIn` accepts all of the above.
 
-3. Frontend plumbing
-   - Pass `i18n.language` and `country_code` (from location or profile) when fetching Fashion Scout feed.
+#### Phase T.B — OAuth-derived autofill (Google) **(COMPLETE)**
+- ✅ `calendar_service.persist_tokens_for_user` now auto-fills on first connect:
+  - `display_name`, `first_name`, `last_name`, `avatar_url`, `locale`
+  - **Never clobbers** existing user-entered values.
 
-#### Phase S.C — Ask a Professional scaffold (P0)
-- Add a disabled "Ask a Professional" button (localized) on Stylist composer with a "Coming soon" tooltip.
-- Copy adapts when location is available (e.g., "Connect with a local stylist"), but no logic implemented yet.
+#### Phase T.C — Frontend Profile UI **(COMPLETE)**
+- ✅ New `ProfileDetailsCard.jsx` (7-section accordion):
+  1) Identity
+  2) Contact
+  3) Demographics
+  4) Preferences — Units
+  5) Photos
+  6) Body measurements
+  7) Hair
+- ✅ Conditional female-only rows (Bra size, Dress size) appear when `sex=female`.
+- ✅ Photo slots support camera (mobile `capture=user`) + file upload.
+- ✅ Photos are downscaled client-side (1024px JPEG @ q=0.82) before persisting to Mongo (data URL).
+- ✅ Measurements grid labels units based on preference (cm/in, kg/lb).
+- ✅ i18n: 12 locale files updated (EN/HE/AR curated, rest English fallback).
+- ✅ “Auto-filled from Google — edit anytime” badge when Google has provided any identity fields.
 
-#### Phase S.D — Contacts UX (P1 pragmatic, web-first)
-**Goal**: allow users to share outfits for approval and invite contacts, while acknowledging web limitations.
+#### Phase T.D — Verification **(COMPLETE)**
+- ✅ API PATCH round-trip verified (200 + persisted fields).
+- ✅ Screenshots in EN + HE confirm every section renders; female-only fields appear correctly.
 
-**Scope**
-1. Share outfit
-   - Add `ShareOutfitButton` on outfit recommendation cards.
-   - Use `navigator.share` when available; fallback to copy link.
-
-2. Invite friends
-   - Add `InviteFriendsButton` on Profile.
-   - Uses `navigator.share` [with a pre-filled message + download link.
-   - Fallback: copy link + QR code.
-
-3. Optional scaffolding: Contact picker
-   - Feature-detect `navigator.contacts.select`.
-   - Provide "Pick from contacts" option on supported Android Chrome; otherwise hide/disable.
-
-4. Optional scaffolding: share-link backend
-   - `POST /share/outfit` mints a UUID and stores a read-only snapshot.
-   - `GET /share/outfit/{id}` renders a public view page.
-   - **Approval/chat flows** are explicitly out of scope for Phase S (future phase).
-
-**Out of scope (future)**
-- Capacitor/Expo native wrapper with real native permissions for contacts.
-- Real-time chat between users.
-- Professional directory + booking + payments.
-- Full contact/address book sync.
+**Follow-up considerations (not required for Phase T)**
+- Consider blob storage (S3/R2) for photos once user growth warrants it.
+- Feed `body_measurements` into stylist prompts for fit-check reasoning (future phase).
 
 ---
 
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
-| **P0** | **Phase S — Device Access + Contacts UX + Region-aware Scout + Professional scaffold** | Web APIs + UI | None |
-| P0 | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
-| P1 | Phase 4 (Part 3) — PayPlus payments | PayPlus credentials | User credentials |
+| **P0** | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
+| **P1** | Phase 4 (Part 3) — PayPlus payments | PayPlus credentials | User credentials |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
+| P2 | Fit-check Stylist upgrade using `body_measurements` | Phase T data available | None |
 | P3 | Phase R polish: rename sessions + mobile UX | Phase R shipped | None |
+| P3 | Photo blob store migration (S3/R2) | user scale | None |
 
 ---
 
 ## 3) Next Actions (immediate)
-1. **Phase S (P0): Location-first-run UX + persistence + Marketplace proximity**
-   - Implement `LocationProvider` + first-run prompt
-   - Persist `home_location` to user profile
-   - Add radius filters + distance chip for Market
-2. **Phase S (P0): Fashion Scout localization by language+country**
-   - Add language/country-aware caching and endpoint params
-   - Wire frontend to pass locale + region
-3. **Phase S (P1): Contacts UX via Share + Invite**
-   - Web Share API + copy/QR fallback
-   - Optional contact picker scaffolding
-4. **Phase 6 / N model merge (P0 / blocked)**
+1. **Phase 6 / N model merge (P0 / blocked)**
    - User runs `/app/scripts/pog_phase6_merge_gguf.ipynb` off-pod.
    - After hosting, set `GARMENT_VISION_ENDPOINT_URL` and run backend verification.
-5. **PayPlus discovery + integration (P1 / deferred)**
+2. **PayPlus discovery + integration (P1 / deferred)**
    - When credentials arrive: confirm sandbox/prod endpoints, payout model, implement checkout + webhooks.
+3. **Fit-check prompt upgrade (P2)**
+   - Add `users.body_measurements` + `users.units` to stylist context.
+   - Add “fit risk” warnings (too tight/too long/etc.) and size suggestions.
+4. **Shared outfit viewer (P2)**
+   - Add a `/shared/:id` public page that renders the shared outfit nicely (currently API exists; UI viewer is the next step).
+5. **Photo storage strategy (P3)**
+   - Evaluate S3/R2 for `face_photo_url/body_photo_url` once growth increases.
 
 ---
 
@@ -307,11 +300,17 @@ DressApp is currently a web app:
   - ✅ Chat uses only current session context; switching session swaps history
   - ✅ Fashion Scout panel shows a news-flash feed with media tiles (image/video when present)
   - ✅ Stylist chat recommendations include at least one relevant image when possible
-- **Phase S (NEW)**
-  - ⏳ First-run mobile location prompt (in-app rationale + native browser permission)
-  - ⏳ Location persisted to profile and used for weather + Market proximity
-  - ⏳ Fashion Scout localized by language+country (cached per day)
-  - ⏳ Share outfit + invite flows via Web Share API and robust fallbacks
-  - ⏳ Professional CTA scaffold visible (coming soon)
+- Phase S:
+  - ✅ First-run mobile location prompt (in-app rationale + native browser permission)
+  - ✅ Location persisted to profile and used for weather + Market proximity
+  - ✅ Fashion Scout localized by language+country (cached per day)
+  - ✅ Share outfit + invite flows via Web Share API and robust fallbacks
+  - ✅ Professional CTA scaffold visible (coming soon)
+- **Phase T**
+  - ✅ Extended profile schema persisted and patchable via `/users/me`
+  - ✅ OAuth autofill from Google userinfo populates identity fields without clobbering edits
+  - ✅ Profile UI supports all required sections (Identity/Contact/Demographics/Units/Photos/Measurements/Hair)
+  - ✅ Camera/upload photos stored (downscaled) and reloaded correctly
+  - ✅ i18n coverage for new fields (EN/HE/AR curated)
 - Phase 6 / N:
   - ⏳ Fine-tuned Gemma 4 E2B merged + hosted; `/api/v1/closet/analyze` uses it via endpoint/env switch

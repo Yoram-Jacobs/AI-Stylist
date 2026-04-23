@@ -145,9 +145,24 @@ class CalendarService:
         prev = (existing.get("google_calendar_tokens") or {}) if existing else {}
         if not doc.get("refresh_token") and prev.get("refresh_token"):
             doc["refresh_token"] = prev["refresh_token"]
-        await db.users.update_one(
-            {"id": user_id}, {"$set": {"google_calendar_tokens": doc}}
-        )
+
+        # Autofill profile fields that are still empty. This gives users a
+        # populated Profile page on first Google connect without silently
+        # overwriting anything they already set.
+        profile_patch: dict[str, Any] = {}
+        if userinfo.get("given_name") and not existing.get("first_name"):
+            profile_patch["first_name"] = userinfo["given_name"]
+        if userinfo.get("family_name") and not existing.get("last_name"):
+            profile_patch["last_name"] = userinfo["family_name"]
+        if userinfo.get("name") and not existing.get("display_name"):
+            profile_patch["display_name"] = userinfo["name"]
+        if userinfo.get("picture") and not existing.get("avatar_url"):
+            profile_patch["avatar_url"] = userinfo["picture"]
+        if userinfo.get("locale") and not existing.get("locale"):
+            profile_patch["locale"] = userinfo["locale"]
+
+        update_doc: dict[str, Any] = {"google_calendar_tokens": doc, **profile_patch}
+        await db.users.update_one({"id": user_id}, {"$set": update_doc})
         return doc
 
     async def disconnect_user(self, user_id: str) -> None:

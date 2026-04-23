@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { CalendarConnect } from '@/components/CalendarConnect';
 import { LocationCard } from '@/components/LocationCard';
 import { InviteFriendsButton } from '@/components/InviteFriendsButton';
+import { ProfileDetailsCard } from '@/components/ProfileDetailsCard';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 
 const VOICES = [
@@ -139,6 +140,10 @@ export default function Profile() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="mb-6">
+        <ProfileDetailsCard />
+      </div>
 
       <div className="mb-6">
         <CalendarConnect />

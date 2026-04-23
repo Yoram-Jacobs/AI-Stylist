@@ -89,6 +89,35 @@ class User(BaseDoc):
     stripe_onboarding_complete: bool = False
     roles: list[str] = Field(default_factory=lambda: ["user"])
 
+    # --- Extended profile (Phase T) -------------------------------------
+    # Plain identity — populated from OAuth `given_name` / `family_name` on
+    # first Google connect, editable afterwards.
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    date_of_birth: str | None = None  # ISO YYYY-MM-DD
+    sex: Literal["male", "female"] | None = None
+    personal_status: Literal[
+        "single", "married", "divorced", "widowed"
+    ] | None = None
+    address: dict[str, Any] | None = None  # {line1,line2,city,region,country,postal_code}
+
+    # Unit preferences: weight (kg | lb) + length (cm | in).
+    units: dict[str, Any] | None = None
+
+    # Photos — stored as data URLs so we stay inside the current serverless
+    # Mongo footprint (no external blob store yet). Capped client-side to
+    # ~500 KB each.
+    face_photo_url: str | None = None
+    body_photo_url: str | None = None
+
+    # Body measurements kept in one nested doc so adding a field later is a
+    # one-line change and doesn't bloat the user root document.
+    body_measurements: dict[str, Any] | None = None
+
+    # Hair profile (length / type / color / style).
+    hair: dict[str, Any] | None = None
+
 
 # ------------------------- Closet items -------------------------
 class RetailMetadata(BaseModel):

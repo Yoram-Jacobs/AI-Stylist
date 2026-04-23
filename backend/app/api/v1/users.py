@@ -25,6 +25,20 @@ class UpdateUserIn(BaseModel):
     style_profile: StyleProfile | None = None
     cultural_context: CulturalContext | None = None
 
+    # --- Extended profile (Phase T) ---
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    date_of_birth: str | None = None
+    sex: str | None = None
+    personal_status: str | None = None
+    address: dict[str, Any] | None = None
+    units: dict[str, Any] | None = None
+    face_photo_url: str | None = None
+    body_photo_url: str | None = None
+    body_measurements: dict[str, Any] | None = None
+    hair: dict[str, Any] | None = None
+
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)) -> dict[str, Any]:
