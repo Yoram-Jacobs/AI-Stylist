@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -11,6 +11,11 @@ import {
   Mic,
   Square,
   RefreshCw,
+  Save,
+  Undo2,
+  Plus,
+  X,
+  CheckCircle2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,22 +34,287 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { isSTTSupported, createRecognition } from '@/lib/speech';
 
+/* -------------------- enum option lists (kept in-file to avoid a cross-page coupling) -------------------- */
+const CATEGORY_OPTIONS = [
+  'Top',
+  'Bottom',
+  'Outerwear',
+  'Full Body',
+  'Footwear',
+  'Accessories',
+  'Underwear',
+];
+const DRESS_CODE_OPTIONS = [
+  'casual',
+  'smart-casual',
+  'business',
+  'formal',
+  'athletic',
+  'loungewear',
+];
+const GENDER_OPTIONS = ['men', 'women', 'unisex', 'kids'];
+const SEASON_OPTIONS = ['spring', 'summer', 'fall', 'winter', 'all'];
+const STATE_OPTIONS = ['new', 'used'];
+const CONDITION_OPTIONS = ['bad', 'fair', 'good', 'excellent'];
+const QUALITY_OPTIONS = ['budget', 'mid', 'premium', 'luxury'];
+const PATTERN_OPTIONS = [
+  'solid',
+  'striped',
+  'plaid',
+  'floral',
+  'herringbone',
+  'polka',
+  'paisley',
+  'geometric',
+  'abstract',
+];
+const FORMALITY_OPTIONS = ['casual', 'smart-casual', 'business', 'formal'];
+const INTENT_OPTIONS = ['own', 'for_sale', 'donate', 'swap'];
+const CURRENCY_OPTIONS = ['USD', 'EUR', 'GBP', 'ILS'];
+
+const EDITABLE_FIELDS = [
+  'title',
+  'name',
+  'caption',
+  'category',
+  'sub_category',
+  'item_type',
+  'brand',
+  'gender',
+  'dress_code',
+  'season',
+  'tradition',
+  'size',
+  'color',
+  'material',
+  'pattern',
+  'state',
+  'condition',
+  'quality',
+  'repair_advice',
+  'price_cents',
+  'currency',
+  'marketplace_intent',
+  'formality',
+  'cultural_tags',
+  'tags',
+  'notes',
+];
+
+/** Pick the subset of fields we mutate + normalise to a stable shape. */
+function toFormState(item) {
+  return {
+    title: item.title || '',
+    name: item.name || '',
+    caption: item.caption || '',
+    category: item.category || 'Top',
+    sub_category: item.sub_category || '',
+    item_type: item.item_type || '',
+    brand: item.brand || '',
+    gender: item.gender || '',
+    dress_code: item.dress_code || '',
+    season: Array.isArray(item.season) ? item.season : [],
+    tradition: item.tradition || '',
+    size: item.size || '',
+    color: item.color || '',
+    material: item.material || '',
+    pattern: item.pattern || '',
+    state: item.state || '',
+    condition: item.condition || '',
+    quality: item.quality || '',
+    repair_advice: item.repair_advice || '',
+    price_cents: item.price_cents ?? '',
+    currency: item.currency || 'USD',
+    marketplace_intent: item.marketplace_intent || 'own',
+    formality: item.formality || '',
+    cultural_tags: Array.isArray(item.cultural_tags) ? item.cultural_tags : [],
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    notes: item.notes || '',
+  };
+}
+
+/** Compute the PATCH body from a form snapshot: include only the fields
+ *  that actually changed from the loaded item. Empty-string fields that
+ *  were previously set are translated to ``null`` (clear the field).
+ *  Multi-select arrays are sent as the full array whenever they differ.
+ */
+function diffPatch(loaded, form) {
+  const baseline = toFormState(loaded);
+  const out = {};
+  for (const key of EDITABLE_FIELDS) {
+    const a = baseline[key];
+    const b = form[key];
+    const isArr = Array.isArray(a) || Array.isArray(b);
+    if (isArr) {
+      const aa = Array.isArray(a) ? a : [];
+      const bb = Array.isArray(b) ? b : [];
+      if (aa.length !== bb.length || aa.some((v, i) => v !== bb[i])) {
+        out[key] = bb;
+      }
+      continue;
+    }
+    // price_cents: user types dollars in the UI; convert before send.
+    if (key === 'price_cents') {
+      const parsed = b === '' || b == null ? null : Math.round(Number(b));
+      if (parsed !== a) {
+        out[key] = Number.isFinite(parsed) ? parsed : null;
+      }
+      continue;
+    }
+    if ((a || '') !== (b || '')) {
+      out[key] = b === '' ? null : b;
+    }
+  }
+  return out;
+}
+
+/* -------------------- generic chip-list editor -------------------- */
+function ChipList({ value, onChange, placeholder, disabled, testidPrefix }) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if (value.includes(trimmed)) { setDraft(''); return; }
+    onChange([...value, trimmed]);
+    setDraft('');
+  };
+  return (
+    <div
+      className="flex flex-wrap gap-1.5 items-center rounded-xl border border-border bg-background px-2 py-1.5 min-h-10"
+      data-testid={`${testidPrefix}-chiplist`}
+    >
+      {value.map((v) => (
+        <Badge
+          key={v}
+          variant="secondary"
+          className="rounded-full text-[11px] inline-flex items-center gap-1"
+          data-testid={`${testidPrefix}-chip-${v}`}
+        >
+          {v}
+          {!disabled && (
+            <button
+              type="button"
+              onClick={() => onChange(value.filter((x) => x !== v))}
+              className="hover:text-destructive"
+              aria-label={`Remove ${v}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </Badge>
+      ))}
+      <Input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); add(); }
+        }}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="h-7 text-xs border-0 shadow-none flex-1 min-w-24 focus-visible:ring-0 px-1"
+        data-testid={`${testidPrefix}-input`}
+      />
+      {!disabled && draft.trim() && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={add}
+          className="h-7 px-2 text-xs"
+          data-testid={`${testidPrefix}-add`}
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/* -------------------- multi-select pill group -------------------- */
+function PillMultiSelect({ value, options, onChange, testidPrefix }) {
+  const toggle = (opt) => {
+    onChange(
+      value.includes(opt) ? value.filter((v) => v !== opt) : [...value, opt],
+    );
+  };
+  return (
+    <div
+      className="flex flex-wrap gap-1.5"
+      data-testid={`${testidPrefix}-pillgroup`}
+    >
+      {options.map((opt) => {
+        const on = value.includes(opt);
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            data-testid={`${testidPrefix}-pill-${opt}`}
+            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+              on
+                ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] border-[hsl(var(--accent))]'
+                : 'bg-card border-border hover:bg-secondary'
+            }`}
+          >
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* -------------------- single-select shadcn wrapper that tolerates "" -------------------- */
+function NullableSelect({ value, onChange, options, placeholder, testid }) {
+  // Shadcn Select rejects empty string as a value; we map "" -> __none__ for the control.
+  const v = value || '__none__';
+  return (
+    <Select
+      value={v}
+      onValueChange={(next) => onChange(next === '__none__' ? '' : next)}
+    >
+      <SelectTrigger className="rounded-xl h-10" data-testid={testid}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__none__">—</SelectItem>
+        {options.map((o) => (
+          <SelectItem key={o} value={o}>
+            {o}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/* ========================= Page ========================= */
 export default function ItemDetail() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { id } = useParams();
   const nav = useNavigate();
+
   const [item, setItem] = useState(null);
+  const [form, setForm] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editPrompt, setEditPrompt] = useState('');
-  const [editing, setEditing] = useState(false);
-  // Phase Q — Repair state
+  const [saving, setSaving] = useState(false);
+
+  // Repair state
   const [repairHint, setRepairHint] = useState('');
   const [repairing, setRepairing] = useState(false);
   const [dictating, setDictating] = useState(false);
@@ -53,9 +323,16 @@ export default function ItemDetail() {
   const recognitionRef = useRef(null);
   const sttSupported = useRef(isSTTSupported());
 
+  // Variant edit state (existing feature, preserved)
+  const [editPrompt, setEditPrompt] = useState('');
+  const [editing, setEditing] = useState(false);
+
+  /* ------------------- load + sync ------------------- */
   const load = async () => {
     try {
-      setItem(await api.getItem(id));
+      const data = await api.getItem(id);
+      setItem(data);
+      setForm(toFormState(data));
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.notFound'));
       nav('/closet');
@@ -63,39 +340,42 @@ export default function ItemDetail() {
       setLoading(false);
     }
   };
-
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    load();
-  }, [id]);
+  useEffect(() => { load(); }, [id]);
+  useEffect(() => () => {
+    try { recognitionRef.current?.abort?.(); } catch { /* ignore */ }
+  }, []);
 
-  useEffect(
-    () => () => {
-      try {
-        recognitionRef.current?.abort?.();
-      } catch {
-        /* ignore */
-      }
-    },
-    [],
+  const patch = useMemo(
+    () => (item && form ? diffPatch(item, form) : {}),
+    [item, form],
   );
+  const isDirty = Object.keys(patch).length > 0;
 
-  const onEdit = async () => {
-    if (!editPrompt.trim()) return;
-    setEditing(true);
+  const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  /* ------------------- save / discard ------------------- */
+  const onSave = async () => {
+    if (!isDirty || saving) return;
+    setSaving(true);
     try {
-      const res = await api.editItemImage(id, editPrompt.trim());
-      toast.success(t('itemDetail.variantGenerated'));
-      setItem((it) => ({ ...it, variants: res.variants }));
-      setEditPrompt('');
+      const updated = await api.updateItem(id, patch);
+      setItem(updated);
+      setForm(toFormState(updated));
+      toast.success(t('itemDetail.detailsSaved'));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || t('itemDetail.editUnavailable'));
+      toast.error(err?.response?.data?.detail || t('itemDetail.saveFailed'));
     } finally {
-      setEditing(false);
+      setSaving(false);
     }
   };
+  const onDiscard = () => {
+    if (!item) return;
+    setForm(toFormState(item));
+    toast.message(t('itemDetail.changesDiscarded'));
+  };
 
-  /* ---------- Phase Q: repair flow ---------- */
+  /* ------------------- repair flow (unchanged from Phase Q) ------------------- */
   const onRepair = async () => {
     if (repairing) return;
     setRepairing(true);
@@ -107,12 +387,10 @@ export default function ItemDetail() {
       if (res.applied) {
         toast.success(t('itemDetail.repair.success'));
         setItem(res.item);
+        setForm(toFormState(res.item));
         setRepairHint('');
       } else {
-        // Validation rejected — category drifted or HF hiccup.
-        toast.warning(
-          res.detail || t('itemDetail.repair.rejected'),
-        );
+        toast.warning(res.detail || t('itemDetail.repair.rejected'));
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.repair.error'));
@@ -120,7 +398,6 @@ export default function ItemDetail() {
       setRepairing(false);
     }
   };
-
   const startDictation = () => {
     if (!sttSupported.current) return;
     const rec = createRecognition({
@@ -138,21 +415,30 @@ export default function ItemDetail() {
         setDictationInterim('');
         recognitionRef.current = null;
       },
-      onError: () => {
-        toast.error(t('stylist.micDenied'));
-      },
+      onError: () => toast.error(t('stylist.micDenied')),
     });
     if (!rec) return;
     recognitionRef.current = rec;
     rec.start();
     setDictating(true);
   };
-
   const stopDictation = () => {
+    try { recognitionRef.current?.stop?.(); } catch { /* ignore */ }
+  };
+
+  /* ------------------- variant generation (unchanged) ------------------- */
+  const onGenerateVariant = async () => {
+    if (!editPrompt.trim()) return;
+    setEditing(true);
     try {
-      recognitionRef.current?.stop?.();
-    } catch {
-      /* ignore */
+      const res = await api.editItemImage(id, editPrompt.trim());
+      toast.success(t('itemDetail.variantGenerated'));
+      setItem((it) => ({ ...it, variants: res.variants }));
+      setEditPrompt('');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || t('itemDetail.editUnavailable'));
+    } finally {
+      setEditing(false);
     }
   };
 
@@ -166,16 +452,15 @@ export default function ItemDetail() {
     }
   };
 
-  if (loading || !item) {
+  if (loading || !item || !form) {
     return (
-      <div className="container-px max-w-4xl mx-auto pt-6">
+      <div className="container-px max-w-5xl mx-auto pt-6">
         <div className="aspect-[3/4] w-full rounded-[calc(var(--radius)+6px)] shimmer" />
       </div>
     );
   }
 
   const hasReconstruction = !!item.reconstructed_image_url;
-  // Precedence: reconstructed (Phase Q) > segmented > original.
   const preferredImage =
     (!showingOriginal && item.reconstructed_image_url) ||
     item.segmented_image_url ||
@@ -183,24 +468,64 @@ export default function ItemDetail() {
   const reconstructionReasons =
     (item.reconstruction_metadata && item.reconstruction_metadata.reasons) || [];
 
+  /* ========================= RENDER ========================= */
   return (
-    <div className="container-px max-w-4xl mx-auto pt-4 md:pt-10">
-      <button
-        onClick={() => nav(-1)}
-        className="inline-flex items-center text-sm text-muted-foreground mb-4"
-        data-testid="item-back"
-      >
-        <ArrowLeft className="h-4 w-4 me-1 rtl:rotate-180" /> {t('common.back')}
-      </button>
+    <div className="container-px max-w-5xl mx-auto pt-4 md:pt-8 pb-24">
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <button
+          onClick={() => nav(-1)}
+          className="inline-flex items-center text-sm text-muted-foreground"
+          data-testid="item-back"
+        >
+          <ArrowLeft className="h-4 w-4 me-1 rtl:rotate-180" /> {t('common.back')}
+        </button>
+        <div className="flex items-center gap-2">
+          {isDirty && (
+            <Badge
+              variant="outline"
+              className="rounded-full text-[10px] py-0 h-6"
+              data-testid="item-edit-dirty-badge"
+            >
+              {t('itemDetail.edit.unsaved', { count: Object.keys(patch).length })}
+            </Badge>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onDiscard}
+            disabled={!isDirty || saving}
+            data-testid="item-edit-discard-button"
+          >
+            <Undo2 className="h-4 w-4 me-1.5" /> {t('itemDetail.edit.discard')}
+          </Button>
+          <Button
+            type="button"
+            onClick={onSave}
+            disabled={!isDirty || saving}
+            size="sm"
+            className="rounded-xl"
+            data-testid="item-edit-save-button"
+          >
+            {saving ? (
+              <><Loader2 className="h-4 w-4 animate-spin me-1.5" />{t('itemDetail.edit.saving')}</>
+            ) : (
+              <><Save className="h-4 w-4 me-1.5" />{t('itemDetail.edit.save')}</>
+            )}
+          </Button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-        <div className="md:col-span-3">
+        {/* ---------- Image column ---------- */}
+        <div className="md:col-span-3 space-y-4">
           <Card className="rounded-[calc(var(--radius)+6px)] overflow-hidden shadow-editorial relative">
             <AspectRatio ratio={3 / 4} className="bg-secondary">
               {preferredImage ? (
                 <img
                   src={preferredImage}
-                  alt={item.title}
+                  alt={form.title || item.title}
                   className="w-full h-full object-cover"
                   data-testid="item-detail-main-image"
                 />
@@ -226,11 +551,6 @@ export default function ItemDetail() {
                   onClick={() => setShowingOriginal((s) => !s)}
                   className="absolute top-3 end-3 inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary transition-colors"
                   data-testid="item-detail-toggle-reconstruction"
-                  aria-label={
-                    showingOriginal
-                      ? t('itemDetail.repair.showRepaired')
-                      : t('itemDetail.repair.showOriginal')
-                  }
                 >
                   <RefreshCw className="h-3 w-3" />
                   {showingOriginal
@@ -239,87 +559,50 @@ export default function ItemDetail() {
                 </button>
               </>
             )}
+            <div className="absolute bottom-3 start-3 flex items-center gap-2">
+              <SourceTagBadge source={item.source} />
+              <Badge
+                variant="outline"
+                className="rounded-full text-[10px] bg-background/90 backdrop-blur"
+              >
+                {form.category}
+              </Badge>
+            </div>
           </Card>
 
+          {/* Variant carousel (existing) */}
           {item.variants && item.variants.length > 0 && (
-            <div className="mt-4">
+            <div>
               <div className="caps-label text-muted-foreground mb-2">
                 {t('itemDetail.variants')}
               </div>
               <div className="flex gap-3 overflow-x-auto pb-2" data-testid="item-variant-carousel">
                 {item.variants.map((v, i) => (
-                  <a
-                    key={i}
-                    href={v.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-shrink-0 w-32"
-                  >
+                  <a key={i} href={v.url} target="_blank" rel="noreferrer" className="flex-shrink-0 w-28">
                     <div className="aspect-[3/4] rounded-xl overflow-hidden border border-border">
                       <img src={v.url} alt={v.prompt} className="w-full h-full object-cover" />
                     </div>
-                    <div className="text-[11px] text-muted-foreground mt-1 truncate">
-                      {v.prompt}
-                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-1 truncate">{v.prompt}</div>
                   </a>
                 ))}
               </div>
             </div>
           )}
-        </div>
 
-        <div className="md:col-span-2 space-y-4">
-          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h1 className="font-display text-2xl leading-tight">{item.title}</h1>
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {[item.brand, item.category, item.color].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                <SourceTagBadge source={item.source} />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {item.formality && (
-                  <Badge variant="outline" className="caps-label rounded-full">
-                    {item.formality}
-                  </Badge>
-                )}
-                {(item.tags || []).map((tag) => (
-                  <Badge key={tag} variant="secondary" className="rounded-full">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-              {item.notes && <p className="text-sm text-muted-foreground mt-4">{item.notes}</p>}
-            </CardContent>
-          </Card>
-
-          {/* Phase Q — Repair Image Card */}
-          <Card
-            className="rounded-[calc(var(--radius)+6px)] shadow-editorial"
-            data-testid="item-repair-card"
-          >
+          {/* Image Repair card (Phase Q) */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="item-repair-card">
             <CardContent className="p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="caps-label text-muted-foreground">
                   {t('itemDetail.repair.label')}
                 </div>
                 {reconstructionReasons.length > 0 && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] py-0 h-5 rounded-full"
-                    data-testid="item-repair-reasons-badge"
-                  >
+                  <Badge variant="outline" className="text-[10px] py-0 h-5 rounded-full" data-testid="item-repair-reasons-badge">
                     {reconstructionReasons.join(', ')}
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {t('itemDetail.repair.subtitle')}
-              </p>
-
+              <p className="text-sm text-muted-foreground">{t('itemDetail.repair.subtitle')}</p>
               <div className="relative">
                 <Textarea
                   value={dictating ? dictationInterim || repairHint : repairHint}
@@ -336,67 +619,326 @@ export default function ItemDetail() {
                     onClick={dictating ? stopDictation : startDictation}
                     disabled={repairing}
                     className={`absolute end-2 bottom-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border transition-colors ${
-                      dictating
-                        ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                        : 'bg-card hover:bg-secondary'
+                      dictating ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : 'bg-card hover:bg-secondary'
                     }`}
                     data-testid="item-repair-mic-button"
-                    aria-label={
-                      dictating ? t('stylist.tapToStop') : t('stylist.recordVoice')
-                    }
                   >
-                    {dictating ? (
-                      <Square className="h-3.5 w-3.5" />
-                    ) : (
-                      <Mic className="h-3.5 w-3.5" />
-                    )}
+                    {dictating ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
                   </button>
                 )}
               </div>
-
-              <Button
-                onClick={onRepair}
-                disabled={repairing}
-                className="w-full rounded-xl"
-                data-testid="item-repair-button"
-              >
+              <Button onClick={onRepair} disabled={repairing} className="w-full rounded-xl" data-testid="item-repair-button">
                 {repairing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 me-2 animate-spin" />
-                    {t('itemDetail.repair.running')}
-                  </>
+                  <><Loader2 className="h-4 w-4 me-2 animate-spin" />{t('itemDetail.repair.running')}</>
                 ) : (
-                  <>
-                    <Wand2 className="h-4 w-4 me-2" />
-                    {hasReconstruction
-                      ? t('itemDetail.repair.retryCta')
-                      : t('itemDetail.repair.cta')}
-                  </>
+                  <><Wand2 className="h-4 w-4 me-2" />{hasReconstruction ? t('itemDetail.repair.retryCta') : t('itemDetail.repair.cta')}</>
                 )}
               </Button>
-
               {repairing && (
                 <div className="space-y-2" data-testid="item-repair-progress">
                   <div className="h-2 rounded shimmer w-full" />
-                  <p className="text-[11px] text-muted-foreground italic">
-                    {t('itemDetail.repair.progressHint')}
-                  </p>
+                  <p className="text-[11px] text-muted-foreground italic">{t('itemDetail.repair.progressHint')}</p>
                 </div>
               )}
             </CardContent>
           </Card>
+        </div>
 
-          <Card
-            className="rounded-[calc(var(--radius)+6px)] shadow-editorial"
-            data-testid="item-edit-image-card"
-          >
+        {/* ---------- Edit form column ---------- */}
+        <div className="md:col-span-2 space-y-4" data-testid="item-edit-form">
+          {/* Identity */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
             <CardContent className="p-5 space-y-3">
-              <div className="caps-label text-muted-foreground">
-                {t('itemDetail.generateVariant')}
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionIdentity')}</div>
+              <Field label={t('itemDetail.edit.title')} htmlFor="f-title" required>
+                <Input
+                  id="f-title"
+                  value={form.title}
+                  onChange={(e) => setField('title', e.target.value)}
+                  className="rounded-xl"
+                  data-testid="item-edit-field-title"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.name')} htmlFor="f-name">
+                <Input
+                  id="f-name"
+                  value={form.name}
+                  onChange={(e) => setField('name', e.target.value)}
+                  className="rounded-xl"
+                  data-testid="item-edit-field-name"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.brand')} htmlFor="f-brand">
+                <Input
+                  id="f-brand"
+                  value={form.brand}
+                  onChange={(e) => setField('brand', e.target.value)}
+                  className="rounded-xl"
+                  data-testid="item-edit-field-brand"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.caption')} htmlFor="f-caption">
+                <Textarea
+                  id="f-caption"
+                  value={form.caption}
+                  onChange={(e) => setField('caption', e.target.value)}
+                  rows={2}
+                  className="rounded-xl resize-none"
+                  data-testid="item-edit-field-caption"
+                />
+              </Field>
+            </CardContent>
+          </Card>
+
+          {/* Taxonomy */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionTaxonomy')}</div>
+              <Field label={t('itemDetail.edit.category')}>
+                <NullableSelect
+                  value={form.category}
+                  onChange={(v) => setField('category', v || 'Top')}
+                  options={CATEGORY_OPTIONS}
+                  placeholder={t('itemDetail.edit.category')}
+                  testid="item-edit-field-category"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.subCategory')} htmlFor="f-sub">
+                <Input
+                  id="f-sub"
+                  value={form.sub_category}
+                  onChange={(e) => setField('sub_category', e.target.value)}
+                  className="rounded-xl"
+                  data-testid="item-edit-field-sub_category"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.itemType')} htmlFor="f-itemtype">
+                <Input
+                  id="f-itemtype"
+                  value={form.item_type}
+                  onChange={(e) => setField('item_type', e.target.value)}
+                  className="rounded-xl"
+                  data-testid="item-edit-field-item_type"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={t('itemDetail.edit.gender')}>
+                  <NullableSelect
+                    value={form.gender}
+                    onChange={(v) => setField('gender', v)}
+                    options={GENDER_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-gender"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.dressCode')}>
+                  <NullableSelect
+                    value={form.dress_code}
+                    onChange={(v) => setField('dress_code', v)}
+                    options={DRESS_CODE_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-dress_code"
+                  />
+                </Field>
               </div>
-              <p className="text-sm text-muted-foreground">
-                {t('itemDetail.generateVariantSub')}
-              </p>
+              <Field label={t('itemDetail.edit.season')}>
+                <PillMultiSelect
+                  value={form.season}
+                  options={SEASON_OPTIONS}
+                  onChange={(v) => setField('season', v)}
+                  testidPrefix="item-edit-field-season"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.tradition')} htmlFor="f-tradition">
+                <Input
+                  id="f-tradition"
+                  value={form.tradition}
+                  onChange={(e) => setField('tradition', e.target.value)}
+                  className="rounded-xl"
+                  placeholder="arabic, jewish, …"
+                  data-testid="item-edit-field-tradition"
+                />
+              </Field>
+            </CardContent>
+          </Card>
+
+          {/* Composition */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionComposition')}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={t('itemDetail.edit.size')} htmlFor="f-size">
+                  <Input
+                    id="f-size"
+                    value={form.size}
+                    onChange={(e) => setField('size', e.target.value)}
+                    className="rounded-xl"
+                    data-testid="item-edit-field-size"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.color')} htmlFor="f-color">
+                  <Input
+                    id="f-color"
+                    value={form.color}
+                    onChange={(e) => setField('color', e.target.value)}
+                    className="rounded-xl"
+                    data-testid="item-edit-field-color"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.material')} htmlFor="f-material">
+                  <Input
+                    id="f-material"
+                    value={form.material}
+                    onChange={(e) => setField('material', e.target.value)}
+                    className="rounded-xl"
+                    data-testid="item-edit-field-material"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.pattern')}>
+                  <NullableSelect
+                    value={form.pattern}
+                    onChange={(v) => setField('pattern', v)}
+                    options={PATTERN_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-pattern"
+                  />
+                </Field>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Quality */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionQuality')}</div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label={t('itemDetail.edit.state')}>
+                  <NullableSelect
+                    value={form.state}
+                    onChange={(v) => setField('state', v)}
+                    options={STATE_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-state"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.condition')}>
+                  <NullableSelect
+                    value={form.condition}
+                    onChange={(v) => setField('condition', v)}
+                    options={CONDITION_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-condition"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.qualityTier')}>
+                  <NullableSelect
+                    value={form.quality}
+                    onChange={(v) => setField('quality', v)}
+                    options={QUALITY_OPTIONS}
+                    placeholder="—"
+                    testid="item-edit-field-quality"
+                  />
+                </Field>
+              </div>
+              <Field label={t('itemDetail.edit.repairAdvice')} htmlFor="f-repair">
+                <Textarea
+                  id="f-repair"
+                  value={form.repair_advice}
+                  onChange={(e) => setField('repair_advice', e.target.value)}
+                  rows={2}
+                  className="rounded-xl resize-none"
+                  data-testid="item-edit-field-repair_advice"
+                />
+              </Field>
+            </CardContent>
+          </Card>
+
+          {/* Pricing & intent */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionPricing')}</div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label={t('itemDetail.edit.priceCents')} htmlFor="f-price">
+                  <Input
+                    id="f-price"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.price_cents}
+                    onChange={(e) => setField('price_cents', e.target.value)}
+                    className="rounded-xl"
+                    data-testid="item-edit-field-price_cents"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.currency')}>
+                  <NullableSelect
+                    value={form.currency}
+                    onChange={(v) => setField('currency', v || 'USD')}
+                    options={CURRENCY_OPTIONS}
+                    placeholder="USD"
+                    testid="item-edit-field-currency"
+                  />
+                </Field>
+                <Field label={t('itemDetail.edit.intent')}>
+                  <NullableSelect
+                    value={form.marketplace_intent}
+                    onChange={(v) => setField('marketplace_intent', v || 'own')}
+                    options={INTENT_OPTIONS}
+                    placeholder="own"
+                    testid="item-edit-field-marketplace_intent"
+                  />
+                </Field>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Organization */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionOrganization')}</div>
+              <Field label={t('itemDetail.edit.formality')}>
+                <NullableSelect
+                  value={form.formality}
+                  onChange={(v) => setField('formality', v)}
+                  options={FORMALITY_OPTIONS}
+                  placeholder="—"
+                  testid="item-edit-field-formality"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.tags')}>
+                <ChipList
+                  value={form.tags}
+                  onChange={(v) => setField('tags', v)}
+                  placeholder={t('itemDetail.edit.tagPlaceholder')}
+                  testidPrefix="item-edit-field-tags"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.culturalTags')}>
+                <ChipList
+                  value={form.cultural_tags}
+                  onChange={(v) => setField('cultural_tags', v)}
+                  placeholder={t('itemDetail.edit.culturalTagPlaceholder')}
+                  testidPrefix="item-edit-field-cultural_tags"
+                />
+              </Field>
+              <Field label={t('itemDetail.edit.notes')} htmlFor="f-notes">
+                <Textarea
+                  id="f-notes"
+                  value={form.notes}
+                  onChange={(e) => setField('notes', e.target.value)}
+                  rows={3}
+                  className="rounded-xl resize-none"
+                  data-testid="item-edit-field-notes"
+                />
+              </Field>
+            </CardContent>
+          </Card>
+
+          {/* Variant generator (existing) */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="item-edit-image-card">
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">{t('itemDetail.generateVariant')}</div>
+              <p className="text-sm text-muted-foreground">{t('itemDetail.generateVariantSub')}</p>
               <Input
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
@@ -404,42 +946,23 @@ export default function ItemDetail() {
                 className="rounded-xl"
                 data-testid="item-edit-prompt-input"
               />
-              <Button
-                onClick={onEdit}
-                disabled={editing || !editPrompt.trim()}
-                className="w-full rounded-xl"
-                data-testid="item-generate-variant-button"
-              >
-                {editing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4 me-2" /> {t('itemDetail.generateVariant')}
-                  </>
-                )}
+              <Button onClick={onGenerateVariant} disabled={editing || !editPrompt.trim()} className="w-full rounded-xl" data-testid="item-generate-variant-button">
+                {editing ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Sparkles className="h-4 w-4 me-2" />{t('itemDetail.generateVariant')}</>}
               </Button>
             </CardContent>
           </Card>
 
+          {/* Bottom actions */}
           <div className="grid grid-cols-2 gap-3">
-            <Button
-              asChild
-              variant="secondary"
-              className="rounded-xl"
-              data-testid="item-list-for-sale"
-            >
+            <Button asChild variant="secondary" className="rounded-xl" data-testid="item-list-for-sale">
               <Link to={`/market/create?itemId=${item.id}`}>
-                <Store className="h-4 w-4 me-2" /> {t('itemDetail.listForSale')}
+                <Store className="h-4 w-4 me-2" />{t('itemDetail.listForSale')}
               </Link>
             </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button
-                  variant="destructive"
-                  className="rounded-xl"
-                  data-testid="item-delete-button"
-                >
-                  <Trash2 className="h-4 w-4 me-2" /> {t('common.delete')}
+                <Button variant="destructive" className="rounded-xl" data-testid="item-delete-button">
+                  <Trash2 className="h-4 w-4 me-2" />{t('common.delete')}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -458,6 +981,38 @@ export default function ItemDetail() {
           </div>
         </div>
       </div>
+
+      {/* Sticky Save footer on mobile (form is long) */}
+      {isDirty && (
+        <div
+          className="md:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-full bg-background/95 backdrop-blur border border-border shadow-lg px-3 py-2"
+          data-testid="item-edit-sticky-save"
+        >
+          <CheckCircle2 className="h-4 w-4 text-[hsl(var(--accent))]" />
+          <span className="text-xs text-muted-foreground">
+            {t('itemDetail.edit.unsaved', { count: Object.keys(patch).length })}
+          </span>
+          <Button type="button" size="sm" onClick={onSave} disabled={saving} className="rounded-full h-8">
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <><Save className="h-3.5 w-3.5 me-1" />{t('itemDetail.edit.save')}</>
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------- small field wrapper -------------------- */
+function Field({ label, children, htmlFor, required }) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={htmlFor} className="caps-label text-muted-foreground text-[10px]">
+        {label}{required ? ' *' : ''}
+      </Label>
+      {children}
     </div>
   );
 }

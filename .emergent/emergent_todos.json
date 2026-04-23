@@ -1,46 +1,42 @@
 [
   {
-    "content": "Explore: multi-item pipeline, HF FLUX edit interface, item edit page, ClosetItem schema",
+    "content": "Extend backend UpdateItemIn with all editable fields",
     "status": "completed"
   },
   {
-    "content": "Create /app/backend/app/services/reconstruction.py (needs_reconstruction + reconstruct + validate)",
+    "content": "Survey reusable form components + existing addItem.* i18n keys in AddItem.jsx",
     "status": "completed"
   },
   {
-    "content": "Add reconstructed_image_url + reconstruction_metadata to ClosetItem schema",
+    "content": "Rewrite ItemDetail.jsx into a full edit page with every field editable",
     "status": "completed"
   },
   {
-    "content": "Auto-repair in POST /closet/analyze for flagged crops (parallel via asyncio.gather)",
+    "content": "Preserve existing Repair / Variant / Delete / List-for-sale flows",
     "status": "completed"
   },
   {
-    "content": "Add POST /closet/{id}/repair endpoint for manual edit-page trigger",
+    "content": "Dirty-state detection + Save/Discard actions + localized toasts",
     "status": "completed"
   },
   {
-    "content": "Frontend: AddItem.jsx shows AI-repaired badge and uses reconstructed crop",
+    "content": "Add i18n keys (en + he) for edit page labels",
     "status": "completed"
   },
   {
-    "content": "Frontend: add Repair button + hint input to ItemDetail.jsx with voice input",
+    "content": "Lint + esbuild compile check",
     "status": "completed"
   },
   {
-    "content": "Add i18n keys for repair UI + badges",
+    "content": "Backend smoke test: PATCH /closet/{id} with new fields",
     "status": "completed"
   },
   {
-    "content": "Lint + compile check",
+    "content": "Frontend screenshot: edit page renders + save round-trip works",
     "status": "completed"
   },
   {
-    "content": "Frontend screenshot: AddItem repair badge + edit-page Repair button",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md with Phase Q",
+    "content": "Update plan.md with Edit-page milestone",
     "status": "completed"
   }
 ]

@@ -98,21 +98,44 @@ class CreateItemIn(BaseModel):
 class UpdateItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Source | None = None
+    # Descriptive
+    name: str | None = None
+    title: str | None = None
+    caption: str | None = None
+    # Taxonomy
     category: str | None = None
     sub_category: str | None = None
-    title: str | None = None
+    item_type: str | None = None
     brand: str | None = None
+    gender: GarmentGender | None = None
+    dress_code: DressCode | None = None
+    season: list[str] | None = None
+    tradition: str | None = None
+    # Composition
     size: str | None = None
     color: str | None = None
+    colors: list[WeightedTag] | None = None
     material: str | None = None
+    fabric_materials: list[WeightedTag] | None = None
     pattern: str | None = None
-    season: list[str] | None = None
+    # Quality
+    state: GarmentState | None = None
+    condition: GarmentCondition | None = None
+    quality: GarmentQuality | None = None
+    repair_advice: str | None = None
+    # Pricing + marketplace intent
+    price_cents: int | None = None
+    currency: str | None = None
+    marketplace_intent: MarketplaceIntent | None = None
+    # Legacy
     formality: Formality | None = None
     cultural_tags: list[str] | None = None
     tags: list[str] | None = None
+    # Wear tracking
     wear_count: int | None = None
     last_worn_at: str | None = None
     notes: str | None = None
+    # Phase Q — reconstruction knobs
     reconstructed_image_url: str | None = None
     reconstruction_metadata: dict[str, Any] | None = None
     # Allow clearing the reconstruction (user can "revert" via Repair UI)
@@ -883,7 +906,15 @@ async def get_item(
 async def update_item(
     item_id: str, payload: UpdateItemIn, user: dict = Depends(get_current_user)
 ) -> dict[str, Any]:
+    # ``exclude_none=True`` keeps the PATCH semantics of "send only what you
+    # want to change" — a client can e.g. update just `notes` without
+    # wiping every other optional field.
     patch = payload.model_dump(exclude_none=True)
+    # The `clear_reconstruction` flag is a command, not a value we persist.
+    # Pop it + translate into explicit null-sets on the related columns.
+    if patch.pop("clear_reconstruction", False):
+        patch["reconstructed_image_url"] = None
+        patch["reconstruction_metadata"] = None
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     updated = await repos.update(
         get_db().closet_items, {"id": item_id, "user_id": user["id"]}, patch

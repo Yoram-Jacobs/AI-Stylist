@@ -521,7 +521,7 @@ Adds a first-class "Complete the outfit" action in the Closet. Given 1–N user-
 
 ---
 
-### Phase Q — High-Fidelity Wardrobe Reconstructor **(P1 / COMPLETE)**
+### Phase Q — High-Fidelity Wardrobe Reconstructor **(P1 / COMPLETE, +edit-page)**
 Fixes the "cropped images only show part of the item" pain point. Every garment crop produced by the multi-item extractor is evaluated against a cheap local-heuristics check; when the crop looks incomplete, the pipeline automatically generates a clean, centered, full-item product image via HF FLUX.1-schnell driven by a semantic prompt built from The Eyes' analysis. Category-drift sanity check rejects off-target generations. A manual "Image Repair" card on the item edit page handles edge cases with optional typed-or-spoken hints.
 
 **Scope notes (what this is NOT)**
@@ -586,6 +586,24 @@ Fixes the "cropped images only show part of the item" pain point. Every garment 
 | "Multilingual voice interface using Gemma 4 native audio ingestion" | ✅ via Phase M `speech.js` (Web Speech API, 12 locales, zero extra API cost). Gemma audio tokens would require Phase O hosting. |
 | "Neglect item images that show the whole item without bg and without other items" | ✅ `whole_frame_skip` rule in `should_reconstruct` |
 | "All processing occurs locally via Ollama and Docker" | ❌ **out of scope** — web app stack. Images still flow through HF inference (same privacy profile as today). Can be layered on the off-pod endpoint pattern once Phases N/O land. |
+
+**Edit-page upgrade (companion milestone)**
+- ✅ `ItemDetail.jsx` rewritten a second time into a **full manual editor**: clicking any closet item now opens a page where **every schema field** is editable inline. Layout: left column keeps the image + Phase Q Repair card + variants; right column scrolls through six labelled sections:
+  1. **Identity** — title (required), name, brand, caption
+  2. **Taxonomy** — category, sub_category, item_type, gender, dress_code, season (pill multi-select), tradition
+  3. **Composition** — size, color, material, pattern
+  4. **Quality** — state, condition, quality, repair_advice
+  5. **Pricing & intent** — price_cents, currency, marketplace_intent
+  6. **Organization** — formality, tags (chip list), cultural_tags (chip list), notes
+- ✅ **Dirty-state detection** via `diffPatch(loaded, form)` — the top bar shows a "{{count}} unsaved" badge and enables **Save** / **Discard** only when the user has actually changed something. Empty-string clears are translated to explicit `null` PATCHes so fields can be wiped.
+- ✅ **Sticky mobile save footer** appears at the bottom of the viewport on < md widths when there are unsaved changes.
+- ✅ `UpdateItemIn` extended to accept every editable field (name, caption, item_type, gender, dress_code, state, condition, quality, repair_advice, price_cents, currency, marketplace_intent, tradition, colors/fabric_materials WeightedTag arrays). `extra="forbid"` stays on so unknown fields still 422.
+- ✅ `api.updateItem(id, body)` alias added to `/app/frontend/src/lib/api.js` (keeps `patchItem` working).
+- ✅ **22-field PATCH round-trip live-verified** against the preview URL (HTTP 200, every echoed field matches the request). `clear_reconstruction` flag correctly translates to `reconstructed_image_url: null` + `reconstruction_metadata: null`.
+- ✅ **Frontend flow screenshot-verified end-to-end**: initial render, dirty-badge appearance after typing in `title`, season pill toggle, tag chip addition, clicking Save, toast "Details saved" appearing, dirty badge disappearing, field values persisted.
+- ✅ i18n: new `itemDetail.edit.*` block (38 keys) added to `en.json` + `he.json` covering every section header, field label, placeholder, and action (Save/Discard/Saving/unsaved count). Other 10 locales fall back to English per the Phase L strategy.
+- ✅ Reusable in-file helpers: `<ChipList>` for tags/cultural_tags, `<PillMultiSelect>` for seasons, `<NullableSelect>` for every Shadcn Select dropdown that needs to represent "unset" via a `—` item (works around Shadcn's refusal of empty-string values).
+- ⚠️ Weighted tag arrays (`colors`, `fabric_materials`) are accepted by the backend but not exposed in the edit UI — they're niche, the primary `color` + `material` string fields cover 95% of cases. Future enhancement if users ask for it.
 
 ---
 

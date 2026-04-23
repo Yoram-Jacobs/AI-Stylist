@@ -65,6 +65,7 @@ export const api = {
   searchCloset: (body) =>
     client.post('/closet/search', body, { timeout: 30000 }).then((r) => r.data),
   patchItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),
+  updateItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),
   deleteItem: (id) => client.delete(`/closet/${id}`).then((r) => r.data),
   editItemImage: (id, prompt) =>
     client
