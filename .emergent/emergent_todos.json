@@ -1,42 +1,42 @@
 [
   {
-    "content": "Extend backend UpdateItemIn with all editable fields",
+    "content": "Add taxonomy namespace to en.json and he.json",
     "status": "completed"
   },
   {
-    "content": "Survey reusable form components + existing addItem.* i18n keys in AddItem.jsx",
+    "content": "Create /app/frontend/src/lib/taxonomy.js helper",
     "status": "completed"
   },
   {
-    "content": "Rewrite ItemDetail.jsx into a full edit page with every field editable",
+    "content": "Refactor SourceTagBadge.jsx to localize Private/Shared/Retail",
     "status": "completed"
   },
   {
-    "content": "Preserve existing Repair / Variant / Delete / List-for-sale flows",
+    "content": "Refactor CalendarConnect.jsx (full localization of card)",
     "status": "completed"
   },
   {
-    "content": "Dirty-state detection + Save/Discard actions + localized toasts",
+    "content": "Refactor Closet.jsx category filter + item card",
     "status": "completed"
   },
   {
-    "content": "Add i18n keys (en + he) for edit page labels",
+    "content": "Refactor AddItem.jsx to use localized dropdown options + labels",
     "status": "completed"
   },
   {
-    "content": "Lint + esbuild compile check",
+    "content": "Refactor ItemDetail.jsx to use localized dropdown options",
     "status": "completed"
   },
   {
-    "content": "Backend smoke test: PATCH /closet/{id} with new fields",
+    "content": "Refactor Marketplace.jsx filter dropdowns",
     "status": "completed"
   },
   {
-    "content": "Frontend screenshot: edit page renders + save round-trip works",
+    "content": "Build + esbuild check passed",
     "status": "completed"
   },
   {
-    "content": "Update plan.md with Edit-page milestone",
+    "content": "Hebrew-mode screenshot QA verified - all dropdowns translated",
     "status": "completed"
   }
 ]

@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { Plus } from 'lucide-react';
 import { api } from '@/lib/api';
+import { labelForCategory, labelForSource } from '@/lib/taxonomy';
 import { toast } from 'sonner';
 
 const fmt = (cents, cur = 'USD') =>
@@ -63,11 +64,11 @@ export default function Marketplace() {
           <div className="flex flex-wrap gap-2 mb-4">
             <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-source-select"><SelectValue /></SelectTrigger>
-              <SelectContent>{SOURCES.map((s) => <SelectItem key={s} value={s}>{s === 'all' ? t('common.all') : s}</SelectItem>)}</SelectContent>
+              <SelectContent>{SOURCES.map((s) => <SelectItem key={s} value={s}>{labelForSource(s, t)}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={filters.category} onValueChange={(v) => setFilters((f) => ({ ...f, category: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-category-select"><SelectValue /></SelectTrigger>
-              <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c === 'all' ? t('common.all') : c}</SelectItem>)}</SelectContent>
+              <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{labelForCategory(c, t)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
 

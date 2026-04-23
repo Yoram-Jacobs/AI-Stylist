@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +16,7 @@ import { api } from '@/lib/api';
  * query param.
  */
 export const CalendarConnect = () => {
+  const { t } = useTranslation();
   const [status, setStatus] = useState({ connected: false, google_email: null });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -38,12 +40,12 @@ export const CalendarConnect = () => {
     const params = new URLSearchParams(location.search);
     const cal = params.get('calendar');
     if (cal === 'connected') {
-      toast.success('Google Calendar connected');
+      toast.success(t('calendar.connected'));
       params.delete('calendar');
       nav({ pathname: location.pathname, search: params.toString() }, { replace: true });
     } else if (cal === 'error') {
       const reason = params.get('reason') || 'unknown_error';
-      toast.error(`Couldn't connect Google Calendar: ${reason.replaceAll('_', ' ')}`);
+      toast.error(`${t('calendar.connectFailed')}: ${reason.replaceAll('_', ' ')}`);
       params.delete('calendar');
       params.delete('reason');
       nav({ pathname: location.pathname, search: params.toString() }, { replace: true });
@@ -58,7 +60,7 @@ export const CalendarConnect = () => {
       if (!authorization_url) throw new Error('missing url');
       window.location.href = authorization_url;
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to start Google sign-in');
+      toast.error(err?.response?.data?.detail || t('calendar.connectFailedGeneric'));
       setBusy(false);
     }
   };
@@ -68,9 +70,9 @@ export const CalendarConnect = () => {
     try {
       await api.googleOAuthDisconnect();
       setStatus({ connected: false, google_email: null });
-      toast.success('Google Calendar disconnected');
+      toast.success(t('calendar.disconnected'));
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Disconnect failed');
+      toast.error(err?.response?.data?.detail || t('calendar.disconnectFailed'));
     } finally {
       setBusy(false);
     }
@@ -88,14 +90,14 @@ export const CalendarConnect = () => {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <div className="caps-label text-muted-foreground">Context</div>
+              <div className="caps-label text-muted-foreground">{t('calendar.context')}</div>
               {loading ? null : status.connected ? (
                 <Badge
                   variant="outline"
                   className="bg-emerald-50 text-emerald-800 border-emerald-200 text-[11px]"
                   data-testid="calendar-connected-badge"
                 >
-                  <CheckCircle2 className="h-3 w-3 mr-1" /> Connected
+                  <CheckCircle2 className="h-3 w-3 me-1" /> {t('calendar.connectedBadge')}
                 </Badge>
               ) : (
                 <Badge
@@ -103,22 +105,20 @@ export const CalendarConnect = () => {
                   className="text-[11px]"
                   data-testid="calendar-disconnected-badge"
                 >
-                  Not connected
+                  {t('calendar.notConnected')}
                 </Badge>
               )}
             </div>
-            <h3 className="font-display text-xl mt-1">Google Calendar</h3>
+            <h3 className="font-display text-xl mt-1">{t('calendar.title')}</h3>
             <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-              Let the stylist ground outfits in your real schedule. We request
-              read-only access to your primary calendar and keep events on the
-              server only while rendering advice.
+              {t('calendar.description')}
             </p>
             {status.connected && status.google_email ? (
               <div
                 className="text-xs text-muted-foreground mt-2"
                 data-testid="calendar-connected-email"
               >
-                Signed in as <span className="font-medium">{status.google_email}</span>
+                {t('calendar.signedInAs')} <span className="font-medium">{status.google_email}</span>
               </div>
             ) : null}
           </div>
@@ -139,7 +139,7 @@ export const CalendarConnect = () => {
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <>
-                    <Unlink className="h-4 w-4 mr-2" /> Disconnect
+                    <Unlink className="h-4 w-4 me-2" /> {t('calendar.disconnectAction')}
                   </>
                 )}
               </Button>
@@ -154,7 +154,7 @@ export const CalendarConnect = () => {
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <>
-                    <LinkIcon className="h-4 w-4 mr-2" /> Connect Google Calendar
+                    <LinkIcon className="h-4 w-4 me-2" /> {t('calendar.connectAction')}
                   </>
                 )}
               </Button>
@@ -165,8 +165,7 @@ export const CalendarConnect = () => {
           <div className="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
             <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>
-              Until connected, the stylist uses a generic "work day" placeholder
-              when you tick <em>Include calendar</em>.
+              {t('calendar.offlineHint')} <em>{t('calendar.includeCalendarEm')}</em>.
             </span>
           </div>
         ) : null}

@@ -22,6 +22,7 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
+import { labelForCategory, labelForSource } from '@/lib/taxonomy';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
@@ -272,15 +273,19 @@ export default function Closet() {
               <SelectValue placeholder={t('closet.category')} />
             </SelectTrigger>
             <SelectContent>
-              {CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c === 'all' ? t('common.all') : c}</SelectItem>)}
+              {CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>{labelForCategory(c, t)}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
             <SelectTrigger className="w-[120px] rounded-xl" data-testid="closet-source-select">
-              <SelectValue placeholder="Source" />
+              <SelectValue placeholder={labelForSource('all', t)} />
             </SelectTrigger>
             <SelectContent>
-              {SOURCES.map((s) => <SelectItem key={s} value={s}>{s === 'all' ? t('common.all') : s}</SelectItem>)}
+              {SOURCES.map((s) => (
+                <SelectItem key={s} value={s}>{labelForSource(s, t)}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Button
@@ -514,6 +519,7 @@ export default function Closet() {
 
 /* -------------------- shared card body -------------------- */
 function ItemCardInner({ item, isSelected, showCheckbox, score }) {
+  const { t } = useTranslation();
   return (
     <Card
       className={`rounded-[calc(var(--radius)+6px)] overflow-hidden border-border shadow-editorial group-hover:shadow-editorial-md transition-shadow ${
@@ -529,7 +535,7 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">
-            No image
+            {t('market.noImage')}
           </div>
         )}
         {typeof score === 'number' && (
@@ -569,7 +575,7 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
           <SourceTagBadge source={item.source} />
         </div>
         <div className="text-xs text-muted-foreground mt-1">
-          {[item.category, item.color].filter(Boolean).join(' · ')}
+          {[labelForCategory(item.category, t), item.color].filter(Boolean).join(' · ')}
         </div>
       </CardContent>
     </Card>

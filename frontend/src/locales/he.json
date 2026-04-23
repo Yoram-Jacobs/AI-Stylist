@@ -118,12 +118,12 @@
   },
   "addItem": {
     "title": "העלאה ומילוי אוטומטי",
-    "subtitle": "בחר תמונה אחת או יותר. \u2018העיניים\u2019 יסרקו כל פריט וימלאו את כל השדות — אתה רק סוקר ומתאים.",
+    "subtitle": "בחר תמונה אחת או יותר. ‘העיניים’ יסרקו כל פריט וימלאו את כל השדות — אתה רק סוקר ומתאים.",
     "label": "הוספה לארון",
     "addPhotos": "הוסף תמונות",
     "uploadPhotos": "העלה תמונות",
     "takePhoto": "צלם תמונה",
-    "dropzoneTitle": "תן ל\u2018עיניים\u2019 לראות את הפריטים שלך",
+    "dropzoneTitle": "תן ל‘עיניים’ לראות את הפריטים שלך",
     "dropzoneBody": "צלם צילום מהיר במצלמה או העלה תמונות קיימות. נתמכות JPG, PNG, HEIC — כל פריט מנותח במקביל.",
     "analyze": "נתח",
     "scanning": "סורק",
@@ -172,7 +172,29 @@
     "selectPlaceholder": "בחר…",
     "stripeFee": "עמלת סליקה",
     "youReceive": "תקבל",
-    "listingPreview": "תצוגה מקדימה של מודעה"
+    "listingPreview": "תצוגה מקדימה של מודעה",
+    "subCategory": "תת־קטגוריה",
+    "subCategoryPlaceholder": "חולצה",
+    "itemType": "סוג פריט",
+    "itemTypePlaceholder": "חולצת אוקספורד",
+    "brandPlaceholder": "למשל Levi's",
+    "tradition": "מסורת",
+    "traditionPlaceholder": "לדוגמה: ערבית, יהודית",
+    "sizePlaceholder": "M",
+    "genderPlaceholder": "יוניסקס",
+    "categoryPlaceholder": "עליונית",
+    "dressCode": "קוד לבוש",
+    "dressCodePlaceholder": "יומיומי",
+    "patternPlaceholder": "חלק",
+    "state": "מצב",
+    "qualityLabel": "איכות",
+    "tags": "תגיות",
+    "addTag": "הוסף תגית",
+    "addAction": "הוסף",
+    "removeTagAria": "הסר תגית {{label}}",
+    "removeEntryAria": "הסר {{label}}",
+    "colorSlotPlaceholder": "שם הצבע",
+    "fabricSlotPlaceholder": "שם הבד"
   },
   "itemDetail": {
     "back": "חזור",
@@ -359,7 +381,7 @@
     "viewsCount": "{{count}} צפיות",
     "feeBreakdown": "פירוט עמלות",
     "listPrice": "מחיר מבוקש",
-    "manageInMine": "נהל ב\u2018המודעות שלי\u2019",
+    "manageInMine": "נהל ב‘המודעות שלי’",
     "loadFailed": "הטעינה נכשלה",
     "listingNotFound": "המודעה לא נמצאה",
     "txReserved": "העסקה שוריינה",
@@ -490,10 +512,111 @@
     "disconnect": "נתק",
     "connected": "Google יומן מחובר",
     "disconnected": "Google יומן נותק",
-    "connectFailed": "לא ניתן לחבר את היומן"
+    "connectFailed": "לא ניתן לחבר את היומן",
+    "context": "הקשר",
+    "notConnected": "לא מחובר",
+    "connectedBadge": "מחובר",
+    "title": "יומן Google",
+    "description": "אפשר לסטייליסט לבסס תלבושות על לוח הזמנים האמיתי שלך. אנחנו מבקשים גישה לקריאה בלבד ליומן הראשי ושומרים אירועים בשרת רק בזמן יצירת הייעוץ.",
+    "signedInAs": "מחובר כ",
+    "offlineHint": "עד שתתחבר, הסטייליסט ישתמש ב\"יום עבודה\" גנרי כשתסמן",
+    "includeCalendarEm": "הכלל יומן",
+    "connectAction": "חבר את יומן Google",
+    "disconnectAction": "נתק",
+    "connectFailedGeneric": "לא ניתן להתחיל בהתחברות ל-Google",
+    "disconnectFailed": "הניתוק נכשל"
   },
   "seo": {
     "defaultTitle": "DressApp — הארון שלך, מוגבה",
     "defaultDescription": "קטלג את המלתחה, התייעץ עם סטייליסט AI, והחלף או מכור בעמלה הוגנת של 7%."
+  },
+  "taxonomy": {
+    "categories": {
+      "all": "הכל",
+      "top": "עליונית",
+      "bottom": "תחתונית",
+      "outerwear": "מעיל",
+      "full_body": "חלק שלם",
+      "footwear": "הנעלה",
+      "shoes": "נעליים",
+      "accessories": "אקססוריז",
+      "accessory": "אביזר",
+      "underwear": "הלבשה תחתונה",
+      "dress": "שמלה"
+    },
+    "dress_code": {
+      "casual": "יומיומי",
+      "smart-casual": "אלגנטי־יומיומי",
+      "business": "עסקי",
+      "formal": "רשמי",
+      "athletic": "אתלטי",
+      "loungewear": "בית"
+    },
+    "gender": {
+      "men": "גברים",
+      "women": "נשים",
+      "unisex": "יוניסקס",
+      "kids": "ילדים"
+    },
+    "season": {
+      "spring": "אביב",
+      "summer": "קיץ",
+      "fall": "סתיו",
+      "winter": "חורף",
+      "all": "כל העונות"
+    },
+    "state": {
+      "new": "חדש",
+      "used": "משומש"
+    },
+    "condition": {
+      "bad": "גרוע",
+      "fair": "סביר",
+      "good": "טוב",
+      "excellent": "מצוין"
+    },
+    "quality": {
+      "budget": "בסיסי",
+      "mid": "בינוני",
+      "premium": "פרימיום",
+      "luxury": "יוקרה"
+    },
+    "pattern": {
+      "solid": "חלק",
+      "striped": "פסים",
+      "plaid": "משובץ",
+      "floral": "פרחוני",
+      "herringbone": "דגדגן",
+      "polka": "נקודות",
+      "paisley": "פייזלי",
+      "geometric": "גיאומטרי",
+      "abstract": "מופשט"
+    },
+    "formality": {
+      "casual": "יומיומי",
+      "smart-casual": "אלגנטי־יומיומי",
+      "business": "עסקי",
+      "formal": "רשמי"
+    },
+    "intent": {
+      "own": "שמור בארון",
+      "for_sale": "למכירה",
+      "donate": "תרומה",
+      "swap": "החלפה"
+    },
+    "source": {
+      "all": "הכל",
+      "Private": "פרטי",
+      "Shared": "משותף",
+      "Retail": "קמעונאי"
+    },
+    "role": {
+      "top": "עליונית",
+      "bottom": "תחתונית",
+      "outerwear": "מעיל",
+      "shoes": "נעליים",
+      "accessory": "אביזר",
+      "dress": "שמלה"
+    }
   }
 }

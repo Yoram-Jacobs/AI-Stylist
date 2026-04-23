@@ -152,7 +152,29 @@
     "removeItem": "आइटम हटाएं",
     "detected": "{{count}} आइटम मिले",
     "noPhotos": "विश्लेषण के लिए कम से कम एक फ़ोटो चुनें।",
-    "tryAgain": "पुनः प्रयास करें"
+    "tryAgain": "पुनः प्रयास करें",
+    "subCategory": "Sub-category",
+    "subCategoryPlaceholder": "Shirt",
+    "itemType": "Item type",
+    "itemTypePlaceholder": "Oxford shirt",
+    "brandPlaceholder": "e.g. Levi's",
+    "tradition": "Tradition",
+    "traditionPlaceholder": "e.g. arabic, jewish",
+    "sizePlaceholder": "M",
+    "genderPlaceholder": "unisex",
+    "categoryPlaceholder": "Top",
+    "dressCode": "Dress code",
+    "dressCodePlaceholder": "casual",
+    "patternPlaceholder": "solid",
+    "state": "State",
+    "qualityLabel": "Quality",
+    "tags": "Tags",
+    "addTag": "add tag",
+    "addAction": "Add",
+    "removeTagAria": "Remove tag {{label}}",
+    "removeEntryAria": "Remove {{label}}",
+    "colorSlotPlaceholder": "Color name",
+    "fabricSlotPlaceholder": "Fabric name"
   },
   "itemDetail": {
     "back": "अलमारी पर वापस",
@@ -298,10 +320,111 @@
     "disconnect": "अलग करें",
     "connected": "Google कैलेंडर जुड़ा है",
     "disconnected": "Google कैलेंडर अलग हुआ",
-    "connectFailed": "कैलेंडर नहीं जुड़ सका"
+    "connectFailed": "कैलेंडर नहीं जुड़ सका",
+    "context": "Context",
+    "notConnected": "Not connected",
+    "connectedBadge": "Connected",
+    "title": "Google Calendar",
+    "description": "Let the stylist ground outfits in your real schedule. We request read-only access to your primary calendar and keep events on the server only while rendering advice.",
+    "signedInAs": "Signed in as",
+    "offlineHint": "Until connected, the stylist uses a generic \"work day\" placeholder when you tick",
+    "includeCalendarEm": "Include calendar",
+    "connectAction": "Connect Google Calendar",
+    "disconnectAction": "Disconnect",
+    "connectFailedGeneric": "Failed to start Google sign-in",
+    "disconnectFailed": "Disconnect failed"
   },
   "seo": {
     "defaultTitle": "DressApp — आपकी अलमारी, उन्नत",
     "defaultDescription": "अपनी अलमारी को सूचीबद्ध करें, AI स्टाइलिस्ट से पूछें, और 7% के उचित शुल्क पर अदला-बदली या बिक्री करें।"
+  },
+  "taxonomy": {
+    "categories": {
+      "all": "All",
+      "top": "Top",
+      "bottom": "Bottom",
+      "outerwear": "Outerwear",
+      "full_body": "Full Body",
+      "footwear": "Footwear",
+      "shoes": "Shoes",
+      "accessories": "Accessories",
+      "accessory": "Accessory",
+      "underwear": "Underwear",
+      "dress": "Dress"
+    },
+    "dress_code": {
+      "casual": "Casual",
+      "smart-casual": "Smart-casual",
+      "business": "Business",
+      "formal": "Formal",
+      "athletic": "Athletic",
+      "loungewear": "Loungewear"
+    },
+    "gender": {
+      "men": "Men",
+      "women": "Women",
+      "unisex": "Unisex",
+      "kids": "Kids"
+    },
+    "season": {
+      "spring": "Spring",
+      "summer": "Summer",
+      "fall": "Fall",
+      "winter": "Winter",
+      "all": "All seasons"
+    },
+    "state": {
+      "new": "New",
+      "used": "Used"
+    },
+    "condition": {
+      "bad": "Bad",
+      "fair": "Fair",
+      "good": "Good",
+      "excellent": "Excellent"
+    },
+    "quality": {
+      "budget": "Budget",
+      "mid": "Mid",
+      "premium": "Premium",
+      "luxury": "Luxury"
+    },
+    "pattern": {
+      "solid": "Solid",
+      "striped": "Striped",
+      "plaid": "Plaid",
+      "floral": "Floral",
+      "herringbone": "Herringbone",
+      "polka": "Polka",
+      "paisley": "Paisley",
+      "geometric": "Geometric",
+      "abstract": "Abstract"
+    },
+    "formality": {
+      "casual": "Casual",
+      "smart-casual": "Smart-casual",
+      "business": "Business",
+      "formal": "Formal"
+    },
+    "intent": {
+      "own": "Keep",
+      "for_sale": "For sale",
+      "donate": "Donate",
+      "swap": "Swap"
+    },
+    "source": {
+      "all": "All sources",
+      "Private": "Private",
+      "Shared": "Shared",
+      "Retail": "Retail"
+    },
+    "role": {
+      "top": "Top",
+      "bottom": "Bottom",
+      "outerwear": "Outerwear",
+      "shoes": "Shoes",
+      "accessory": "Accessory",
+      "dress": "Dress"
+    }
   }
 }

@@ -152,7 +152,29 @@
     "removeItem": "إزالة العنصر",
     "detected": "تم اكتشاف {{count}} عنصر(عناصر)",
     "noPhotos": "اختر صورة واحدة على الأقل للتحليل.",
-    "tryAgain": "حاول مجددًا"
+    "tryAgain": "حاول مجددًا",
+    "subCategory": "فئة فرعية",
+    "subCategoryPlaceholder": "قميص",
+    "itemType": "نوع القطعة",
+    "itemTypePlaceholder": "قميص أكسفورد",
+    "brandPlaceholder": "مثلاً Levi's",
+    "tradition": "التقليد",
+    "traditionPlaceholder": "مثلاً: عربي، يهودي",
+    "sizePlaceholder": "M",
+    "genderPlaceholder": "للجنسين",
+    "categoryPlaceholder": "قطعة علوية",
+    "dressCode": "كود اللبس",
+    "dressCodePlaceholder": "كاجوال",
+    "patternPlaceholder": "سادة",
+    "state": "الحالة",
+    "qualityLabel": "الجودة",
+    "tags": "وسوم",
+    "addTag": "أضف وسم",
+    "addAction": "إضافة",
+    "removeTagAria": "احذف الوسم {{label}}",
+    "removeEntryAria": "احذف {{label}}",
+    "colorSlotPlaceholder": "اسم اللون",
+    "fabricSlotPlaceholder": "اسم القماش"
   },
   "itemDetail": {
     "back": "العودة إلى الخزانة",
@@ -298,10 +320,111 @@
     "disconnect": "قطع الاتصال",
     "connected": "تم ربط Google Calendar",
     "disconnected": "تم قطع الاتصال بـ Google Calendar",
-    "connectFailed": "تعذّر ربط التقويم"
+    "connectFailed": "تعذّر ربط التقويم",
+    "context": "السياق",
+    "notConnected": "غير متصل",
+    "connectedBadge": "متصل",
+    "title": "تقويم Google",
+    "description": "دع المصمم يعتمد التصاميم على جدولك الحقيقي. نطلب صلاحية قراءة فقط لتقويمك الأساسي ونحتفظ بالأحداث على الخادم فقط أثناء إعداد النصيحة.",
+    "signedInAs": "مسجل كـ",
+    "offlineHint": "حتى تتصل، يستخدم المصمم يوم عمل افتراضيًا عند تفعيلك لـ",
+    "includeCalendarEm": "تضمين التقويم",
+    "connectAction": "اربط تقويم Google",
+    "disconnectAction": "اقطع الاتصال",
+    "connectFailedGeneric": "فشل بدء تسجيل الدخول بـ Google",
+    "disconnectFailed": "فشل قطع الاتصال"
   },
   "seo": {
     "defaultTitle": "DressApp — خزانتك، بأسلوب راقٍ",
     "defaultDescription": "افهرس خزانتك، اسأل مصمم الذكاء الاصطناعي، وبادل أو بع برسوم عادلة 7%."
+  },
+  "taxonomy": {
+    "categories": {
+      "all": "الكل",
+      "top": "قطعة علوية",
+      "bottom": "قطعة سفلية",
+      "outerwear": "ملابس خارجية",
+      "full_body": "قطعة كاملة",
+      "footwear": "أحذية",
+      "shoes": "أحذية",
+      "accessories": "إكسسوارات",
+      "accessory": "إكسسوار",
+      "underwear": "ملابس داخلية",
+      "dress": "فستان"
+    },
+    "dress_code": {
+      "casual": "كاجوال",
+      "smart-casual": "كاجوال أنيق",
+      "business": "عملي",
+      "formal": "رسمي",
+      "athletic": "رياضي",
+      "loungewear": "منزلي"
+    },
+    "gender": {
+      "men": "رجال",
+      "women": "نساء",
+      "unisex": "للجنسين",
+      "kids": "أطفال"
+    },
+    "season": {
+      "spring": "ربيع",
+      "summer": "صيف",
+      "fall": "خريف",
+      "winter": "شتاء",
+      "all": "كل الفصول"
+    },
+    "state": {
+      "new": "جديد",
+      "used": "مستعمل"
+    },
+    "condition": {
+      "bad": "سيئة",
+      "fair": "مقبولة",
+      "good": "جيدة",
+      "excellent": "ممتازة"
+    },
+    "quality": {
+      "budget": "اقتصادي",
+      "mid": "متوسط",
+      "premium": "بريميوم",
+      "luxury": "فاخر"
+    },
+    "pattern": {
+      "solid": "سادة",
+      "striped": "مخطط",
+      "plaid": "مربعات",
+      "floral": "نقش زهور",
+      "herringbone": "هيرنغبون",
+      "polka": "نقاط",
+      "paisley": "بيزلي",
+      "geometric": "هندسي",
+      "abstract": "تجريدي"
+    },
+    "formality": {
+      "casual": "كاجوال",
+      "smart-casual": "كاجوال أنيق",
+      "business": "عملي",
+      "formal": "رسمي"
+    },
+    "intent": {
+      "own": "احتفظ به",
+      "for_sale": "للبيع",
+      "donate": "تبرع",
+      "swap": "تبديل"
+    },
+    "source": {
+      "all": "الكل",
+      "Private": "خاص",
+      "Shared": "مشترك",
+      "Retail": "تجزئة"
+    },
+    "role": {
+      "top": "قطعة علوية",
+      "bottom": "قطعة سفلية",
+      "outerwear": "ملابس خارجية",
+      "shoes": "أحذية",
+      "accessory": "إكسسوار",
+      "dress": "فستان"
+    }
   }
 }

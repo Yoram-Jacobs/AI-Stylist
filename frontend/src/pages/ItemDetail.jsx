@@ -44,6 +44,18 @@ import {
 } from '@/components/ui/select';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { api } from '@/lib/api';
+import {
+  labelForCategory,
+  labelForDressCode,
+  labelForGender,
+  labelForPattern,
+  labelForSeason,
+  labelForState,
+  labelForCondition,
+  labelForQuality,
+  labelForIntent,
+  labelForFormality,
+} from '@/lib/taxonomy';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { isSTTSupported, createRecognition } from '@/lib/speech';
@@ -245,7 +257,7 @@ function ChipList({ value, onChange, placeholder, disabled, testidPrefix }) {
 }
 
 /* -------------------- multi-select pill group -------------------- */
-function PillMultiSelect({ value, options, onChange, testidPrefix }) {
+function PillMultiSelect({ value, options, onChange, testidPrefix, format }) {
   const toggle = (opt) => {
     onChange(
       value.includes(opt) ? value.filter((v) => v !== opt) : [...value, opt],
@@ -270,7 +282,7 @@ function PillMultiSelect({ value, options, onChange, testidPrefix }) {
                 : 'bg-card border-border hover:bg-secondary'
             }`}
           >
-            {opt}
+            {format ? format(opt) : opt}
           </button>
         );
       })}
@@ -279,7 +291,7 @@ function PillMultiSelect({ value, options, onChange, testidPrefix }) {
 }
 
 /* -------------------- single-select shadcn wrapper that tolerates "" -------------------- */
-function NullableSelect({ value, onChange, options, placeholder, testid }) {
+function NullableSelect({ value, onChange, options, placeholder, testid, format }) {
   // Shadcn Select rejects empty string as a value; we map "" -> __none__ for the control.
   const v = value || '__none__';
   return (
@@ -294,7 +306,7 @@ function NullableSelect({ value, onChange, options, placeholder, testid }) {
         <SelectItem value="__none__">—</SelectItem>
         {options.map((o) => (
           <SelectItem key={o} value={o}>
-            {o}
+            {format ? format(o) : o}
           </SelectItem>
         ))}
       </SelectContent>
@@ -565,7 +577,7 @@ export default function ItemDetail() {
                 variant="outline"
                 className="rounded-full text-[10px] bg-background/90 backdrop-blur"
               >
-                {form.category}
+                {labelForCategory(form.category, t)}
               </Badge>
             </div>
           </Card>
@@ -705,6 +717,7 @@ export default function ItemDetail() {
                   options={CATEGORY_OPTIONS}
                   placeholder={t('itemDetail.edit.category')}
                   testid="item-edit-field-category"
+                  format={(o) => labelForCategory(o, t)}
                 />
               </Field>
               <Field label={t('itemDetail.edit.subCategory')} htmlFor="f-sub">
@@ -733,6 +746,7 @@ export default function ItemDetail() {
                     options={GENDER_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-gender"
+                    format={(o) => labelForGender(o, t)}
                   />
                 </Field>
                 <Field label={t('itemDetail.edit.dressCode')}>
@@ -742,6 +756,7 @@ export default function ItemDetail() {
                     options={DRESS_CODE_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-dress_code"
+                    format={(o) => labelForDressCode(o, t)}
                   />
                 </Field>
               </div>
@@ -751,6 +766,7 @@ export default function ItemDetail() {
                   options={SEASON_OPTIONS}
                   onChange={(v) => setField('season', v)}
                   testidPrefix="item-edit-field-season"
+                  format={(o) => labelForSeason(o, t)}
                 />
               </Field>
               <Field label={t('itemDetail.edit.tradition')} htmlFor="f-tradition">
@@ -805,6 +821,7 @@ export default function ItemDetail() {
                     options={PATTERN_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-pattern"
+                    format={(o) => labelForPattern(o, t)}
                   />
                 </Field>
               </div>
@@ -823,6 +840,7 @@ export default function ItemDetail() {
                     options={STATE_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-state"
+                    format={(o) => labelForState(o, t)}
                   />
                 </Field>
                 <Field label={t('itemDetail.edit.condition')}>
@@ -832,6 +850,7 @@ export default function ItemDetail() {
                     options={CONDITION_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-condition"
+                    format={(o) => labelForCondition(o, t)}
                   />
                 </Field>
                 <Field label={t('itemDetail.edit.qualityTier')}>
@@ -841,6 +860,7 @@ export default function ItemDetail() {
                     options={QUALITY_OPTIONS}
                     placeholder="—"
                     testid="item-edit-field-quality"
+                    format={(o) => labelForQuality(o, t)}
                   />
                 </Field>
               </div>
@@ -890,6 +910,7 @@ export default function ItemDetail() {
                     options={INTENT_OPTIONS}
                     placeholder="own"
                     testid="item-edit-field-marketplace_intent"
+                    format={(o) => labelForIntent(o, t)}
                   />
                 </Field>
               </div>
@@ -907,6 +928,7 @@ export default function ItemDetail() {
                   options={FORMALITY_OPTIONS}
                   placeholder="—"
                   testid="item-edit-field-formality"
+                  format={(o) => labelForFormality(o, t)}
                 />
               </Field>
               <Field label={t('itemDetail.edit.tags')}>

@@ -172,7 +172,29 @@
     "selectPlaceholder": "Select…",
     "stripeFee": "Processing fee",
     "youReceive": "You receive",
-    "listingPreview": "Listing preview"
+    "listingPreview": "Listing preview",
+    "subCategory": "Sub-category",
+    "subCategoryPlaceholder": "Shirt",
+    "itemType": "Item type",
+    "itemTypePlaceholder": "Oxford shirt",
+    "brandPlaceholder": "e.g. Levi's",
+    "tradition": "Tradition",
+    "traditionPlaceholder": "e.g. arabic, jewish",
+    "sizePlaceholder": "M",
+    "genderPlaceholder": "unisex",
+    "categoryPlaceholder": "Top",
+    "dressCode": "Dress code",
+    "dressCodePlaceholder": "casual",
+    "patternPlaceholder": "solid",
+    "state": "State",
+    "qualityLabel": "Quality",
+    "tags": "Tags",
+    "addTag": "add tag",
+    "addAction": "Add",
+    "removeTagAria": "Remove tag {{label}}",
+    "removeEntryAria": "Remove {{label}}",
+    "colorSlotPlaceholder": "Color name",
+    "fabricSlotPlaceholder": "Fabric name"
   },
   "itemDetail": {
     "back": "Back",
@@ -281,7 +303,7 @@
     "recordVoice": "Record voice",
     "stopRecording": "Stop",
     "thinking": "Drafting your look",
-    "thinkingSub": "Pulling your closet, weather, and calendar context. This can take 15\u201325 seconds.",
+    "thinkingSub": "Pulling your closet, weather, and calendar context. This can take 15–25 seconds.",
     "advice": "Advice",
     "rationale": "Rationale",
     "send": "Send",
@@ -292,7 +314,7 @@
     "occasion": "Occasion",
     "occasionPlaceholder": "e.g. Client pitch",
     "weatherAware": "Weather-aware",
-    "transcribing": "Transcribing\u2026",
+    "transcribing": "Transcribing…",
     "errorAdvice": "Stylist failed",
     "micDenied": "Microphone permission denied",
     "outfitN": "Outfit {{n}}",
@@ -336,7 +358,7 @@
     "myListings": "My listings",
     "transactionsTab": "Transactions",
     "emptyTitle": "No listings yet",
-    "emptySub": "Check back soon \u2014 or list something of your own.",
+    "emptySub": "Check back soon — or list something of your own.",
     "noMatching": "Nothing matching yet",
     "noMatchingSub": "Try widening your filters or check back after today's Trend-Scout update.",
     "noMyListings": "You have no listings yet.",
@@ -359,13 +381,13 @@
     "viewsCount": "{{count}} views",
     "feeBreakdown": "Fee breakdown",
     "listPrice": "List price",
-    "manageInMine": "Manage in \u201cMy listings\u201d",
+    "manageInMine": "Manage in “My listings”",
     "loadFailed": "Failed to load marketplace",
     "listingNotFound": "Listing not found",
     "txReserved": "Transaction reserved",
     "purchaseFailed": "Purchase failed",
     "seeAll": "See all",
-    "loading": "Loading\u2026",
+    "loading": "Loading…",
     "noTx": "No transactions yet.",
     "netShort": "net {{amount}}",
     "sourceFilter": "Source",
@@ -432,7 +454,7 @@
     "yourNet": "Your net",
     "view": "View",
     "loadFailed": "Failed to load transactions",
-    "listingShort": "Listing {{id}}\u2026"
+    "listingShort": "Listing {{id}}…"
   },
   "profile": {
     "accountLabel": "Account",
@@ -490,10 +512,111 @@
     "disconnect": "Disconnect",
     "connected": "Google Calendar connected",
     "disconnected": "Google Calendar disconnected",
-    "connectFailed": "Could not connect calendar"
+    "connectFailed": "Could not connect calendar",
+    "context": "Context",
+    "notConnected": "Not connected",
+    "connectedBadge": "Connected",
+    "title": "Google Calendar",
+    "description": "Let the stylist ground outfits in your real schedule. We request read-only access to your primary calendar and keep events on the server only while rendering advice.",
+    "signedInAs": "Signed in as",
+    "offlineHint": "Until connected, the stylist uses a generic \"work day\" placeholder when you tick",
+    "includeCalendarEm": "Include calendar",
+    "connectAction": "Connect Google Calendar",
+    "disconnectAction": "Disconnect",
+    "connectFailedGeneric": "Failed to start Google sign-in",
+    "disconnectFailed": "Disconnect failed"
   },
   "seo": {
     "defaultTitle": "DressApp — Your closet, elevated",
     "defaultDescription": "Catalog your wardrobe, ask an AI stylist, and swap or sell with a fair 7% fee."
+  },
+  "taxonomy": {
+    "categories": {
+      "all": "All",
+      "top": "Top",
+      "bottom": "Bottom",
+      "outerwear": "Outerwear",
+      "full_body": "Full Body",
+      "footwear": "Footwear",
+      "shoes": "Shoes",
+      "accessories": "Accessories",
+      "accessory": "Accessory",
+      "underwear": "Underwear",
+      "dress": "Dress"
+    },
+    "dress_code": {
+      "casual": "Casual",
+      "smart-casual": "Smart-casual",
+      "business": "Business",
+      "formal": "Formal",
+      "athletic": "Athletic",
+      "loungewear": "Loungewear"
+    },
+    "gender": {
+      "men": "Men",
+      "women": "Women",
+      "unisex": "Unisex",
+      "kids": "Kids"
+    },
+    "season": {
+      "spring": "Spring",
+      "summer": "Summer",
+      "fall": "Fall",
+      "winter": "Winter",
+      "all": "All seasons"
+    },
+    "state": {
+      "new": "New",
+      "used": "Used"
+    },
+    "condition": {
+      "bad": "Bad",
+      "fair": "Fair",
+      "good": "Good",
+      "excellent": "Excellent"
+    },
+    "quality": {
+      "budget": "Budget",
+      "mid": "Mid",
+      "premium": "Premium",
+      "luxury": "Luxury"
+    },
+    "pattern": {
+      "solid": "Solid",
+      "striped": "Striped",
+      "plaid": "Plaid",
+      "floral": "Floral",
+      "herringbone": "Herringbone",
+      "polka": "Polka",
+      "paisley": "Paisley",
+      "geometric": "Geometric",
+      "abstract": "Abstract"
+    },
+    "formality": {
+      "casual": "Casual",
+      "smart-casual": "Smart-casual",
+      "business": "Business",
+      "formal": "Formal"
+    },
+    "intent": {
+      "own": "Keep",
+      "for_sale": "For sale",
+      "donate": "Donate",
+      "swap": "Swap"
+    },
+    "source": {
+      "all": "All sources",
+      "Private": "Private",
+      "Shared": "Shared",
+      "Retail": "Retail"
+    },
+    "role": {
+      "top": "Top",
+      "bottom": "Bottom",
+      "outerwear": "Outerwear",
+      "shoes": "Shoes",
+      "accessory": "Accessory",
+      "dress": "Dress"
+    }
   }
 }

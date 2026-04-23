@@ -17,6 +17,17 @@ import {
 } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
+import {
+  labelForCategory,
+  labelForDressCode,
+  labelForGender,
+  labelForPattern,
+  labelForSeason,
+  labelForState,
+  labelForCondition,
+  labelForQuality,
+  labelForIntent,
+} from '@/lib/taxonomy';
 import { toast } from 'sonner';
 
 /* -------------------- constants -------------------- */
@@ -36,10 +47,10 @@ const PATTERN_OPTIONS = [
   'geometric', 'abstract',
 ];
 const INTENT_OPTIONS = [
-  { value: 'own', label: 'Own', icon: Shirt, tone: 'bg-slate-100 text-slate-900 border-slate-200' },
-  { value: 'for_sale', label: 'For Sale', icon: HandCoins, tone: 'bg-amber-100 text-amber-900 border-amber-200' },
-  { value: 'donate', label: 'Donate', icon: Gift, tone: 'bg-emerald-100 text-emerald-900 border-emerald-200' },
-  { value: 'swap', label: 'Swap', icon: Repeat, tone: 'bg-sky-100 text-sky-900 border-sky-200' },
+  { value: 'own', icon: Shirt, tone: 'bg-slate-100 text-slate-900 border-slate-200' },
+  { value: 'for_sale', icon: HandCoins, tone: 'bg-amber-100 text-amber-900 border-amber-200' },
+  { value: 'donate', icon: Gift, tone: 'bg-emerald-100 text-emerald-900 border-emerald-200' },
+  { value: 'swap', icon: Repeat, tone: 'bg-sky-100 text-sky-900 border-sky-200' },
 ];
 
 const fileToBase64 = (file) =>
@@ -470,7 +481,7 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
               >
                 <div className="flex items-center gap-2 text-xs">
                   <Eye className="h-3.5 w-3.5 text-[hsl(var(--accent))] animate-pulse" />
-                  <span className="font-medium">The Eyes are scanning…</span>
+                  <span className="font-medium">{t('addItem.scanning')}…</span>
                 </div>
                 <Progress value={progress} className="h-1 mt-1.5" />
               </div>
@@ -478,15 +489,15 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
             {status === 'error' && !isBusy && (
               <div className="absolute bottom-0 left-0 right-0 bg-rose-50/95 text-rose-900 px-3 py-2 text-xs flex items-start gap-2">
                 <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span className="flex-1">{error || 'Analysis failed'}</span>
+                <span className="flex-1">{error || t('addItem.analyzeFailed')}</span>
                 <button onClick={onRetry} className="underline shrink-0" data-testid="add-item-retry">
-                  Retry
+                  {t('addItem.tryAgain')}
                 </button>
               </div>
             )}
             {saved && (
               <div className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-[2px]">
-                <Badge className="bg-emerald-600 text-white">Saved</Badge>
+                <Badge className="bg-emerald-600 text-white">{t('addItem.saved')}</Badge>
               </div>
             )}
             {!saved && (
@@ -494,7 +505,7 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
                 type="button"
                 onClick={onRemove}
                 className="absolute top-2 right-2 h-8 w-8 rounded-full bg-background/80 backdrop-blur flex items-center justify-center hover:bg-background"
-                aria-label="Remove this photo"
+                aria-label={t('addItem.removePhoto')}
                 data-testid="add-item-remove"
               >
                 <X className="h-4 w-4" />
@@ -527,25 +538,25 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
               >
                 <Wand2 className="h-4 w-4 mt-0.5 shrink-0" />
                 <div>
-                  <div className="font-medium">Repair tip</div>
+                  <div className="font-medium">{t('addItem.repairTip')}</div>
                   <div className="mt-0.5">{fields.repair_advice}</div>
                 </div>
               </div>
             )}
             <TaxonomyGrid fields={fields} onChange={onChange} disabled={saved} />
             <WeightedList
-              label="Colours"
+              labelKey="addItem.color"
               items={fields.colors}
               onChange={(v) => onChange({ colors: v })}
-              placeholder="red"
+              placeholder={t('addItem.colorSlotPlaceholder')}
               disabled={saved}
               testid="add-item-colors"
             />
             <WeightedList
-              label="Fabric composition"
+              labelKey="addItem.material"
               items={fields.fabric_materials}
               onChange={(v) => onChange({ fabric_materials: v })}
-              placeholder="cotton"
+              placeholder={t('addItem.fabricSlotPlaceholder')}
               disabled={saved}
               testid="add-item-fabrics"
             />
@@ -565,26 +576,27 @@ function ItemCard({ card, onRetry, onRemove, onChange, onCardPatch }) {
 
 /* -------------------- sub-sections -------------------- */
 function NameCaption({ fields, onChange, disabled }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div>
-        <Label className="caps-label text-muted-foreground">Name</Label>
+        <Label className="caps-label text-muted-foreground">{t('addItem.itemName')}</Label>
         <Input
           value={fields.name || ''}
           onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="Cream Linen Blazer"
+          placeholder={t('addItem.namePlaceholder')}
           disabled={disabled}
           data-testid="add-item-name"
           className="mt-1 font-display text-xl bg-transparent border-0 border-b rounded-none px-0 focus-visible:ring-0 focus-visible:border-[hsl(var(--accent))]"
         />
       </div>
       <div>
-        <Label className="caps-label text-muted-foreground">Caption</Label>
+        <Label className="caps-label text-muted-foreground">{t('addItem.caption')}</Label>
         <Textarea
           value={fields.caption || ''}
           onChange={(e) => onChange({ caption: e.target.value })}
           rows={2}
-          placeholder="A friendly, editorial description of the piece…"
+          placeholder={t('addItem.captionPlaceholder')}
           disabled={disabled}
           data-testid="add-item-caption"
           className="mt-1 resize-none"
@@ -595,6 +607,7 @@ function NameCaption({ fields, onChange, disabled }) {
 }
 
 function IntentSelector({ fields, onChange, disabled }) {
+  const { t } = useTranslation();
   const intent = fields.marketplace_intent || 'own';
   // Only compute preview for 'for_sale'
   const priceCents = Number(fields.price_cents) || 0;
@@ -607,11 +620,17 @@ function IntentSelector({ fields, onChange, disabled }) {
     <div className="rounded-2xl border border-border p-3 bg-secondary/30">
       <div className="flex items-center justify-between mb-2">
         <Label className="caps-label text-muted-foreground flex items-center gap-1">
-          <Tag className="h-3 w-3" /> Marketplace intent
+          <Tag className="h-3 w-3" /> {t('addItem.marketplaceIntent')}
         </Label>
-        <Badge variant="outline" className="text-[10px]">Default: Own</Badge>
+        <Badge variant="outline" className="text-[10px]">
+          {t('addItem.intent_own')}
+        </Badge>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" role="radiogroup" aria-label="Marketplace intent">
+      <div
+        className="grid grid-cols-2 sm:grid-cols-4 gap-2"
+        role="radiogroup"
+        aria-label={t('addItem.marketplaceIntent')}
+      >
         {INTENT_OPTIONS.map((o) => {
           const active = intent === o.value;
           const Icon = o.icon;
@@ -628,7 +647,7 @@ function IntentSelector({ fields, onChange, disabled }) {
                 active ? `${o.tone} font-medium` : 'bg-background text-muted-foreground hover:text-foreground border-border'
               }`}
             >
-              <Icon className="h-3.5 w-3.5" /> {o.label}
+              <Icon className="h-3.5 w-3.5" /> {labelForIntent(o.value, t)}
             </button>
           );
         })}
@@ -636,7 +655,7 @@ function IntentSelector({ fields, onChange, disabled }) {
       {intent === 'for_sale' && (
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="add-item-fee-preview">
           <div>
-            <Label className="caps-label text-muted-foreground">List price (USD)</Label>
+            <Label className="caps-label text-muted-foreground">{t('addItem.price')} (USD)</Label>
             <Input
               type="number"
               inputMode="decimal"
@@ -654,9 +673,9 @@ function IntentSelector({ fields, onChange, disabled }) {
             />
           </div>
           <div className="text-xs text-muted-foreground self-end">
-            <div className="flex justify-between"><span>Stripe fee</span><span className="font-mono">{fmtCents(stripeFee)}</span></div>
-            <div className="flex justify-between"><span>Platform 7%</span><span className="font-mono">{fmtCents(platformFee)}</span></div>
-            <div className="flex justify-between font-medium text-foreground"><span>You receive</span><span className="font-mono">{fmtCents(sellerNet)}</span></div>
+            <div className="flex justify-between"><span>{t('addItem.stripeFee')}</span><span className="font-mono">{fmtCents(stripeFee)}</span></div>
+            <div className="flex justify-between"><span>{t('transactions.platform7')}</span><span className="font-mono">{fmtCents(platformFee)}</span></div>
+            <div className="flex justify-between font-medium text-foreground"><span>{t('addItem.youReceive')}</span><span className="font-mono">{fmtCents(sellerNet)}</span></div>
           </div>
         </div>
       )}
@@ -665,17 +684,20 @@ function IntentSelector({ fields, onChange, disabled }) {
 }
 
 function TaxonomyGrid({ fields, onChange, disabled }) {
-  const row = (label, value, setter, options, testid, placeholder) => (
+  const { t } = useTranslation();
+  const row = (label, value, setter, options, testid, placeholder, formatter) => (
     <div>
       <Label className="caps-label text-muted-foreground">{label}</Label>
       {options ? (
         <Select value={value || ''} onValueChange={(v) => setter(v === '__clear' ? '' : v)} disabled={disabled}>
           <SelectTrigger className="mt-1 rounded-xl" data-testid={testid}>
-            <SelectValue placeholder={placeholder || 'Select…'} />
+            <SelectValue placeholder={placeholder || t('addItem.selectPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
             {options.map((o) => (
-              <SelectItem key={o} value={o} className="capitalize">{o}</SelectItem>
+              <SelectItem key={o} value={o}>
+                {formatter ? formatter(o, t) : o}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -694,30 +716,33 @@ function TaxonomyGrid({ fields, onChange, disabled }) {
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-      {row('Category', fields.category, (v) => onChange({ category: v }), CATEGORY_OPTIONS, 'add-item-category', 'Top')}
-      {row('Sub-category', fields.sub_category, (v) => onChange({ sub_category: v }), null, 'add-item-subcategory', 'Shirt')}
-      {row('Item type', fields.item_type, (v) => onChange({ item_type: v }), null, 'add-item-itemtype', 'Oxford shirt')}
-      {row('Brand', fields.brand, (v) => onChange({ brand: v }), null, 'add-item-brand', "e.g. Levi's")}
-      {row('Gender', fields.gender, (v) => onChange({ gender: v }), GENDER_OPTIONS, 'add-item-gender', 'unisex')}
-      {row('Dress code', fields.dress_code, (v) => onChange({ dress_code: v }), DRESS_CODE_OPTIONS, 'add-item-dresscode', 'casual')}
-      {row('Pattern', fields.pattern, (v) => onChange({ pattern: v }), PATTERN_OPTIONS, 'add-item-pattern', 'solid')}
-      {row('Tradition', fields.tradition, (v) => onChange({ tradition: v }), null, 'add-item-tradition', 'e.g. arabic, jewish')}
-      {row('Size', fields.size, (v) => onChange({ size: v }), null, 'add-item-size', 'M')}
+      {row(t('addItem.category'), fields.category, (v) => onChange({ category: v }), CATEGORY_OPTIONS, 'add-item-category', t('addItem.categoryPlaceholder'), labelForCategory)}
+      {row(t('addItem.subCategory'), fields.sub_category, (v) => onChange({ sub_category: v }), null, 'add-item-subcategory', t('addItem.subCategoryPlaceholder'))}
+      {row(t('addItem.itemType'), fields.item_type, (v) => onChange({ item_type: v }), null, 'add-item-itemtype', t('addItem.itemTypePlaceholder'))}
+      {row(t('addItem.brand'), fields.brand, (v) => onChange({ brand: v }), null, 'add-item-brand', t('addItem.brandPlaceholder'))}
+      {row(t('itemDetail.edit.gender'), fields.gender, (v) => onChange({ gender: v }), GENDER_OPTIONS, 'add-item-gender', t('addItem.genderPlaceholder'), labelForGender)}
+      {row(t('addItem.dressCode'), fields.dress_code, (v) => onChange({ dress_code: v }), DRESS_CODE_OPTIONS, 'add-item-dresscode', t('addItem.dressCodePlaceholder'), labelForDressCode)}
+      {row(t('addItem.pattern'), fields.pattern, (v) => onChange({ pattern: v }), PATTERN_OPTIONS, 'add-item-pattern', t('addItem.patternPlaceholder'), labelForPattern)}
+      {row(t('addItem.tradition'), fields.tradition, (v) => onChange({ tradition: v }), null, 'add-item-tradition', t('addItem.traditionPlaceholder'))}
+      {row(t('addItem.size'), fields.size, (v) => onChange({ size: v }), null, 'add-item-size', t('addItem.sizePlaceholder'))}
     </div>
   );
 }
 
 function QualityRow({ fields, onChange, disabled }) {
-  const cell = (label, value, setter, options, testid) => (
+  const { t } = useTranslation();
+  const cell = (label, value, setter, options, testid, formatter) => (
     <div>
       <Label className="caps-label text-muted-foreground">{label}</Label>
       <Select value={value || ''} onValueChange={(v) => setter(v === '__clear' ? '' : v)} disabled={disabled}>
         <SelectTrigger className="mt-1 rounded-xl" data-testid={testid}>
-          <SelectValue placeholder="Select…" />
+          <SelectValue placeholder={t('addItem.selectPlaceholder')} />
         </SelectTrigger>
         <SelectContent>
           {options.map((o) => (
-            <SelectItem key={o} value={o} className="capitalize">{o}</SelectItem>
+            <SelectItem key={o} value={o}>
+              {formatter ? formatter(o, t) : o}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -725,14 +750,15 @@ function QualityRow({ fields, onChange, disabled }) {
   );
   return (
     <div className="grid grid-cols-3 gap-3">
-      {cell('State', fields.state, (v) => onChange({ state: v }), STATE_OPTIONS, 'add-item-state')}
-      {cell('Condition', fields.condition, (v) => onChange({ condition: v }), CONDITION_OPTIONS, 'add-item-condition')}
-      {cell('Quality', fields.quality, (v) => onChange({ quality: v }), QUALITY_OPTIONS, 'add-item-quality')}
+      {cell(t('addItem.state'), fields.state, (v) => onChange({ state: v }), STATE_OPTIONS, 'add-item-state', labelForState)}
+      {cell(t('addItem.condition'), fields.condition, (v) => onChange({ condition: v }), CONDITION_OPTIONS, 'add-item-condition', labelForCondition)}
+      {cell(t('addItem.qualityLabel'), fields.quality, (v) => onChange({ quality: v }), QUALITY_OPTIONS, 'add-item-quality', labelForQuality)}
     </div>
   );
 }
 
 function SeasonPicker({ fields, onChange, disabled }) {
+  const { t } = useTranslation();
   const active = new Set(fields.season || []);
   const toggle = (s) => {
     const next = new Set(active);
@@ -745,7 +771,7 @@ function SeasonPicker({ fields, onChange, disabled }) {
   };
   return (
     <div>
-      <Label className="caps-label text-muted-foreground">Season</Label>
+      <Label className="caps-label text-muted-foreground">{t('addItem.season')}</Label>
       <div className="mt-1 flex flex-wrap gap-1.5" data-testid="add-item-season">
         {SEASON_OPTIONS.map((s) => {
           const on = active.has(s);
@@ -757,11 +783,11 @@ function SeasonPicker({ fields, onChange, disabled }) {
               onClick={() => toggle(s)}
               aria-pressed={on}
               data-testid={`add-item-season-${s}`}
-              className={`rounded-full px-3 py-1 text-xs border capitalize ${
+              className={`rounded-full px-3 py-1 text-xs border ${
                 on ? 'bg-[hsl(var(--accent))] text-white border-[hsl(var(--accent))]' : 'bg-background border-border text-muted-foreground'
               }`}
             >
-              {s}
+              {labelForSeason(s, t)}
             </button>
           );
         })}
@@ -770,16 +796,18 @@ function SeasonPicker({ fields, onChange, disabled }) {
   );
 }
 
-function WeightedList({ label, items, onChange, placeholder, disabled, testid }) {
+function WeightedList({ label, labelKey, items, onChange, placeholder, disabled, testid }) {
+  const { t } = useTranslation();
   const safe = Array.isArray(items) ? items : [];
   const sum = safe.reduce((s, it) => s + (Number(it.pct) || 0), 0);
   const update = (i, patch) => onChange(safe.map((it, j) => (j === i ? { ...it, ...patch } : it)));
   const remove = (i) => onChange(safe.filter((_, j) => j !== i));
   const add = () => onChange([...safe, { name: '', pct: 0 }]);
+  const heading = labelKey ? t(labelKey) : label;
   return (
     <div>
       <div className="flex items-center justify-between">
-        <Label className="caps-label text-muted-foreground">{label}</Label>
+        <Label className="caps-label text-muted-foreground">{heading}</Label>
         <span className={`text-[10px] font-mono ${sum === 100 ? 'text-emerald-700' : sum > 100 ? 'text-rose-700' : 'text-muted-foreground'}`}>
           {sum}%
         </span>
@@ -811,7 +839,7 @@ function WeightedList({ label, items, onChange, placeholder, disabled, testid })
               onClick={() => remove(i)}
               disabled={disabled}
               className="h-9 w-9 rounded-full flex items-center justify-center hover:bg-secondary"
-              aria-label={`Remove ${it.name || 'entry'}`}
+              aria-label={t('addItem.removeEntryAria', { label: it.name || heading })}
               data-testid={`${testid}-remove-${i}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -827,7 +855,7 @@ function WeightedList({ label, items, onChange, placeholder, disabled, testid })
           className="text-xs h-8 rounded-lg"
           data-testid={`${testid}-add`}
         >
-          <Plus className="h-3 w-3 mr-1" /> Add
+          <Plus className="h-3 w-3 me-1" /> {t('addItem.addAction')}
         </Button>
       </div>
     </div>
@@ -835,6 +863,7 @@ function WeightedList({ label, items, onChange, placeholder, disabled, testid })
 }
 
 function TagsEditor({ items, onChange, disabled }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const add = () => {
     const v = draft.trim();
@@ -844,17 +873,17 @@ function TagsEditor({ items, onChange, disabled }) {
   };
   return (
     <div>
-      <Label className="caps-label text-muted-foreground">Tags</Label>
+      <Label className="caps-label text-muted-foreground">{t('addItem.tags')}</Label>
       <div className="mt-1 flex flex-wrap gap-1.5" data-testid="add-item-tags">
-        {items.map((t) => (
-          <Badge key={t} variant="outline" className="text-[11px] pl-2 pr-1 flex items-center gap-1">
-            {t}
+        {items.map((tag) => (
+          <Badge key={tag} variant="outline" className="text-[11px] pl-2 pr-1 flex items-center gap-1">
+            {tag}
             <button
               type="button"
-              onClick={() => onChange(items.filter((x) => x !== t))}
+              onClick={() => onChange(items.filter((x) => x !== tag))}
               disabled={disabled}
               className="h-4 w-4 rounded-full hover:bg-secondary flex items-center justify-center"
-              aria-label={`Remove tag ${t}`}
+              aria-label={t('addItem.removeTagAria', { label: tag })}
             >
               <X className="h-3 w-3" />
             </button>
@@ -865,7 +894,7 @@ function TagsEditor({ items, onChange, disabled }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-            placeholder="add tag"
+            placeholder={t('addItem.addTag')}
             disabled={disabled}
             className="h-8 text-xs rounded-full w-32"
             data-testid="add-item-tag-input"
