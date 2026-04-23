@@ -42,6 +42,9 @@ class UpdateUserIn(BaseModel):
     # --- Phase U: Professional ---
     professional: dict[str, Any] | None = None
 
+    # --- Phase 4P: PayPal payouts ---
+    paypal_receiver_email: str | None = None
+
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)) -> dict[str, Any]:

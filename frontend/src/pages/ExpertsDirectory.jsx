@@ -288,10 +288,9 @@ function ExpertCard({ expert }) {
         <div className="flex items-start gap-3">
           <div className="h-12 w-12 rounded-xl bg-secondary border border-border overflow-hidden shrink-0">
             {avatar ? (
-              // eslint-disable-next-line jsx-a11y/img-redundant-alt
               <img
                 src={avatar}
-                alt="avatar"
+                alt={expert.display_name}
                 className="h-full w-full object-cover"
               />
             ) : (

@@ -10,6 +10,7 @@ from app.api.v1 import (
     closet,
     google_auth,
     listings,
+    payments,
     professionals,
     share,
     stylist,
@@ -31,6 +32,9 @@ api_v1_router.include_router(trends.router)
 api_v1_router.include_router(share.router)
 api_v1_router.include_router(professionals.router)
 api_v1_router.include_router(ads.router)
+api_v1_router.include_router(payments.paypal_router)
+api_v1_router.include_router(payments.credits_router)
+api_v1_router.include_router(payments.buy_router)
 api_v1_router.include_router(admin.router)
 
 

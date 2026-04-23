@@ -395,6 +395,8 @@
     "noMyListings": "You have no listings yet.",
     "buyNow": "Buy now",
     "reserveFor": "Reserve for {{price}}",
+    "buyFor": "Buy for {{price}}",
+    "purchased": "Payment complete — check your transactions",
     "statusNotice": "This listing is {{status}}.",
     "similarTitle": "Items like this",
     "similarSub": "Visually similar listings from the community.",
@@ -620,6 +622,12 @@
       "visibilityNote": "Visible in the Experts directory at /experts.",
       "hiddenBadge": "Hidden by moderator",
       "save": "Save professional details"
+    },
+    "payouts": {
+      "sectionTitle": "Payouts (PayPal)",
+      "description": "When one of your listings sells, we'll send your net to this PayPal email via PayPal Payouts. Leave blank to disable automatic payouts.",
+      "paypalEmail": "PayPal email for payouts",
+      "linked": "Linked"
     }
   },
   "admin": {
@@ -952,5 +960,18 @@
   "ticker": {
     "label": "Sponsored in your region",
     "empty": "No sponsored placements yet"
+  },
+  "credits": {
+    "balanceLabel": "Ad credit balance",
+    "balanceHint": "Credits are deducted in real-time as your ads serve impressions and clicks.",
+    "topup": "Top up",
+    "topupTitle": "Top up ad credits",
+    "pack": "Pack",
+    "custom": "Custom",
+    "customAmount": "Amount",
+    "currency": "Currency",
+    "toppedUp": "Ad credits added — thanks!",
+    "paypalDisclosure": "Secure checkout powered by PayPal. You'll approve the payment in PayPal's window, then we top up your balance instantly.",
+    "insufficientFunds": "Insufficient ad credits — your campaign was paused automatically. Top up to resume."
   }
 }

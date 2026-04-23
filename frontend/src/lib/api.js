@@ -229,6 +229,28 @@ export const api = {
     client.post(`/admin/ads/campaigns/${id}/disable`).then((r) => r.data),
   adminEnableCampaign: (id) =>
     client.post(`/admin/ads/campaigns/${id}/enable`).then((r) => r.data),
+
+  // --- Phase 4P: PayPal / credits / marketplace buy ---
+  paypalConfig: () => client.get('/paypal/config').then((r) => r.data),
+  creditsBalance: (currency = 'USD') =>
+    client.get('/credits/balance', { params: { currency } }).then((r) => r.data),
+  creditsAllBalances: () =>
+    client.get('/credits/balances').then((r) => r.data),
+  creditsHistory: (limit = 30) =>
+    client.get('/credits/history', { params: { limit } }).then((r) => r.data),
+  creditsTopupCreate: (body) =>
+    client.post('/credits/topup', body).then((r) => r.data),
+  creditsTopupCapture: (topupId) =>
+    client.post(`/credits/topup/${topupId}/capture`).then((r) => r.data),
+
+  listingBuyCreate: (listingId) =>
+    client.post(`/listings/${listingId}/buy`).then((r) => r.data),
+  listingBuyCapture: (listingId, orderId) =>
+    client
+      .post(`/listings/${listingId}/buy/capture`, null, {
+        params: { order_id: orderId },
+      })
+      .then((r) => r.data),
 };
 
 export default client;

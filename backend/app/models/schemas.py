@@ -118,6 +118,10 @@ class User(BaseDoc):
     # Hair profile (length / type / color / style).
     hair: dict[str, Any] | None = None
 
+    # --- Phase 4P: PayPal payouts ---
+    # Email address used to receive seller payouts via PayPal Payouts API.
+    paypal_receiver_email: str | None = None
+
     # --- Professional (Phase U) ----------------------------------------
     # Self-service "is fashion professional?" toggle + business card.
     # When is_professional=True the user appears in the /experts directory
@@ -276,6 +280,20 @@ class StripePointer(BaseModel):
     destination_account: str | None = None
 
 
+class PayPalPointer(BaseModel):
+    """Persisted on a Transaction once the PayPal flow is initiated."""
+
+    order_id: str | None = None
+    capture_id: str | None = None
+    payer_id: str | None = None
+    payer_email: str | None = None
+    status: str | None = None  # COMPLETED, PENDING, DENIED, REFUNDED
+    payout_batch_id: str | None = None
+    payout_item_id: str | None = None
+    payout_status: str | None = None  # SUCCESS, PENDING, FAILED, BLOCKED
+    captured_at: str | None = None
+
+
 class Transaction(BaseDoc):
     listing_id: str
     buyer_id: str
@@ -283,6 +301,7 @@ class Transaction(BaseDoc):
     currency: str = "USD"
     financial: TransactionFinancial
     stripe: StripePointer = Field(default_factory=StripePointer)
+    paypal: PayPalPointer = Field(default_factory=PayPalPointer)
     status: TxStatus = "pending"
     paid_at: str | None = None
     refunded_at: str | None = None
@@ -369,7 +388,37 @@ class AdCampaign(BaseDoc):
     target_country: str | None = None  # ISO-2 (e.g. IL, US)
     target_region: str | None = None  # region/state name (free-form for MVP)
     status: AdCampaignStatus = "draft"
+    # When the serving layer auto-pauses a campaign (e.g. insufficient
+    # funds) we surface the reason so the UI can render a helpful banner.
+    status_reason: str | None = None
+    # Per-currency billing: campaigns draw from the owner's matching
+    # `user_credits(user_id, currency)` balance. Default USD for MVP.
+    currency: str = "USD"
     # Live counters.
     impressions: int = 0
     clicks: int = 0
     spent_cents: int = 0
+
+
+# --------------------- Phase 4P: Credits + Payments ---------------------
+CreditTopupStatus = Literal["pending", "captured", "failed", "refunded"]
+
+
+class UserCredits(BaseDoc):
+    """Per-(user, currency) prepaid ad credit balance."""
+
+    user_id: str
+    currency: str = "USD"
+    balance_cents: int = 0
+
+
+class CreditTopup(BaseDoc):
+    user_id: str
+    amount_cents: int
+    currency: str = "USD"
+    status: CreditTopupStatus = "pending"
+    paypal_order_id: str | None = None
+    paypal_capture_id: str | None = None
+    captured_at: str | None = None
+    payer_email: str | None = None
+    pack: str | None = None  # "10" | "25" | "50" | "custom"

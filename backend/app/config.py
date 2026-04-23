@@ -119,7 +119,7 @@ class Settings:
     # --- OpenWeatherMap ---
     OPENWEATHER_API_KEY: str | None = os.environ.get("OPENWEATHER_API_KEY")
 
-    # --- Stripe (Phase 4) ---
+    # --- Stripe (legacy; Phase 4P swaps to PayPal) ---
     STRIPE_SECRET_KEY: str | None = os.environ.get("STRIPE_SECRET_KEY") or None
     STRIPE_PUBLISHABLE_KEY: str | None = os.environ.get("STRIPE_PUBLISHABLE_KEY") or None
     STRIPE_WEBHOOK_SECRET: str | None = os.environ.get("STRIPE_WEBHOOK_SECRET") or None
@@ -132,6 +132,82 @@ class Settings:
     STRIPE_PROCESSING_FEE_FIXED_CENTS: int = int(
         os.environ.get("STRIPE_PROCESSING_FEE_FIXED_CENTS", "30")
     )
+
+    # --- PayPal (Phase 4P) ---
+    # Toggle sandbox vs live via PAYPAL_ENV. Base URLs resolve accordingly.
+    PAYPAL_ENV: str = (os.environ.get("PAYPAL_ENV") or "sandbox").lower()
+    PAYPAL_SANDBOX_CLIENT_ID: str | None = (
+        os.environ.get("PAYPAL_SANDBOX_CLIENT_ID") or None
+    )
+    PAYPAL_SANDBOX_SECRET: str | None = (
+        os.environ.get("PAYPAL_SANDBOX_SECRET") or None
+    )
+    PAYPAL_SANDBOX_WEBHOOK_ID: str | None = (
+        os.environ.get("PAYPAL_SANDBOX_WEBHOOK_ID") or None
+    )
+    PAYPAL_LIVE_CLIENT_ID: str | None = (
+        os.environ.get("PAYPAL_LIVE_CLIENT_ID") or None
+    )
+    PAYPAL_LIVE_SECRET: str | None = (
+        os.environ.get("PAYPAL_LIVE_SECRET") or None
+    )
+    PAYPAL_LIVE_WEBHOOK_ID: str | None = (
+        os.environ.get("PAYPAL_LIVE_WEBHOOK_ID") or None
+    )
+    PAYPAL_DEFAULT_CURRENCY: str = (
+        os.environ.get("PAYPAL_DEFAULT_CURRENCY") or "USD"
+    ).upper()
+    # Comma-separated list exposed to the frontend currency dropdown.
+    PAYPAL_SUPPORTED_CURRENCIES: str = (
+        os.environ.get("PAYPAL_SUPPORTED_CURRENCIES")
+        or "USD,EUR,GBP,ILS,AUD,CAD"
+    )
+    # Skip webhook signature verification for dev/sandbox if explicitly set.
+    PAYPAL_SKIP_WEBHOOK_VERIFY: bool = (
+        os.environ.get("PAYPAL_SKIP_WEBHOOK_VERIFY", "false").lower() == "true"
+    )
+    # Dev-only fallback: if real PayPal auth fails AND this flag is true,
+    # the Orders API simulates order create/capture so UI flows can be
+    # demo'd without valid credentials. Never enable in production.
+    PAYPAL_MOCK_MODE: bool = (
+        os.environ.get("PAYPAL_MOCK_MODE", "true").lower() == "true"
+    )
+    # Platform fee (mirrors legacy STRIPE_PLATFORM_FEE_PERCENT).
+    PAYPAL_PLATFORM_FEE_PERCENT: float = float(
+        os.environ.get("PAYPAL_PLATFORM_FEE_PERCENT", "7")
+    )
+
+    @property
+    def paypal_client_id(self) -> str | None:
+        return (
+            self.PAYPAL_LIVE_CLIENT_ID
+            if self.PAYPAL_ENV == "live"
+            else self.PAYPAL_SANDBOX_CLIENT_ID
+        )
+
+    @property
+    def paypal_secret(self) -> str | None:
+        return (
+            self.PAYPAL_LIVE_SECRET
+            if self.PAYPAL_ENV == "live"
+            else self.PAYPAL_SANDBOX_SECRET
+        )
+
+    @property
+    def paypal_webhook_id(self) -> str | None:
+        return (
+            self.PAYPAL_LIVE_WEBHOOK_ID
+            if self.PAYPAL_ENV == "live"
+            else self.PAYPAL_SANDBOX_WEBHOOK_ID
+        )
+
+    @property
+    def paypal_api_base(self) -> str:
+        return (
+            "https://api-m.paypal.com"
+            if self.PAYPAL_ENV == "live"
+            else "https://api-m.sandbox.paypal.com"
+        )
 
     # --- Google OAuth (Phase 4) ---
     GOOGLE_OAUTH_CLIENT_ID: str | None = os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or None

@@ -1,54 +1,50 @@
 [
   {
-    "content": "Backend: extend User schema with `professional` sub-doc + accept in PATCH /users/me",
+    "content": "Backend: add env + paypal_client service (OAuth2 token cache, httpx wrapper)",
     "status": "completed"
   },
   {
-    "content": "Backend: add /professionals directory endpoints (list + detail)",
+    "content": "Backend: /paypal/config + /paypal/orders create+capture + webhook",
     "status": "completed"
   },
   {
-    "content": "Backend: add /ads campaigns CRUD + ticker auction-lite + impression/click tracking",
+    "content": "Backend: Prepaid ad credits (user_credits, credit_topups, top-up + capture, balance, history)",
     "status": "completed"
   },
   {
-    "content": "Backend: admin hide/unhide endpoints for professionals + ad campaigns + create ad_campaigns index",
+    "content": "Backend: Wire ad impression/click to deduct credits + auto-pause on insufficient funds",
     "status": "completed"
   },
   {
-    "content": "Frontend API: extend lib/api.js with new professionals/ads endpoints",
+    "content": "Backend: Marketplace buy flow (order create/capture) + Transaction.paypal pointer",
     "status": "completed"
   },
   {
-    "content": "Frontend: Add 'Professional' accordion section to ProfileDetailsCard",
+    "content": "Backend: PayPal Payouts service + trigger seller payout on capture + paypal_receiver_email on User",
     "status": "completed"
   },
   {
-    "content": "Frontend: Create /experts directory page (filters, grid, detail modal)",
+    "content": "Frontend: /lib/paypal.js + PayPalCheckoutButton component",
     "status": "completed"
   },
   {
-    "content": "Frontend: Create /ads campaigns manager page for professionals",
+    "content": "Frontend: AdsManager credit balance card + top-up dialog",
     "status": "completed"
   },
   {
-    "content": "Frontend: AdTicker component + wire into Home footer + Experts page",
+    "content": "Frontend: ListingDetail PayPal checkout button",
     "status": "completed"
   },
   {
-    "content": "Frontend: Enable Stylist 'Ask a Professional' CTA -> /experts",
+    "content": "Frontend: Profile Payouts section (paypal_receiver_email)",
     "status": "completed"
   },
   {
-    "content": "i18n: Add EN/HE/AR strings for professionals/ads/experts/ticker",
+    "content": "i18n EN/HE/AR for paypal/credits/payouts",
     "status": "completed"
   },
   {
-    "content": "Register routes (App.js) + nav link (TopNav/BottomTabs)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend + Frontend testing via testing agent",
-    "status": "completed"
+    "content": "Testing agent: backend + frontend PayPal flows",
+    "status": "in_progress"
   }
 ]

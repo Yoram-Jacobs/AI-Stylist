@@ -395,6 +395,8 @@
     "noMyListings": "אין לך עדיין מודעות.",
     "buyNow": "קנה עכשיו",
     "reserveFor": "שריין תמורת {{price}}",
+    "buyFor": "קנה תמורת {{price}}",
+    "purchased": "התשלום הושלם — בדוק בעסקאות שלך",
     "statusNotice": "המודעה הזו {{status}}.",
     "similarTitle": "פריטים דומים",
     "similarSub": "מודעות דומות חזותית מהקהילה.",
@@ -620,6 +622,12 @@
       "visibilityNote": "יופיע בספריית המומחים תחת /experts.",
       "hiddenBadge": "הוסתר על ידי המנהלים",
       "save": "שמור פרטים מקצועיים"
+    },
+    "payouts": {
+      "sectionTitle": "תשלומים (PayPal)",
+      "description": "כשמישהו קונה פריט שלך, שלם את חלקך יועבר לכתובת PayPal זו דרך PayPal Payouts. השאר ריק להשבתת תשלומים אוטומטיים.",
+      "paypalEmail": "אימייל PayPal לקבלת תשלומים",
+      "linked": "מקושר"
     }
   },
   "admin": {
@@ -952,5 +960,18 @@
   "ticker": {
     "label": "בחסות באזורך",
     "empty": "אין עדיין מיקומי חסות"
+  },
+  "credits": {
+    "balanceLabel": "יתרת קרדיט פרסום",
+    "balanceHint": "הקרדיטים נגרעים בזמן אמת כאשר המודעות שלך מציגות הצגות וקליקים.",
+    "topup": "טעינה",
+    "topupTitle": "טעינת קרדיט פרסום",
+    "pack": "חבילה",
+    "custom": "מותאם",
+    "customAmount": "סכום",
+    "currency": "מטבע",
+    "toppedUp": "הקרדיטים נוספו — תודה!",
+    "paypalDisclosure": "תשלום מאובטח ב-PayPal. תאשר בחלון של PayPal, והיתרה תיטען מיד.",
+    "insufficientFunds": "אין מספיק קרדיט — הקמפיין הושהה אוטומטית. טען כדי להמשיך."
   }
 }

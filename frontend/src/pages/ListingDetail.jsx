@@ -11,6 +11,7 @@ import { ArrowLeft, Eye, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PayPalCheckoutButton } from '@/lib/paypal';
 
 const fmt = (cents, cur = 'USD') =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format((cents || 0) / 100);
@@ -22,7 +23,6 @@ export default function ListingDetail() {
   const { user } = useAuth();
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [buying, setBuying] = useState(false);
   const [similar, setSimilar] = useState([]);
   const [similarMode, setSimilarMode] = useState(null);
   const [similarLoading, setSimilarLoading] = useState(true);
@@ -41,15 +41,27 @@ export default function ListingDetail() {
       .finally(() => setSimilarLoading(false));
   }, [id, nav, t]);
 
-  const onBuy = async () => {
-    setBuying(true);
-    try {
-      const tx = await api.createTransaction({ listing_id: id });
-      toast.success(t('market.txReserved'));
-      nav(`/market#tx-${tx.id}`);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || t('market.purchaseFailed'));
-    } finally { setBuying(false); }
+  const createOrder = async () => {
+    const res = await api.listingBuyCreate(id);
+    return { order_id: res.order_id, transaction_id: res.transaction_id };
+  };
+
+  const captureOrder = async ({ order_id }) => {
+    const res = await api.listingBuyCapture(id, order_id);
+    return res;
+  };
+
+  const onBuySuccess = (res) => {
+    toast.success(t('market.purchased'));
+    if (res?.transaction?.id) {
+      nav(`/transactions#tx-${res.transaction.id}`);
+    } else {
+      nav('/transactions');
+    }
+  };
+
+  const onBuyError = (err) => {
+    toast.error(err?.response?.data?.detail || t('market.purchaseFailed'));
   };
 
   if (loading) {
@@ -113,9 +125,22 @@ export default function ListingDetail() {
               <Link to={`/market`}>{t('market.manageInMine')}</Link>
             </Button>
           ) : listing.status === 'active' ? (
-            <Button onClick={onBuy} disabled={buying} className="w-full rounded-xl" data-testid="listing-buy-button">
-              {buying ? <Loader2 className="h-4 w-4 animate-spin" /> : t('market.reserveFor', { price: fmt(fm.list_price_cents, fm.currency) })}
-            </Button>
+            <div data-testid="listing-buy-wrapper">
+              <PayPalCheckoutButton
+                createOrder={createOrder}
+                captureOrder={captureOrder}
+                onSuccess={onBuySuccess}
+                onError={onBuyError}
+                amountLabel={t('market.buyFor', {
+                  price: fmt(fm.list_price_cents, fm.currency),
+                })}
+                className="w-full"
+                testId="listing-buy-button"
+              />
+              <div className="text-[10px] text-muted-foreground mt-2 text-center">
+                {t('credits.paypalDisclosure')}
+              </div>
+            </div>
           ) : (
             <div className="rounded-xl border border-border bg-secondary/60 p-4 text-sm text-muted-foreground" data-testid="listing-status-notice">
               {t('market.statusNotice', { status: listing.status })}

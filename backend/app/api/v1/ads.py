@@ -46,6 +46,7 @@ class CampaignCreateIn(BaseModel):
     end_date: str | None = None
     target_country: str | None = None
     target_region: str | None = None
+    currency: str = "USD"
     status: str = "draft"
 
 
@@ -60,6 +61,7 @@ class CampaignPatchIn(BaseModel):
     end_date: str | None = None
     target_country: str | None = None
     target_region: str | None = None
+    currency: str | None = None
     status: str | None = None
 
 
@@ -98,6 +100,7 @@ async def create_campaign(
         end_date=payload.end_date,
         target_country=payload.target_country,
         target_region=payload.target_region,
+        currency=(payload.currency or "USD").upper(),
         status=payload.status if payload.status in {"draft", "active", "paused"} else "draft",
     )
     doc = campaign.model_dump()
@@ -278,22 +281,75 @@ async def ticker(
 
 
 # ----------------------------- tracking -----------------------------
+async def _charge_owner_or_pause(
+    db, campaign: dict[str, Any], amount_cents: int
+) -> bool:
+    """Atomically deduct `amount_cents` from campaign owner's credit
+    balance for the campaign currency. If insufficient funds, auto-pause
+    the campaign. Returns True if charge succeeded."""
+    owner_id = campaign["owner_id"]
+    currency = (campaign.get("currency") or "USD").upper()
+    res = await db.user_credits.update_one(
+        {
+            "user_id": owner_id,
+            "currency": currency,
+            "balance_cents": {"$gte": amount_cents},
+        },
+        {"$inc": {"balance_cents": -amount_cents}, "$set": {"updated_at": _now_iso()}},
+    )
+    if res.modified_count:
+        return True
+    # Not enough funds → auto-pause.
+    await db.ad_campaigns.update_one(
+        {"id": campaign["id"], "status": "active"},
+        {
+            "$set": {
+                "status": "paused",
+                "status_reason": "insufficient_funds",
+                "updated_at": _now_iso(),
+            }
+        },
+    )
+    return False
+
+
 @router.post("/impression/{campaign_id}")
 async def track_impression(campaign_id: str) -> dict[str, Any]:
     db = get_db()
-    # Treat impression as 1¢ virtual charge so spend-pacing has teeth for MVP.
-    res = await db.ad_campaigns.update_one(
-        {"id": campaign_id, "status": "active"},
-        {"$inc": {"impressions": 1, "spent_cents": 1}, "$set": {"updated_at": _now_iso()}},
+    campaign = await db.ad_campaigns.find_one(
+        {"id": campaign_id, "status": "active"}, {"_id": 0}
     )
-    return {"ok": bool(res.matched_count)}
+    if not campaign:
+        return {"ok": False, "reason": "not_active"}
+    charged = await _charge_owner_or_pause(db, campaign, 1)
+    if not charged:
+        return {"ok": False, "reason": "insufficient_funds"}
+    await db.ad_campaigns.update_one(
+        {"id": campaign_id},
+        {
+            "$inc": {"impressions": 1, "spent_cents": 1},
+            "$set": {"updated_at": _now_iso()},
+        },
+    )
+    return {"ok": True}
 
 
 @router.post("/click/{campaign_id}")
 async def track_click(campaign_id: str) -> dict[str, Any]:
     db = get_db()
-    res = await db.ad_campaigns.update_one(
-        {"id": campaign_id, "status": "active"},
-        {"$inc": {"clicks": 1, "spent_cents": 5}, "$set": {"updated_at": _now_iso()}},
+    campaign = await db.ad_campaigns.find_one(
+        {"id": campaign_id, "status": "active"}, {"_id": 0}
     )
-    return {"ok": bool(res.matched_count)}
+    if not campaign:
+        return {"ok": False, "reason": "not_active"}
+    charged = await _charge_owner_or_pause(db, campaign, 5)
+    if not charged:
+        return {"ok": False, "reason": "insufficient_funds"}
+    await db.ad_campaigns.update_one(
+        {"id": campaign_id},
+        {
+            "$inc": {"clicks": 1, "spent_cents": 5},
+            "$set": {"updated_at": _now_iso()},
+        },
+    )
+    return {"ok": True}

@@ -4,6 +4,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth';
 import { LocationProvider } from '@/lib/location';
+import { PayPalProvider } from '@/lib/paypal';
 import { AppLayout } from '@/components/AppLayout';
 import { PublicOnly } from '@/components/PublicOnly';
 import { SeoBase } from '@/components/SeoBase';
@@ -29,7 +30,8 @@ function App() {
     <HelmetProvider>
       <AuthProvider>
         <LocationProvider>
-          <BrowserRouter>
+          <PayPalProvider>
+            <BrowserRouter>
           <SeoBase />
           <a
             href="#main-content"
@@ -63,6 +65,7 @@ function App() {
           </Routes>
           <Toaster position="top-center" richColors closeButton />
           </BrowserRouter>
+          </PayPalProvider>
         </LocationProvider>
       </AuthProvider>
     </HelmetProvider>

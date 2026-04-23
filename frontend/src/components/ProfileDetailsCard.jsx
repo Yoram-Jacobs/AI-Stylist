@@ -236,6 +236,7 @@ export function ProfileDetailsCard() {
           description: user?.professional?.business?.description || '',
         },
       },
+      paypal_receiver_email: user?.paypal_receiver_email || '',
     }),
     [user],
   );
@@ -285,6 +286,7 @@ export function ProfileDetailsCard() {
               business: prune(form.professional.business),
             }
           : { is_professional: false },
+        paypal_receiver_email: form.paypal_receiver_email || null,
       };
       const updated = await api.patchMe(payload);
       updateUserLocal?.(updated);
@@ -826,6 +828,43 @@ export function ProfileDetailsCard() {
                     </div>
                   </>
                 )}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* --- Payouts (Phase 4P) --- */}
+          <AccordionItem value="payouts">
+            <AccordionTrigger
+              className="caps-label"
+              data-testid="profile-accordion-payouts"
+            >
+              {t('profile.payouts.sectionTitle')}
+              {form.paypal_receiver_email && (
+                <Badge
+                  variant="outline"
+                  className="ms-2 text-[10px] bg-card rounded-full"
+                >
+                  {t('profile.payouts.linked')}
+                </Badge>
+              )}
+            </AccordionTrigger>
+            <AccordionContent>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border p-3 bg-secondary/40 text-xs text-muted-foreground">
+                  {t('profile.payouts.description')}
+                </div>
+                <Field label={t('profile.payouts.paypalEmail')}>
+                  <Input
+                    type="email"
+                    value={form.paypal_receiver_email}
+                    onChange={(e) =>
+                      setField('paypal_receiver_email', e.target.value)
+                    }
+                    placeholder="name@example.com"
+                    className="rounded-xl"
+                    data-testid="profile-paypal-email"
+                  />
+                </Field>
               </div>
             </AccordionContent>
           </AccordionItem>

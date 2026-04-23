@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Phase U kickoff)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Phase U ship + PayPal switch)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
@@ -25,7 +25,7 @@
 - ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
 - ✅ **Phase T shipped**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
 - ✅ **Phase U shipped**: **Experts Pool + Ads/Campaigns + AdTicker + Ask-a-Professional directory** — backend 16/16, frontend 17/17.
-- 🎯 **Payments next**: PayPlus payments integration — deferred until API credentials are available.
+- 🎯 **Payments next (UPDATED)**: Implement **PayPal** (Smart Buttons + Orders v2 API) + **PayPal Payouts** + **prepaid ad credits** with multi-currency support (**replaces PayPlus plan**).
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -92,7 +92,7 @@
 
 ---
 
-### Phase 4 — Context + Autonomy + Payments (PayPlus) **(PARTIALLY COMPLETE / PAYPLUS DEFERRED)**
+### Phase 4 — Context + Autonomy + Payments (PayPal) **(PARTIALLY COMPLETE / PAYPAL NEXT)**
 
 #### Phase 4 (Part 1) — Google Calendar OAuth (P0) **(COMPLETE)**
 Delivered previously; unchanged.
@@ -101,8 +101,132 @@ Delivered previously; unchanged.
 - ✅ Scheduled generator runs daily and persists cards.
 - ✅ Extended schema to support optional media fields (image/video/source) for the Stylist side panel.
 
-#### Phase 4 (Part 3) — PayPlus Payments (replaces Stripe) **(NEXT / DEFERRED)**
-Delivered previously; unchanged.
+#### Phase 4P (Part 3) — **PayPal Payments + Payouts + Credits** **(NEXT / NOT STARTED)**
+**Goal**: Replace deferred PayPlus plan with **PayPal Smart Buttons** (Orders v2) for checkout and **PayPal Payouts** for seller disbursement, plus **prepaid ad-credit balance** for professionals. Support **sandbox + live** via `PAYPAL_ENV`. Support **multi-currency MVP**.
+
+**Known credentials status**
+- ✅ Sandbox keys received.
+- ⚠️ Live keys received but look suspicious (client_id == secret in pasted values). Not blocking sandbox work; needs correction before live cutover.
+- ⏳ Webhook IDs deferred until backend URL stable (we’ll provide webhook URL and events list).
+
+##### Phase 4P.A — Env + PayPal client service (P0)
+- Add env keys:
+  - `PAYPAL_ENV=sandbox|live`
+  - `PAYPAL_SANDBOX_CLIENT_ID`, `PAYPAL_SANDBOX_SECRET`, `PAYPAL_SANDBOX_WEBHOOK_ID`
+  - `PAYPAL_LIVE_CLIENT_ID`, `PAYPAL_LIVE_SECRET`, `PAYPAL_LIVE_WEBHOOK_ID`
+  - `PAYPAL_DEFAULT_CURRENCY` (fallback)
+  - Optional: `PAYPAL_SUPPORTED_CURRENCIES=USD,EUR,ILS,...`
+- New service: `/app/backend/app/services/paypal_client.py`
+  - OAuth2 token retrieval + in-memory cache (refresh before expiry)
+  - `httpx` wrapper for REST API v2 calls (Orders create/capture), webhook verification endpoint, Payouts API
+  - Environment-based base URLs:
+    - sandbox: `https://api-m.sandbox.paypal.com`
+    - live: `https://api-m.paypal.com`
+- Add backend endpoint to expose frontend config:
+  - `GET /api/v1/paypal/config` → `{ env, client_id, default_currency, supported_currencies }`
+
+##### Phase 4P.B — Orders API routes + Webhooks (P0)
+- `POST /api/v1/paypal/orders` (auth required)
+  - Input: `{ amount_cents, currency, purpose: 'listing'|'ad_credit_topup', reference_id }`
+  - Output: `{ order_id }`
+  - Creates Orders v2 with `intent=CAPTURE`
+- `POST /api/v1/paypal/orders/{order_id}/capture` (auth required)
+  - Captures order and commits business side-effect based on `purpose`
+- `POST /api/v1/paypal/webhook`
+  - Verify webhook signature via PayPal `verify-webhook-signature` (uses env webhook_id)
+  - Handle events:
+    - `PAYMENT.CAPTURE.COMPLETED|DENIED|REFUNDED`
+    - `PAYMENTS.PAYOUTS-ITEM.SUCCEEDED|FAILED|BLOCKED`
+  - Idempotency guard by `event.id` (persist a `paypal_events` collection)
+
+##### Phase 4P.C — Prepaid Ad Credit system (P0)
+**Rationale**: Avoid storing payment methods and avoid end-of-day charging. Professionals top up credit balance via PayPal.
+
+- New Mongo docs:
+  - `user_credits` — one doc per `(user_id, currency)`:
+    - `{ user_id, currency, balance_cents, updated_at }`
+  - `credit_topups`:
+    - `{ id, user_id, amount_cents, currency, status, paypal_order_id, paypal_capture_id, created_at, captured_at }`
+- Endpoints:
+  - `GET /api/v1/credits/balance?currency=USD`
+  - `GET /api/v1/credits/history?currency=USD`
+  - `POST /api/v1/credits/topup`:
+    - input: `{ pack: '10'|'25'|'50'|'custom', custom_amount_cents?, currency }`
+    - output: `{ topup_id, order_id }`
+  - `POST /api/v1/credits/topup/{topup_id}/capture`
+    - captures order and increments `user_credits.balance_cents` atomically
+- Ads spend enforcement:
+  - On `/ads/impression/{id}` and `/ads/click/{id}`:
+    - deduct credits from campaign owner’s balance (per-currency)
+    - if balance <= 0: auto-pause campaign and set a flag e.g. `status_reason='insufficient_funds'`
+  - Keep `spent_cents` counter, but now tie it to credits rather than virtual cents.
+
+##### Phase 4P.D — Marketplace payments (listing purchases) + Payouts (P0)
+- Extend `Transaction` schema:
+  - add `paypal` pointer:
+    - `{ order_id, capture_id, payer_id, payer_email, payout_batch_id, payout_item_id }`
+- Extend `User` schema:
+  - add `paypal_receiver_email` (optional, required to receive payouts)
+  - accept in `PATCH /users/me`
+- New endpoints:
+  - `POST /api/v1/listings/{listing_id}/buy`:
+    - create PayPal order for listing price (currency-aware)
+    - returns `{ order_id }`
+  - `POST /api/v1/listings/{listing_id}/buy/capture`:
+    - captures order, creates `Transaction` with existing 7% platform fee math
+    - triggers PayPal Payouts to seller `paypal_receiver_email`
+- New service: `/app/backend/app/services/paypal_payouts.py`
+  - `create_payout(batch_ref, receiver_email, amount, currency, note)`
+  - Persist payout pointer on `Transaction`
+- Webhook-driven payout status update:
+  - `PAYMENTS.PAYOUTS-ITEM.*` updates transaction payout status.
+
+##### Phase 4P.E — Frontend PayPal (P0)
+- New frontend util: `/app/frontend/src/lib/paypal.js`
+  - fetch `/paypal/config` once per session
+  - dynamic PayPal JS SDK loader + `@paypal/react-paypal-js` wrapper
+- New component: `PayPalCheckoutButton.jsx`
+  - Uses Smart Buttons
+  - `createOrder()` → backend `POST /paypal/orders` (or listing/topup specific endpoint)
+  - `onApprove()` → backend capture
+- Integrations:
+  - `AdsManager.jsx`:
+    - new “Credit balance” card
+    - top-up dialog with quick packs `$10/$25/$50` + custom
+    - uses `PayPalCheckoutButton`
+  - `ListingDetail.jsx`:
+    - replace stub checkout CTA with PayPal checkout button
+- Profile:
+  - Add “Payouts” accordion section with `paypal_receiver_email` field
+- i18n keys:
+  - `paypal.*`, `credits.*`, `payouts.*` (EN/HE/AR at minimum; other languages fallback acceptable for MVP)
+
+##### Phase 4P.F — Admin surfaces (P1)
+- `GET /api/v1/admin/credits`:
+  - recent topups + per-user balances (filter by currency)
+- `GET /api/v1/admin/payouts`:
+  - payout batches/items, status, manual retry action
+
+##### Phase 4P.G — Testing (P0)
+- Backend tests (testing agent):
+  - order create/capture flows in sandbox
+  - credit top-up → balance increment
+  - ad impression/click deduction → pause on insufficient funds
+  - payout creation request structure (mock network)
+  - webhook verification logic (sandbox; signature verify can be toggled off in dev)
+- Frontend tests:
+  - PayPal button renders with sandbox client_id
+  - top-up modal opens + creates order + capture updates balance
+  - listing buy creates order + capture creates transaction
+
+**Non-goals for this pass**
+- Full seller onboarding UX for PayPal business accounts (docs link only)
+- Subscriptions
+- Tax/VAT accounting
+
+**Deferred until live cutover**
+- Correct live client_id/secret pair
+- Webhook ID registration per environment
 
 ---
 
@@ -162,105 +286,28 @@ Delivered previously; unchanged.
 ---
 
 ### Phase S — Device Access + Contacts UX + Region-aware Scout + Professionals scaffold **(P0 / COMPLETE)**
-
-#### Phase S.0 — Product constraints (web vs native) **(ACKNOWLEDGED)**
-DressApp is currently a web app:
-- ✅ **Location**: supported via `navigator.geolocation` on HTTPS.
-- ⚠️ **Contacts**: full device address-book access is not available cross-browser on the web.
-  - Best-effort (Android Chrome): Contact Picker API (`navigator.contacts.select`).
-  - Universal: Web Share API (`navigator.share`) + clipboard fallback.
-
-#### Phase S.A — Location permission + propagation **(COMPLETE)**
-- ✅ `LocationProvider` + `useLocation()` hook (`/app/frontend/src/lib/location.jsx`)
-  - Permission state + local caching + reverse geocode (Nominatim)
-  - Persists to `users.home_location`
-- ✅ In-app first-run banner (`LocationBanner`) on Home/Stylist/Market
-- ✅ Profile Location settings card (refresh + forget)
-
-#### Phase S.B — Marketplace proximity **(COMPLETE)**
-- ✅ Backend: `/listings` supports `lat,lng,radius_km` via `$geoNear` and returns `distance_km`.
-- ✅ Frontend: radius selector + distance chips.
-
-#### Phase S.C — Region-aware Fashion Scout localization **(COMPLETE)**
-- ✅ `trend_reports` supports per-language cards with cached translation on-demand (Gemini Flash).
-- ✅ API: `GET /trends/fashion-scout?language=…&country=…`
-- ✅ Frontend: Fashion Scout panel passes user language + device/home country code.
-
-#### Phase S.D — Contacts UX (web-first) + Share/Invite **(COMPLETE)**
-- ✅ `ShareOutfitButton` on outfit recommendations (Web Share API + clipboard fallback).
-- ✅ `InviteFriendsButton` on Profile (Web Share API + clipboard fallback).
-- ✅ Minimal share backend:
-  - `POST /share/outfit` and `GET /share/outfit/{id}`
-
-#### Phase S.E — Professionals scaffold **(COMPLETE)**
-- ✅ Disabled "Ask a professional" CTA on Stylist composer + location-aware copy.
+Delivered previously; unchanged.
 
 ---
 
 ### Phase T — Extended Profile & Settings **(P0 / COMPLETE)**
-
-**Goal**: Build a complete Profile & Settings experience matching the required signup/profile layout, with selective autofill from OAuth.
-
-#### Phase T.A — Backend schema + update API **(COMPLETE)**
-- ✅ User doc extended:
-  - `first_name`, `last_name`, `phone`, `date_of_birth`, `sex`, `personal_status`
-  - `address` (nested)
-  - `units` (weight/length)
-  - `face_photo_url`, `body_photo_url`
-  - `body_measurements` (nested)
-  - `hair` (nested)
-- ✅ `UpdateUserIn` accepts all of the above.
-
-#### Phase T.B — OAuth-derived autofill (Google) **(COMPLETE)**
-- ✅ `calendar_service.persist_tokens_for_user` auto-fills on first connect:
-  - `display_name`, `first_name`, `last_name`, `avatar_url`, `locale`
-  - **Never clobbers** existing user-entered values.
-
-#### Phase T.C — Frontend Profile UI **(COMPLETE)**
-- ✅ `ProfileDetailsCard.jsx` (accordion): Identity / Contact / Demographics / Units / Photos / Measurements / Hair.
-- ✅ Conditional female-only rows (Bra size, Dress size).
-- ✅ Camera/upload photos stored as downscaled data URLs.
-- ✅ i18n coverage in EN/HE/AR + fallback.
-
-#### Phase T.D — Verification **(COMPLETE)**
-- ✅ API PATCH round-trip verified.
-- ✅ Screenshots in EN + HE validated.
+Delivered previously; unchanged.
 
 ---
 
 ### Phase U — Experts Pool + Ad Campaigns + Ticker **(P0 / COMPLETE)**
+**Shipped**. Backend verified 16/16; Frontend verified 17/17.
 
-**Shipped (see commit summary below).** Backend verified 16/16, frontend 17/17.
-
-**Delivered**
-- Backend:
-  - `User.professional` sub-doc: `{is_professional, profession, business:{name,address,phone,email,website,description}, approval_status}`
-  - `PATCH /users/me` accepts `professional`
-  - `GET /professionals?country=&region=&profession=&q=` + `GET /professionals/{id}` (404 on hidden)
-  - `POST/GET/PATCH/DELETE /ads/campaigns` (pros only, owner-scoped; admin can view any)
-  - `GET /ads/ticker?country=&region=&limit=` — weighted by `bid_cents * pacing` (pacing halves weight after daily budget spent)
-  - `POST /ads/impression/{id}` (+1¢), `POST /ads/click/{id}` (+5¢)
-  - Admin: `GET /admin/professionals`, `hide/unhide`, `GET /admin/ads/campaigns`, `disable/enable`
-  - Indexes: `users(professional.is_professional, approval_status)`, `users(professional.profession)`, `ad_campaigns(owner_id, created_at)`, `ad_campaigns(status, target_country, target_region)`
-- Frontend:
-  - `ProfileDetailsCard` → **Professional** accordion (Switch + all business fields + inline visibility note)
-  - `/experts` directory: filter bar, grid of expert cards, website/call/email CTAs, region-aware AdTicker footer
-  - `/ads` campaigns manager: gated for non-pros, full CRUD dialog, pause/resume, metrics (impressions/clicks/spent)
-  - `AdTicker` running strip (auto-rotate 5s, impression tracking, CTA click-through tracking) on Home + Experts
-  - Stylist **Ask a Professional** CTA now navigates to `/experts?country=&region=`
-  - TopNav: `Experts` link; Avatar dropdown: `My ads` for pros only
-  - EN/HE/AR i18n coverage for all new surfaces
-
-> **Billing note:** PayPlus still deferred — impressions/clicks/spent remain virtual counters for the MVP.
+> Billing was virtual counters in Phase U; Phase 4P will connect this to real prepaid credits.
 
 ---
 
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
+| **P0** | **Phase 4P — PayPal Orders + Payouts + Credits** | Phase 2 fee math + Phase U ads + Marketplace | None (sandbox keys received) |
 | ✅ | **Phase U — Experts Pool + Ads + Ticker** | Phase S (location), Phase T (profile UI) | Shipped |
 | **P0** | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
-| **P1** | Phase 4 (Part 3) — PayPlus payments | PayPlus credentials | User credentials |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
 | P2 | Fit-check Stylist upgrade using `body_measurements` | Phase T data available | None |
 | P3 | Phase R polish: rename sessions + mobile UX | Phase R shipped | None |
@@ -269,19 +316,19 @@ DressApp is currently a web app:
 ---
 
 ## 3) Next Actions (immediate)
-1. **Phase U — Experts Pool + Ads + AdTicker (P0)**
-   - Add `User.professional` + Profile UI section
-   - Build `/experts` directory + `/ads` manager
-   - Implement auction-lite ticker serving + tracking
+1. **Phase 4P — PayPal integration (P0)**
+   - Implement `paypal_client.py` + env toggles (sandbox first)
+   - Implement Orders create/capture endpoints + webhooks
+   - Add prepaid ad credits (top-up + balance + deduction)
+   - Implement Marketplace buy + seller payouts via PayPal Payouts
+   - Frontend: PayPal Smart Buttons for listing buy + credit top-up
 2. **Phase 6 / N model merge (P0 / blocked)**
    - User runs `/app/scripts/pog_phase6_merge_gguf.ipynb` off-pod.
    - After hosting, set `GARMENT_VISION_ENDPOINT_URL` and run backend verification.
-3. **PayPlus discovery + integration (P1 / deferred)**
-   - When credentials arrive: confirm sandbox/prod endpoints, payout model, implement checkout + webhooks.
-4. **Fit-check prompt upgrade (P2)**
+3. **Fit-check prompt upgrade (P2)**
    - Add `users.body_measurements` + `users.units` to stylist context.
    - Add “fit risk” warnings (too tight/too long/etc.) and size suggestions.
-5. **Shared outfit viewer (P2)**
+4. **Shared outfit viewer (P2)**
    - Add a `/shared/:id` public page that renders the shared outfit nicely (API exists).
 
 ---
@@ -294,7 +341,12 @@ DressApp is currently a web app:
   - ✅ Google Calendar OAuth functional (real events in stylist context)
   - ✅ Trend‑Scout runs daily and is visible in UI
   - ✅ Fashion‑Scout feed supports optional media and powers Stylist side panel
-  - ⏳ PayPlus payments wired end‑to‑end with webhook-driven transaction updates
+  - ⏳ **Phase 4P PayPal** wired end‑to‑end:
+    - Orders create/capture works for listing purchases and credit top-ups
+    - Webhook signature verification works (sandbox + live)
+    - Credits: balances update correctly; ad serving pauses when funds insufficient
+    - Payouts: seller disbursement requests created and tracked via webhooks
+    - Multi-currency supported (at minimum: USD + one additional currency)
 - Phase 5:
   - ✅ Admin dashboard + provider observability
   - ✅ Accessibility + SEO baseline shipped
@@ -322,13 +374,10 @@ DressApp is currently a web app:
   - ✅ Location persisted to profile and used for weather + Market proximity
   - ✅ Fashion Scout localized by language+country (cached per day)
   - ✅ Share outfit + invite flows via Web Share API and robust fallbacks
-  - ✅ Professional CTA scaffold visible (coming soon)
 - Phase T:
   - ✅ Extended profile schema persisted and patchable via `/users/me`
   - ✅ OAuth autofill from Google userinfo populates identity fields without clobbering edits
-  - ✅ Profile UI supports all required sections (Identity/Contact/Demographics/Units/Photos/Measurements/Hair)
-  - ✅ Camera/upload photos stored (downscaled) and reloaded correctly
-  - ✅ i18n coverage for new fields (EN/HE/AR curated)
+  - ✅ Profile UI supports all required sections
 - **Phase U (COMPLETE)**
   - ✅ Users can self-certify as professional; profile fields saved; admin can hide
   - ✅ `/experts` directory lists professionals filtered by region/profession

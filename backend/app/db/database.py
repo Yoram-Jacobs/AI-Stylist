@@ -108,6 +108,22 @@ async def ensure_indexes() -> None:
             ("target_region", 1),
         ]
     )
+
+    # Phase 4P — PayPal payments + credits
+    await db.user_credits.create_index(
+        [("user_id", 1), ("currency", 1)], unique=True
+    )
+    await db.credit_topups.create_index([("user_id", 1), ("created_at", -1)])
+    await db.credit_topups.create_index(
+        [("paypal_order_id", 1)], unique=True, sparse=True
+    )
+    await db.transactions.create_index(
+        [("paypal.order_id", 1)], unique=True, sparse=True
+    )
+    await db.transactions.create_index(
+        [("paypal.payout_item_id", 1)], sparse=True
+    )
+    await db.paypal_events.create_index([("id", 1)], unique=True)
     logger.info("MongoDB indexes ensured")
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import {
@@ -35,6 +35,8 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { PayPalCheckoutButton } from '@/lib/paypal';
+import { Wallet } from 'lucide-react';
 
 const DEFAULT_CREATIVE = {
   headline: '',
@@ -207,25 +209,30 @@ export default function AdsManager() {
         <div className="flex items-center justify-center py-20 text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
-      ) : items.length === 0 ? (
-        <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="ads-empty">
-          <CardContent className="p-10 text-center">
-            <Megaphone className="h-8 w-8 mx-auto text-muted-foreground" />
-            <p className="text-muted-foreground mt-3">{t('ads.empty')}</p>
-          </CardContent>
-        </Card>
       ) : (
-        <div className="space-y-3" data-testid="ads-list">
-          {items.map((c) => (
-            <AdCampaignRow
-              key={c.id}
-              campaign={c}
-              onEdit={() => openEdit(c)}
-              onToggle={() => togglePause(c)}
-              onDelete={() => remove(c)}
-            />
-          ))}
-        </div>
+        <>
+          <CreditBalanceCard />
+          {items.length === 0 ? (
+            <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial mt-4" data-testid="ads-empty">
+              <CardContent className="p-10 text-center">
+                <Megaphone className="h-8 w-8 mx-auto text-muted-foreground" />
+                <p className="text-muted-foreground mt-3">{t('ads.empty')}</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3 mt-4" data-testid="ads-list">
+              {items.map((c) => (
+                <AdCampaignRow
+                  key={c.id}
+                  campaign={c}
+                  onEdit={() => openEdit(c)}
+                  onToggle={() => togglePause(c)}
+                  onDelete={() => remove(c)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Campaign editor dialog */}
@@ -495,5 +502,217 @@ function AdCampaignForm({ form, onChange }) {
         </Select>
       </div>
     </div>
+  );
+}
+
+// --- Credit balance + top-up card ---
+function CreditBalanceCard() {
+  const { t } = useTranslation();
+  const [balance, setBalance] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [currency, setCurrency] = useState('USD');
+
+  const reload = useCallback(async () => {
+    try {
+      const res = await api.creditsBalance(currency);
+      setBalance(res);
+    } catch {
+      setBalance({ currency, balance_cents: 0 });
+    }
+  }, [currency]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const display = balance ? (balance.balance_cents / 100).toFixed(2) : '—';
+
+  return (
+    <>
+      <Card
+        className="rounded-[calc(var(--radius)+6px)] shadow-editorial"
+        data-testid="credit-balance-card"
+      >
+        <CardContent className="p-5 flex items-center gap-4 flex-wrap">
+          <div className="h-12 w-12 rounded-xl bg-[hsl(var(--accent))]/10 text-[hsl(var(--accent))] inline-flex items-center justify-center shrink-0">
+            <Wallet className="h-5 w-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="caps-label text-muted-foreground">
+              {t('credits.balanceLabel')}
+            </div>
+            <div
+              className="font-display text-2xl leading-none mt-1"
+              data-testid="credit-balance-amount"
+            >
+              {balance?.currency || currency} {display}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {t('credits.balanceHint')}
+            </div>
+          </div>
+          <Button
+            onClick={() => setOpen(true)}
+            className="rounded-xl"
+            data-testid="credit-topup-open-btn"
+          >
+            <Plus className="h-4 w-4 me-1" />
+            {t('credits.topup')}
+          </Button>
+        </CardContent>
+      </Card>
+      <TopupDialog
+        open={open}
+        onOpenChange={setOpen}
+        currency={currency}
+        onCurrencyChange={setCurrency}
+        onTopped={reload}
+      />
+    </>
+  );
+}
+
+function TopupDialog({ open, onOpenChange, currency, onCurrencyChange, onTopped }) {
+  const { t } = useTranslation();
+  const [pack, setPack] = useState('25');
+  const [custom, setCustom] = useState('');
+  const [topup, setTopup] = useState(null); // { topup_id, amount_cents, currency }
+  const [phase, setPhase] = useState('idle'); // idle | success
+  const presets = [
+    { id: '10', label: '$10' },
+    { id: '25', label: '$25' },
+    { id: '50', label: '$50' },
+    { id: 'custom', label: t('credits.custom') },
+  ];
+
+  useEffect(() => {
+    if (!open) {
+      setPack('25');
+      setCustom('');
+      setTopup(null);
+      setPhase('idle');
+    }
+  }, [open]);
+
+  const customCents = Math.round(parseFloat(custom || '0') * 100);
+  const canPay =
+    pack !== 'custom' ? true : customCents >= 100 && customCents <= 100000;
+
+  const createOrder = async () => {
+    const body = { pack, currency };
+    if (pack === 'custom') body.custom_amount_cents = customCents;
+    const res = await api.creditsTopupCreate(body);
+    setTopup(res);
+    return { order_id: res.order_id, topup_id: res.topup_id };
+  };
+
+  const captureOrder = async ({ ctx }) => {
+    const res = await api.creditsTopupCapture(ctx.topup_id);
+    return res;
+  };
+
+  const onSuccess = async (res) => {
+    setPhase('success');
+    toast.success(t('credits.toppedUp'));
+    onTopped?.();
+    // Auto-close after a short pause
+    setTimeout(() => onOpenChange(false), 1200);
+    return res;
+  };
+
+  const onError = (err) => {
+    toast.error(err?.response?.data?.detail || t('ads.saveFailed'));
+  };
+
+  const amountLabel =
+    pack === 'custom'
+      ? customCents > 0
+        ? `${t('credits.topup')} — ${currency} ${(customCents / 100).toFixed(2)}`
+        : t('credits.topup')
+      : `${t('credits.topup')} — ${currency} ${pack}.00`;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-display">{t('credits.topupTitle')}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label>{t('credits.currency')}</Label>
+            <Select value={currency} onValueChange={onCurrencyChange}>
+              <SelectTrigger className="rounded-xl mt-1" data-testid="topup-currency">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {['USD', 'EUR', 'GBP', 'ILS', 'AUD', 'CAD'].map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>{t('credits.pack')}</Label>
+            <div className="grid grid-cols-4 gap-2 mt-1">
+              {presets.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPack(p.id)}
+                  className={`rounded-xl border p-3 text-sm text-center transition-colors ${
+                    pack === p.id
+                      ? 'border-[hsl(var(--accent))] bg-[hsl(var(--accent))]/10 text-[hsl(var(--accent))]'
+                      : 'border-border hover:bg-secondary/40'
+                  }`}
+                  data-testid={`topup-pack-${p.id}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {pack === 'custom' && (
+            <div>
+              <Label>{t('credits.customAmount')}</Label>
+              <Input
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                className="rounded-xl mt-1"
+                data-testid="topup-custom-amount"
+              />
+            </div>
+          )}
+          <div className="pt-2">
+            <PayPalCheckoutButton
+              createOrder={createOrder}
+              captureOrder={captureOrder}
+              onSuccess={onSuccess}
+              onError={onError}
+              amountLabel={amountLabel}
+              disabled={!canPay || phase === 'success'}
+              testId="topup-paypal-button"
+            />
+            <div className="text-[10px] text-muted-foreground mt-2 text-center">
+              {t('credits.paypalDisclosure')}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="secondary"
+            onClick={() => onOpenChange(false)}
+            className="rounded-xl"
+          >
+            {t('common.close')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
