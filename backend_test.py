@@ -2315,6 +2315,429 @@ class DressAppAPITester:
         else:
             self.log_test("Closet Analyze Regression", False, f"Status: {status}, Data: {data}")
 
+    # ==================== PHASE U: PROFESSIONAL FASHION EXPERT TESTS ====================
+    
+    def test_professional_profile_setup(self):
+        """Test PATCH /users/me with professional fields"""
+        if not self.dev_token:
+            self.log_test("Professional Profile Setup", False, "No dev token available")
+            return
+            
+        # Set up professional profile
+        professional_data = {
+            "professional": {
+                "is_professional": True,
+                "profession": "Fashion Stylist",
+                "business": {
+                    "name": "Style Expert Co",
+                    "address": "123 Fashion St, Tel Aviv, Israel",
+                    "phone": "+972-50-123-4567",
+                    "email": "contact@styleexpert.co.il",
+                    "website": "https://styleexpert.co.il",
+                    "description": "Professional fashion styling services for all occasions"
+                },
+                "approval_status": "self"
+            }
+        }
+        
+        success, data, status = self.make_request('PATCH', '/users/me', professional_data, token=self.dev_token)
+        
+        if success and status == 200:
+            prof = data.get('professional', {})
+            business = prof.get('business', {})
+            
+            is_professional = prof.get('is_professional') == True
+            has_profession = prof.get('profession') == "Fashion Stylist"
+            has_business_name = business.get('name') == "Style Expert Co"
+            has_approval_status = prof.get('approval_status') == "self"
+            
+            all_valid = is_professional and has_profession and has_business_name and has_approval_status
+            self.log_test("Professional Profile Setup", all_valid, 
+                         f"Professional: {is_professional}, Profession: {has_profession}, Business: {has_business_name}")
+        else:
+            self.log_test("Professional Profile Setup", False, f"Status: {status}, Data: {data}")
+    
+    def test_professional_directory_listing(self):
+        """Test GET /professionals returns professionals only"""
+        success, data, status = self.make_request('GET', '/professionals')
+        
+        if success and status == 200:
+            has_items = 'items' in data and isinstance(data['items'], list)
+            has_pagination = all(k in data for k in ['total', 'skip', 'limit'])
+            
+            # Check that all returned items are professionals
+            all_professionals = True
+            if data.get('items'):
+                for item in data['items']:
+                    prof = item.get('professional', {})
+                    if not prof.get('is_professional'):
+                        all_professionals = False
+                        break
+            
+            all_valid = has_items and has_pagination and all_professionals
+            self.log_test("Professional Directory Listing", all_valid, 
+                         f"Items: {len(data.get('items', []))}, Total: {data.get('total')}, All professionals: {all_professionals}")
+        else:
+            self.log_test("Professional Directory Listing", False, f"Status: {status}, Data: {data}")
+    
+    def test_professional_directory_filters(self):
+        """Test GET /professionals with filters (country, region, profession, q)"""
+        # Test country filter
+        success, data, status = self.make_request('GET', '/professionals?country=IL')
+        country_filter_works = success and status == 200
+        
+        # Test profession filter
+        success, data, status = self.make_request('GET', '/professionals?profession=Fashion%20Stylist')
+        profession_filter_works = success and status == 200
+        
+        # Test text search
+        success, data, status = self.make_request('GET', '/professionals?q=style')
+        text_search_works = success and status == 200
+        
+        # Test region filter
+        success, data, status = self.make_request('GET', '/professionals?region=Tel%20Aviv')
+        region_filter_works = success and status == 200
+        
+        all_filters_work = country_filter_works and profession_filter_works and text_search_works and region_filter_works
+        self.log_test("Professional Directory Filters", all_filters_work, 
+                     f"Country: {country_filter_works}, Profession: {profession_filter_works}, Text: {text_search_works}, Region: {region_filter_works}")
+    
+    def test_professional_individual_lookup(self):
+        """Test GET /professionals/{id} returns individual professional"""
+        # First get a professional ID from the directory
+        success, data, status = self.make_request('GET', '/professionals')
+        if not (success and status == 200 and data.get('items')):
+            self.log_test("Professional Individual Lookup", False, "No professionals found in directory")
+            return
+            
+        professional_id = data['items'][0]['id']
+        
+        # Test individual lookup
+        success, data, status = self.make_request('GET', f'/professionals/{professional_id}')
+        
+        if success and status == 200:
+            has_id = data.get('id') == professional_id
+            has_professional_data = 'professional' in data
+            has_business_data = data.get('professional', {}).get('business') is not None
+            
+            all_valid = has_id and has_professional_data and has_business_data
+            self.log_test("Professional Individual Lookup", all_valid, 
+                         f"ID match: {has_id}, Professional data: {has_professional_data}, Business data: {has_business_data}")
+        else:
+            self.log_test("Professional Individual Lookup", False, f"Status: {status}, Data: {data}")
+    
+    def test_ad_campaign_creation(self):
+        """Test POST /ads/campaigns creates campaign for professionals only"""
+        if not self.dev_token:
+            self.log_test("Ad Campaign Creation", False, "No dev token available")
+            return
+            
+        campaign_data = {
+            "name": "Fashion Styling Services",
+            "profession": "Fashion Stylist",
+            "creative": {
+                "headline": "Professional Fashion Styling",
+                "body": "Transform your wardrobe with expert styling advice",
+                "cta_label": "Book Now",
+                "cta_url": "https://styleexpert.co.il/book"
+            },
+            "daily_budget_cents": 5000,
+            "bid_cents": 100,
+            "target_country": "IL",
+            "target_region": "Tel Aviv",
+            "status": "active"
+        }
+        
+        success, data, status = self.make_request('POST', '/ads/campaigns', campaign_data, token=self.dev_token)
+        
+        if success and status == 200:
+            has_id = 'id' in data
+            has_owner = data.get('owner_id') is not None
+            has_creative = 'creative' in data and 'headline' in data['creative']
+            has_status = data.get('status') == 'active'
+            
+            all_valid = has_id and has_owner and has_creative and has_status
+            self.log_test("Ad Campaign Creation", all_valid, 
+                         f"ID: {has_id}, Owner: {has_owner}, Creative: {has_creative}, Status: {has_status}")
+            
+            # Store campaign ID for other tests
+            self.test_campaign_id = data.get('id')
+        else:
+            self.log_test("Ad Campaign Creation", False, f"Status: {status}, Data: {data}")
+    
+    def test_ad_campaign_crud(self):
+        """Test ad campaign CRUD operations"""
+        if not self.dev_token:
+            self.log_test("Ad Campaign CRUD", False, "No dev token available")
+            return
+            
+        # Test GET /ads/campaigns (list my campaigns)
+        success, data, status = self.make_request('GET', '/ads/campaigns', token=self.dev_token)
+        list_works = success and status == 200 and 'items' in data
+        
+        if not list_works:
+            self.log_test("Ad Campaign CRUD", False, "Could not list campaigns")
+            return
+            
+        if not data.get('items'):
+            self.log_test("Ad Campaign CRUD", False, "No campaigns found")
+            return
+            
+        campaign_id = data['items'][0]['id']
+        
+        # Test GET /ads/campaigns/{id} (get specific campaign)
+        success, data, status = self.make_request('GET', f'/ads/campaigns/{campaign_id}', token=self.dev_token)
+        get_works = success and status == 200 and data.get('id') == campaign_id
+        
+        # Test PATCH /ads/campaigns/{id} (update campaign)
+        update_data = {
+            "name": "Updated Fashion Styling Services",
+            "daily_budget_cents": 7500
+        }
+        success, data, status = self.make_request('PATCH', f'/ads/campaigns/{campaign_id}', update_data, token=self.dev_token)
+        patch_works = success and status == 200 and data.get('name') == "Updated Fashion Styling Services"
+        
+        # Test DELETE /ads/campaigns/{id} (delete campaign)
+        success, data, status = self.make_request('DELETE', f'/ads/campaigns/{campaign_id}', token=self.dev_token)
+        delete_works = success and status == 200
+        
+        all_crud_works = list_works and get_works and patch_works and delete_works
+        self.log_test("Ad Campaign CRUD", all_crud_works, 
+                     f"List: {list_works}, Get: {get_works}, Patch: {patch_works}, Delete: {delete_works}")
+    
+    def test_ad_ticker_system(self):
+        """Test GET /ads/ticker returns active campaigns"""
+        # Test basic ticker
+        success, data, status = self.make_request('GET', '/ads/ticker')
+        basic_works = success and status == 200 and 'items' in data
+        
+        # Test ticker with country filter
+        success, data, status = self.make_request('GET', '/ads/ticker?country=IL')
+        country_filter_works = success and status == 200
+        
+        # Test ticker with region filter
+        success, data, status = self.make_request('GET', '/ads/ticker?region=Tel%20Aviv')
+        region_filter_works = success and status == 200
+        
+        # Test ticker with limit
+        success, data, status = self.make_request('GET', '/ads/ticker?limit=3')
+        limit_works = success and status == 200
+        
+        all_ticker_works = basic_works and country_filter_works and region_filter_works and limit_works
+        self.log_test("Ad Ticker System", all_ticker_works, 
+                     f"Basic: {basic_works}, Country: {country_filter_works}, Region: {region_filter_works}, Limit: {limit_works}")
+    
+    def test_ad_impression_tracking(self):
+        """Test POST /ads/impression/{id} increments counters"""
+        # First create a campaign to track
+        campaign_data = {
+            "name": "Test Campaign for Tracking",
+            "creative": {
+                "headline": "Test Ad",
+                "body": "Test ad for impression tracking"
+            },
+            "status": "active"
+        }
+        
+        success, data, status = self.make_request('POST', '/ads/campaigns', campaign_data, token=self.dev_token)
+        if not (success and status == 200):
+            self.log_test("Ad Impression Tracking", False, "Could not create test campaign")
+            return
+            
+        campaign_id = data.get('id')
+        
+        # Track impression
+        success, data, status = self.make_request('POST', f'/ads/impression/{campaign_id}')
+        impression_tracked = success and status == 200 and data.get('ok') == True
+        
+        self.log_test("Ad Impression Tracking", impression_tracked, 
+                     f"Impression tracked: {impression_tracked}")
+    
+    def test_ad_click_tracking(self):
+        """Test POST /ads/click/{id} increments counters"""
+        # Get campaign ID from previous test or create new one
+        campaign_data = {
+            "name": "Test Campaign for Click Tracking",
+            "creative": {
+                "headline": "Test Ad",
+                "body": "Test ad for click tracking"
+            },
+            "status": "active"
+        }
+        
+        success, data, status = self.make_request('POST', '/ads/campaigns', campaign_data, token=self.dev_token)
+        if not (success and status == 200):
+            self.log_test("Ad Click Tracking", False, "Could not create test campaign")
+            return
+            
+        campaign_id = data.get('id')
+        
+        # Track click
+        success, data, status = self.make_request('POST', f'/ads/click/{campaign_id}')
+        click_tracked = success and status == 200 and data.get('ok') == True
+        
+        self.log_test("Ad Click Tracking", click_tracked, 
+                     f"Click tracked: {click_tracked}")
+    
+    def test_admin_professional_controls(self):
+        """Test admin controls for professionals (hide/unhide)"""
+        if not self.dev_token:
+            self.log_test("Admin Professional Controls", False, "No dev token available")
+            return
+            
+        # Test GET /admin/professionals
+        success, data, status = self.make_request('GET', '/admin/professionals', token=self.dev_token)
+        list_works = success and status == 200 and 'items' in data
+        
+        if not list_works or not data.get('items'):
+            self.log_test("Admin Professional Controls", False, "No professionals found for admin testing")
+            return
+            
+        professional_user_id = data['items'][0]['id']
+        
+        # Test hide professional
+        success, data, status = self.make_request('POST', f'/admin/professionals/{professional_user_id}/hide', token=self.dev_token)
+        hide_works = success and status == 200
+        
+        # Test unhide professional
+        success, data, status = self.make_request('POST', f'/admin/professionals/{professional_user_id}/unhide', token=self.dev_token)
+        unhide_works = success and status == 200
+        
+        all_admin_works = list_works and hide_works and unhide_works
+        self.log_test("Admin Professional Controls", all_admin_works, 
+                     f"List: {list_works}, Hide: {hide_works}, Unhide: {unhide_works}")
+    
+    def test_admin_ad_controls(self):
+        """Test admin controls for ad campaigns (disable/enable)"""
+        if not self.dev_token:
+            self.log_test("Admin Ad Controls", False, "No dev token available")
+            return
+            
+        # Test GET /admin/ads/campaigns
+        success, data, status = self.make_request('GET', '/admin/ads/campaigns', token=self.dev_token)
+        list_works = success and status == 200 and 'items' in data
+        
+        if not list_works or not data.get('items'):
+            self.log_test("Admin Ad Controls", False, "No campaigns found for admin testing")
+            return
+            
+        campaign_id = data['items'][0]['id']
+        
+        # Test disable campaign
+        success, data, status = self.make_request('POST', f'/admin/ads/campaigns/{campaign_id}/disable', token=self.dev_token)
+        disable_works = success and status == 200
+        
+        # Test enable campaign
+        success, data, status = self.make_request('POST', f'/admin/ads/campaigns/{campaign_id}/enable', token=self.dev_token)
+        enable_works = success and status == 200
+        
+        all_admin_works = list_works and disable_works and enable_works
+        self.log_test("Admin Ad Controls", all_admin_works, 
+                     f"List: {list_works}, Disable: {disable_works}, Enable: {enable_works}")
+    
+    def test_non_professional_ad_restrictions(self):
+        """Test that non-professionals cannot create ad campaigns"""
+        if not self.buyer_token:
+            self.log_test("Non-Professional Ad Restrictions", False, "No buyer token available")
+            return
+            
+        campaign_data = {
+            "name": "Unauthorized Campaign",
+            "creative": {
+                "headline": "Should Not Work",
+                "body": "This should fail"
+            }
+        }
+        
+        success, data, status = self.make_request('POST', '/ads/campaigns', campaign_data, token=self.buyer_token)
+        
+        # Should return 403 Forbidden
+        access_denied = status == 403
+        self.log_test("Non-Professional Ad Restrictions", access_denied, 
+                     f"Status: {status} (expected 403)")
+    
+    def test_hidden_professional_exclusion(self):
+        """Test that hidden professionals don't appear in public directory"""
+        if not self.dev_token:
+            self.log_test("Hidden Professional Exclusion", False, "No dev token available")
+            return
+            
+        # Get current professional count
+        success, data, status = self.make_request('GET', '/professionals')
+        if not (success and status == 200):
+            self.log_test("Hidden Professional Exclusion", False, "Could not get professionals list")
+            return
+            
+        initial_count = data.get('total', 0)
+        
+        # Get a professional to hide (use dev user)
+        success, user_data, status = self.make_request('GET', '/users/me', token=self.dev_token)
+        if not (success and status == 200):
+            self.log_test("Hidden Professional Exclusion", False, "Could not get user data")
+            return
+            
+        user_id = user_data.get('id')
+        
+        # Hide the professional
+        success, data, status = self.make_request('POST', f'/admin/professionals/{user_id}/hide', token=self.dev_token)
+        if not (success and status == 200):
+            self.log_test("Hidden Professional Exclusion", False, "Could not hide professional")
+            return
+        
+        # Check that count decreased
+        success, data, status = self.make_request('GET', '/professionals')
+        if success and status == 200:
+            new_count = data.get('total', 0)
+            count_decreased = new_count < initial_count
+            
+            # Restore the professional
+            self.make_request('POST', f'/admin/professionals/{user_id}/unhide', token=self.dev_token)
+            
+            self.log_test("Hidden Professional Exclusion", count_decreased, 
+                         f"Initial: {initial_count}, After hide: {new_count}")
+        else:
+            self.log_test("Hidden Professional Exclusion", False, "Could not verify exclusion")
+    
+    def test_ticker_date_filtering(self):
+        """Test that ticker respects start_date and end_date"""
+        if not self.dev_token:
+            self.log_test("Ticker Date Filtering", False, "No dev token available")
+            return
+            
+        from datetime import datetime, timedelta
+        
+        # Create campaign with future start date
+        future_date = (datetime.now() + timedelta(days=1)).date().isoformat()
+        campaign_data = {
+            "name": "Future Campaign",
+            "creative": {
+                "headline": "Future Ad",
+                "body": "This should not appear in ticker yet"
+            },
+            "status": "active",
+            "start_date": future_date
+        }
+        
+        success, data, status = self.make_request('POST', '/ads/campaigns', campaign_data, token=self.dev_token)
+        if not (success and status == 200):
+            self.log_test("Ticker Date Filtering", False, "Could not create future campaign")
+            return
+            
+        campaign_id = data.get('id')
+        
+        # Check ticker doesn't include future campaign
+        success, data, status = self.make_request('GET', '/ads/ticker')
+        if success and status == 200:
+            future_campaign_excluded = not any(item.get('id') == campaign_id for item in data.get('items', []))
+            
+            # Clean up
+            self.make_request('DELETE', f'/ads/campaigns/{campaign_id}', token=self.dev_token)
+            
+            self.log_test("Ticker Date Filtering", future_campaign_excluded, 
+                         f"Future campaign excluded from ticker: {future_campaign_excluded}")
+        else:
+            self.log_test("Ticker Date Filtering", False, "Could not test ticker filtering")
+
     def run_all_tests(self):
         """Run all test suites"""
         print("🚀 Starting DressApp Backend API Tests")
@@ -2409,6 +2832,23 @@ class DressAppAPITester:
         self.test_stylist_history_regression()
         self.test_phase_l_language_persistence_regression()
         self.test_closet_analyze_regression()
+        
+        # PHASE U: PROFESSIONAL FASHION EXPERT TESTS
+        print("\n👔 Running Phase U: Professional Fashion Expert Tests...")
+        self.test_professional_profile_setup()
+        self.test_professional_directory_listing()
+        self.test_professional_directory_filters()
+        self.test_professional_individual_lookup()
+        self.test_ad_campaign_creation()
+        self.test_ad_campaign_crud()
+        self.test_ad_ticker_system()
+        self.test_ad_impression_tracking()
+        self.test_ad_click_tracking()
+        self.test_admin_professional_controls()
+        self.test_admin_ad_controls()
+        self.test_non_professional_ad_restrictions()
+        self.test_hidden_professional_exclusion()
+        self.test_ticker_date_filtering()
         
         return self.generate_report()
 

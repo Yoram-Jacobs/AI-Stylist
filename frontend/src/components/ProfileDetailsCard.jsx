@@ -19,6 +19,8 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -221,6 +223,19 @@ export function ProfileDetailsCard() {
         color: user?.hair?.color || '',
         style: user?.hair?.style || '',
       },
+      professional: {
+        is_professional: !!user?.professional?.is_professional,
+        profession: user?.professional?.profession || '',
+        approval_status: user?.professional?.approval_status || 'self',
+        business: {
+          name: user?.professional?.business?.name || '',
+          address: user?.professional?.business?.address || '',
+          phone: user?.professional?.business?.phone || '',
+          email: user?.professional?.business?.email || '',
+          website: user?.professional?.business?.website || '',
+          description: user?.professional?.business?.description || '',
+        },
+      },
     }),
     [user],
   );
@@ -262,6 +277,14 @@ export function ProfileDetailsCard() {
         body_photo_url: form.body_photo_url || null,
         body_measurements: prune(form.body_measurements),
         hair: prune(form.hair),
+        professional: form.professional.is_professional
+          ? {
+              is_professional: true,
+              profession: form.professional.profession || null,
+              approval_status: form.professional.approval_status || 'self',
+              business: prune(form.professional.business),
+            }
+          : { is_professional: false },
       };
       const updated = await api.patchMe(payload);
       updateUserLocal?.(updated);
@@ -625,6 +648,184 @@ export function ProfileDetailsCard() {
                     data-testid="profile-hair-style"
                   />
                 </Field>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* --- Professional (Phase U) --- */}
+          <AccordionItem value="professional">
+            <AccordionTrigger
+              className="caps-label"
+              data-testid="profile-accordion-professional"
+            >
+              {t('profile.professional.sectionTitle')}
+              {form.professional.is_professional && (
+                <Badge
+                  variant="outline"
+                  className="ms-2 text-[10px] bg-card rounded-full"
+                >
+                  {t('ads.status_active')}
+                </Badge>
+              )}
+            </AccordionTrigger>
+            <AccordionContent>
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 rounded-xl border border-border p-3 bg-secondary/40">
+                  <Switch
+                    checked={form.professional.is_professional}
+                    onCheckedChange={(v) =>
+                      setField('professional', {
+                        ...form.professional,
+                        is_professional: !!v,
+                      })
+                    }
+                    data-testid="profile-professional-toggle"
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">
+                      {t('profile.professional.checkboxLabel')}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {t('profile.professional.checkboxHint')}
+                    </div>
+                  </div>
+                  {form.professional.approval_status === 'hidden' && (
+                    <Badge
+                      variant="outline"
+                      className="bg-card text-[10px] rounded-full border-rose-400/40 text-rose-700"
+                    >
+                      {t('profile.professional.hiddenBadge')}
+                    </Badge>
+                  )}
+                </div>
+
+                {form.professional.is_professional && (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <Field label={t('profile.professional.profession')}>
+                        <Input
+                          value={form.professional.profession}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              profession: e.target.value,
+                            })
+                          }
+                          placeholder={t(
+                            'profile.professional.professionPlaceholder',
+                          )}
+                          className="rounded-xl"
+                          data-testid="profile-professional-profession"
+                        />
+                      </Field>
+                      <Field label={t('profile.professional.businessName')}>
+                        <Input
+                          value={form.professional.business.name}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              business: {
+                                ...form.professional.business,
+                                name: e.target.value,
+                              },
+                            })
+                          }
+                          className="rounded-xl"
+                          data-testid="profile-professional-business-name"
+                        />
+                      </Field>
+                      <Field label={t('profile.professional.businessAddress')}>
+                        <Input
+                          value={form.professional.business.address}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              business: {
+                                ...form.professional.business,
+                                address: e.target.value,
+                              },
+                            })
+                          }
+                          className="rounded-xl"
+                          data-testid="profile-professional-business-address"
+                        />
+                      </Field>
+                      <Field label={t('profile.professional.businessPhone')}>
+                        <Input
+                          type="tel"
+                          value={form.professional.business.phone}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              business: {
+                                ...form.professional.business,
+                                phone: e.target.value,
+                              },
+                            })
+                          }
+                          className="rounded-xl"
+                          data-testid="profile-professional-business-phone"
+                        />
+                      </Field>
+                      <Field label={t('profile.professional.businessEmail')}>
+                        <Input
+                          type="email"
+                          value={form.professional.business.email}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              business: {
+                                ...form.professional.business,
+                                email: e.target.value,
+                              },
+                            })
+                          }
+                          className="rounded-xl"
+                          data-testid="profile-professional-business-email"
+                        />
+                      </Field>
+                      <Field label={t('profile.professional.businessWebsite')}>
+                        <Input
+                          type="url"
+                          placeholder="https://"
+                          value={form.professional.business.website}
+                          onChange={(e) =>
+                            setField('professional', {
+                              ...form.professional,
+                              business: {
+                                ...form.professional.business,
+                                website: e.target.value,
+                              },
+                            })
+                          }
+                          className="rounded-xl"
+                          data-testid="profile-professional-business-website"
+                        />
+                      </Field>
+                    </div>
+                    <Field label={t('profile.professional.businessDescription')}>
+                      <Textarea
+                        rows={3}
+                        value={form.professional.business.description}
+                        onChange={(e) =>
+                          setField('professional', {
+                            ...form.professional,
+                            business: {
+                              ...form.professional.business,
+                              description: e.target.value,
+                            },
+                          })
+                        }
+                        className="rounded-xl"
+                        data-testid="profile-professional-business-description"
+                      />
+                    </Field>
+                    <div className="text-xs text-muted-foreground">
+                      <Sparkles className="inline h-3 w-3 me-1 text-[hsl(var(--accent))]" />
+                      {t('profile.professional.visibilityNote')}
+                    </div>
+                  </>
+                )}
               </div>
             </AccordionContent>
           </AccordionItem>

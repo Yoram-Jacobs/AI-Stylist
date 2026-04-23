@@ -191,6 +191,44 @@ export const api = {
     client.post(`/admin/users/${userId}/demote`).then((r) => r.data),
   adminSetListingStatus: (listingId, status) =>
     client.post(`/admin/listings/${listingId}/status`, null, { params: { status } }).then((r) => r.data),
+
+  // --- Phase U: professionals directory ---
+  listProfessionals: (params = {}) =>
+    client.get('/professionals', { params }).then((r) => r.data),
+  getProfessional: (id) =>
+    client.get(`/professionals/${id}`).then((r) => r.data),
+
+  // --- Phase U: ad campaigns ---
+  listMyAdCampaigns: () =>
+    client.get('/ads/campaigns').then((r) => r.data),
+  getAdCampaign: (id) =>
+    client.get(`/ads/campaigns/${id}`).then((r) => r.data),
+  createAdCampaign: (body) =>
+    client.post('/ads/campaigns', body).then((r) => r.data),
+  patchAdCampaign: (id, body) =>
+    client.patch(`/ads/campaigns/${id}`, body).then((r) => r.data),
+  deleteAdCampaign: (id) =>
+    client.delete(`/ads/campaigns/${id}`).then((r) => r.data),
+  adTicker: (params = {}) =>
+    client.get('/ads/ticker', { params }).then((r) => r.data),
+  trackAdImpression: (id) =>
+    client.post(`/ads/impression/${id}`).then((r) => r.data).catch(() => null),
+  trackAdClick: (id) =>
+    client.post(`/ads/click/${id}`).then((r) => r.data).catch(() => null),
+
+  // --- Phase U: admin professionals + ads ---
+  adminProfessionals: (params = {}) =>
+    client.get('/admin/professionals', { params }).then((r) => r.data),
+  adminHideProfessional: (userId) =>
+    client.post(`/admin/professionals/${userId}/hide`).then((r) => r.data),
+  adminUnhideProfessional: (userId) =>
+    client.post(`/admin/professionals/${userId}/unhide`).then((r) => r.data),
+  adminAdCampaigns: (params = {}) =>
+    client.get('/admin/ads/campaigns', { params }).then((r) => r.data),
+  adminDisableCampaign: (id) =>
+    client.post(`/admin/ads/campaigns/${id}/disable`).then((r) => r.data),
+  adminEnableCampaign: (id) =>
+    client.post(`/admin/ads/campaigns/${id}/enable`).then((r) => r.data),
 };
 
 export default client;

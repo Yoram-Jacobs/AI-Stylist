@@ -29,6 +29,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 import { WaveformAudioPlayer } from '@/components/WaveformAudioPlayer';
 import { ConversationSidebar } from '@/components/stylist/ConversationSidebar';
 import { FashionScoutPanel } from '@/components/stylist/FashionScoutPanel';
@@ -59,6 +60,7 @@ export default function Stylist() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const loc = useAppLocation();
+  const navigate = useNavigate();
 
   // Conversation state
   const [sessions, setSessions] = useState([]);
@@ -627,7 +629,15 @@ export default function Stylist() {
           <div className="ms-auto">
             <button
               type="button"
-              disabled
+              onClick={() => {
+                const q = new URLSearchParams();
+                const cc = loc?.country_code;
+                const city = loc?.city;
+                if (cc) q.set('country', cc);
+                if (city) q.set('region', city);
+                const qs = q.toString();
+                navigate(qs ? `/experts?${qs}` : '/experts');
+              }}
               title={
                 loc?.coords
                   ? t('stylist.askProfessionalLocal')
@@ -635,19 +645,13 @@ export default function Stylist() {
               }
               className={cn(
                 'inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs',
-                'border border-dashed border-[hsl(var(--accent))]/40 text-[hsl(var(--accent))]',
-                'opacity-70 cursor-not-allowed',
+                'border border-[hsl(var(--accent))]/60 text-[hsl(var(--accent))]',
+                'hover:bg-[hsl(var(--accent))]/10 transition-colors',
               )}
               data-testid="stylist-ask-professional-btn"
             >
               <UserRound className="h-3.5 w-3.5" />
               {t('stylist.askProfessional')}
-              <Badge
-                variant="outline"
-                className="ms-1 text-[9px] py-0 h-4 px-1 rounded-sm bg-card"
-              >
-                {t('common.comingSoon')}
-              </Badge>
             </button>
           </div>
         </div>

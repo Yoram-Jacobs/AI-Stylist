@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
+import { AdTicker } from '@/components/AdTicker';
 
 // Fallback cards used only if the Trend-Scout endpoint fails or returns empty.
 const FALLBACK_TRENDS = [
@@ -136,6 +137,8 @@ export default function Home() {
       </section>
 
       <div className="h-10" />
+
+      <AdTicker placement="home-footer" className="-mx-4 sm:-mx-6 lg:-mx-8" />
     </div>
   );
 }

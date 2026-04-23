@@ -1,38 +1,54 @@
 [
   {
-    "content": "LocationProvider + useLocation hook (permission state, geolocation, reverse geocode, persist to home_location)",
+    "content": "Backend: extend User schema with `professional` sub-doc + accept in PATCH /users/me",
     "status": "completed"
   },
   {
-    "content": "LocationBanner / first-run prompt + Profile location section",
+    "content": "Backend: add /professionals directory endpoints (list + detail)",
     "status": "completed"
   },
   {
-    "content": "Marketplace: backend geoNear + frontend radius/distance chip",
+    "content": "Backend: add /ads campaigns CRUD + ticker auction-lite + impression/click tracking",
     "status": "completed"
   },
   {
-    "content": "Fashion Scout localization: per (bucket, date, language, country) cache + Gemini translation on demand",
+    "content": "Backend: admin hide/unhide endpoints for professionals + ad campaigns + create ad_campaigns index",
     "status": "completed"
   },
   {
-    "content": "Ask a Professional disabled CTA on Stylist composer",
+    "content": "Frontend API: extend lib/api.js with new professionals/ads endpoints",
     "status": "completed"
   },
   {
-    "content": "ShareOutfitButton + InviteFriendsButton using Web Share API with fallback",
+    "content": "Frontend: Add 'Professional' accordion section to ProfileDetailsCard",
     "status": "completed"
   },
   {
-    "content": "Backend /share/outfit endpoint for public snapshot (minimal)",
+    "content": "Frontend: Create /experts directory page (filters, grid, detail modal)",
     "status": "completed"
   },
   {
-    "content": "i18n keys in en/he/ar for new strings",
+    "content": "Frontend: Create /ads campaigns manager page for professionals",
     "status": "completed"
   },
   {
-    "content": "Lint + screenshot QA in Hebrew + English (all green)",
+    "content": "Frontend: AdTicker component + wire into Home footer + Experts page",
     "status": "completed"
+  },
+  {
+    "content": "Frontend: Enable Stylist 'Ask a Professional' CTA -> /experts",
+    "status": "completed"
+  },
+  {
+    "content": "i18n: Add EN/HE/AR strings for professionals/ads/experts/ticker",
+    "status": "completed"
+  },
+  {
+    "content": "Register routes (App.js) + nav link (TopNav/BottomTabs)",
+    "status": "completed"
+  },
+  {
+    "content": "Backend + Frontend testing via testing agent",
+    "status": "in_progress"
   }
 ]

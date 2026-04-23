@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post Phase T completion)**
+# DressApp — Development Plan (Core-first) **UPDATED (post Phase U kickoff)**
 
 ## 1) Objectives
 - ✅ **Phase 1 shipped**: Architecture + MongoDB schema + provider POC script.
@@ -23,8 +23,9 @@
 - ✅ **Item Detail Edit Page**: full manual editor for closet items.
 - ✅ **Phase R shipped**: **Multi-session Stylist + Fashion Scout side panel + chat image evidence**.
 - ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
-- ✅ **Phase T shipped (NEW)**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
-- 🎯 **Next after Phase T**: PayPlus payments integration — deferred until API credentials are available.
+- ✅ **Phase T shipped**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
+- 🟡 **Phase U (NEW / NEXT)**: **Experts Pool + Ads/Campaigns + Ad Ticker + Ask-a-Professional directory**.
+- 🎯 **Payments next**: PayPlus payments integration — deferred until API credentials are available.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -181,7 +182,7 @@ DressApp is currently a web app:
 - ✅ Frontend: radius selector + distance chips.
 
 #### Phase S.C — Region-aware Fashion Scout localization **(COMPLETE)**
-- ✅ `trend_reports` now supports per-language cards with cached translation on-demand (Gemini Flash).
+- ✅ `trend_reports` supports per-language cards with cached translation on-demand (Gemini Flash).
 - ✅ API: `GET /trends/fashion-scout?language=…&country=…`
 - ✅ Frontend: Fashion Scout panel passes user language + device/home country code.
 
@@ -211,39 +212,110 @@ DressApp is currently a web app:
 - ✅ `UpdateUserIn` accepts all of the above.
 
 #### Phase T.B — OAuth-derived autofill (Google) **(COMPLETE)**
-- ✅ `calendar_service.persist_tokens_for_user` now auto-fills on first connect:
+- ✅ `calendar_service.persist_tokens_for_user` auto-fills on first connect:
   - `display_name`, `first_name`, `last_name`, `avatar_url`, `locale`
   - **Never clobbers** existing user-entered values.
 
 #### Phase T.C — Frontend Profile UI **(COMPLETE)**
-- ✅ New `ProfileDetailsCard.jsx` (7-section accordion):
-  1) Identity
-  2) Contact
-  3) Demographics
-  4) Preferences — Units
-  5) Photos
-  6) Body measurements
-  7) Hair
-- ✅ Conditional female-only rows (Bra size, Dress size) appear when `sex=female`.
-- ✅ Photo slots support camera (mobile `capture=user`) + file upload.
-- ✅ Photos are downscaled client-side (1024px JPEG @ q=0.82) before persisting to Mongo (data URL).
-- ✅ Measurements grid labels units based on preference (cm/in, kg/lb).
-- ✅ i18n: 12 locale files updated (EN/HE/AR curated, rest English fallback).
-- ✅ “Auto-filled from Google — edit anytime” badge when Google has provided any identity fields.
+- ✅ `ProfileDetailsCard.jsx` (accordion): Identity / Contact / Demographics / Units / Photos / Measurements / Hair.
+- ✅ Conditional female-only rows (Bra size, Dress size).
+- ✅ Camera/upload photos stored as downscaled data URLs.
+- ✅ i18n coverage in EN/HE/AR + fallback.
 
 #### Phase T.D — Verification **(COMPLETE)**
-- ✅ API PATCH round-trip verified (200 + persisted fields).
-- ✅ Screenshots in EN + HE confirm every section renders; female-only fields appear correctly.
+- ✅ API PATCH round-trip verified.
+- ✅ Screenshots in EN + HE validated.
 
-**Follow-up considerations (not required for Phase T)**
-- Consider blob storage (S3/R2) for photos once user growth warrants it.
-- Feed `body_measurements` into stylist prompts for fit-check reasoning (future phase).
+---
+
+### Phase U — Experts Pool + Ad Campaigns + Ticker **(P0 / NOT STARTED)**
+
+**Goal**: Let users self-enlist as professional fashion experts, appear in a regional directory, and run paid campaigns. “Ask a Professional” routes to the directory. Regional ads render as a running ticker on Home footer and Experts page.
+
+#### Phase U.A — Experts Pool schema + profile UI (P0)
+**Backend**
+- Add `User.professional` nested doc:
+  - `is_professional: bool`
+  - `profession: str` (e.g., Stylist, Barber, Fashion designer)
+  - `business: { name, address, phone, email, website, description }`
+  - `approval_status: 'self' | 'hidden'` (MVP; default 'self')
+  - `created_at`, `updated_at`
+- Extend `PATCH /users/me` to accept `professional`.
+- Admin endpoint to flag/hide:
+  - `POST /admin/professionals/{user_id}/hide`
+  - `POST /admin/professionals/{user_id}/unhide`
+
+**Frontend**
+- Add “Professional” accordion section to Profile:
+  - Checkbox “Professional fashion expert?” reveals Profession + Business Details fields.
+  - Inline note: “Visible in Experts directory” when enabled.
+- i18n keys for the entire section (EN/HE/AR curated).
+
+#### Phase U.B — Professionals directory endpoints (P0)
+**Backend**
+- `GET /professionals` with filters:
+  - `country`, `region`, `profession`
+  - exclude `approval_status='hidden'`
+  - optionally require `is_professional=true`
+- `GET /professionals/{id}`
+
+**Frontend**
+- New `/experts` directory page:
+  - Filter bar (region, profession)
+  - Grid cards (name, profession, business name, city, website/contact CTA)
+  - Details modal or details route.
+
+#### Phase U.C — Ads / campaigns (Facebook-inspired, one-level) (P0)
+**Backend**
+- New collection `ad_campaigns`:
+  - `{ id, owner_id, name, profession, creative {headline, body, image_url, cta_url}, daily_budget_cents, bid_cents, start_date, end_date, target_country, target_region, status, impressions, clicks, spent_cents }`
+- CRUD endpoints (owner-only):
+  - `POST /ads/campaigns`
+  - `GET /ads/campaigns`
+  - `GET /ads/campaigns/{id}`
+  - `PATCH /ads/campaigns/{id}`
+  - `DELETE /ads/campaigns/{id}`
+- Auction-lite serving:
+  - `GET /ads/ticker?country=…&region=…&limit=5`
+  - Eligibility: active + within dates + region match + budget remaining
+  - Selection: weighted by `bid_cents` with budget pacing (e.g. weight = bid * remaining_daily_budget)
+- Tracking:
+  - `POST /ads/impression/{id}`
+  - `POST /ads/click/{id}`
+
+**Admin**
+- Admin hide/disable campaign endpoint:
+  - `POST /admin/ads/campaigns/{id}/disable`
+
+> **Billing note:** PayPlus is not yet integrated; Phase U will track impressions/clicks/spend counters but will not charge real money until PayPlus ships.
+
+#### Phase U.D — Frontend Ads Manager (P0)
+- New `/ads` page (for professionals only):
+  - List campaigns, create/edit form, pause/resume, delete.
+  - Creative preview tile.
+  - Basic analytics: impressions, clicks, spent.
+
+#### Phase U.E — AdTicker component + placements (P0)
+- `AdTicker` running strip:
+  - Visible on Home footer + Experts page.
+  - Region-aware (uses device/home location country/region).
+  - Auto-rotating cards: creative headline + small image + CTA.
+
+#### Phase U.F — Wire Stylist “Ask a Professional” CTA (P0)
+- Enable the CTA (currently disabled scaffold) to route to `/experts`.
+- When location available, pre-filter directory to user’s country/region.
+
+#### Phase U.G — QA  i18n (P0)
+- EN/HE/AR translations for all new Professional/Ads UI.
+- RTL layout checks.
+- Screenshot audit: Profile, Experts directory, Ads manager, Home ticker, Stylist CTA.
 
 ---
 
 ### Roadmap Priority & Sequencing
 | Priority | Phase | Depends On | Blocker |
 | --- | --- | --- | --- |
+| **P0** | **Phase U — Experts Pool + Ads + Ticker** | Phase S (location), Phase T (profile UI) | None |
 | **P0** | Phase 6 / N — Finish Gemma 4 E2B merge (The Eyes) | — | User off-pod notebook execution |
 | **P1** | Phase 4 (Part 3) — PayPlus payments | PayPlus credentials | User credentials |
 | P2 | Phase O — Gemma 4 E4B Stylist Brain | Phase N pattern, user fine-tune | User fine-tune + hosting |
@@ -254,18 +326,20 @@ DressApp is currently a web app:
 ---
 
 ## 3) Next Actions (immediate)
-1. **Phase 6 / N model merge (P0 / blocked)**
+1. **Phase U — Experts Pool + Ads + AdTicker (P0)**
+   - Add `User.professional` + Profile UI section
+   - Build `/experts` directory + `/ads` manager
+   - Implement auction-lite ticker serving + tracking
+2. **Phase 6 / N model merge (P0 / blocked)**
    - User runs `/app/scripts/pog_phase6_merge_gguf.ipynb` off-pod.
    - After hosting, set `GARMENT_VISION_ENDPOINT_URL` and run backend verification.
-2. **PayPlus discovery + integration (P1 / deferred)**
+3. **PayPlus discovery + integration (P1 / deferred)**
    - When credentials arrive: confirm sandbox/prod endpoints, payout model, implement checkout + webhooks.
-3. **Fit-check prompt upgrade (P2)**
+4. **Fit-check prompt upgrade (P2)**
    - Add `users.body_measurements` + `users.units` to stylist context.
    - Add “fit risk” warnings (too tight/too long/etc.) and size suggestions.
-4. **Shared outfit viewer (P2)**
-   - Add a `/shared/:id` public page that renders the shared outfit nicely (currently API exists; UI viewer is the next step).
-5. **Photo storage strategy (P3)**
-   - Evaluate S3/R2 for `face_photo_url/body_photo_url` once growth increases.
+5. **Shared outfit viewer (P2)**
+   - Add a `/shared/:id` public page that renders the shared outfit nicely (API exists).
 
 ---
 
@@ -306,11 +380,17 @@ DressApp is currently a web app:
   - ✅ Fashion Scout localized by language+country (cached per day)
   - ✅ Share outfit + invite flows via Web Share API and robust fallbacks
   - ✅ Professional CTA scaffold visible (coming soon)
-- **Phase T**
+- Phase T:
   - ✅ Extended profile schema persisted and patchable via `/users/me`
   - ✅ OAuth autofill from Google userinfo populates identity fields without clobbering edits
   - ✅ Profile UI supports all required sections (Identity/Contact/Demographics/Units/Photos/Measurements/Hair)
   - ✅ Camera/upload photos stored (downscaled) and reloaded correctly
   - ✅ i18n coverage for new fields (EN/HE/AR curated)
+- **Phase U (NEW)**
+  - ⏳ Users can self-certify as professional; profile fields saved; admin can hide
+  - ⏳ `/experts` directory lists professionals filtered by region/profession
+  - ⏳ Professionals can create ad campaigns; auction-lite ticker serves region-matched creatives
+  - ⏳ Home footer ticker + Experts page ticker render ads; impressions/clicks tracked
+  - ⏳ Stylist “Ask a Professional” CTA routes to `/experts` and pre-filters by region
 - Phase 6 / N:
   - ⏳ Fine-tuned Gemma 4 E2B merged + hosted; `/api/v1/closet/analyze` uses it via endpoint/env switch

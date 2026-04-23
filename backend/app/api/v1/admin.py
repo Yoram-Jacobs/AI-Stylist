@@ -333,3 +333,125 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
             "allow_dev_bypass": settings.ALLOW_DEV_BYPASS,
         },
     }
+
+
+# -------------------- professionals (Phase U) --------------------
+@router.get("/professionals")
+async def admin_list_professionals(
+    limit: int = Query(50, ge=1, le=200),
+    skip: int = Query(0, ge=0),
+    include_hidden: bool = Query(True),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    db = get_db()
+    flt: dict[str, Any] = {"professional.is_professional": True}
+    if not include_hidden:
+        flt["professional.approval_status"] = {"$ne": "hidden"}
+    total = await db.users.count_documents(flt)
+    cursor = (
+        db.users.find(flt, {"_id": 0, "password_hash": 0, "google_oauth": 0})
+        .sort("updated_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    items = [doc async for doc in cursor]
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+@router.post("/professionals/{user_id}/hide")
+async def admin_hide_professional(
+    user_id: str, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
+    db = get_db()
+    res = await db.users.update_one(
+        {"id": user_id, "professional.is_professional": True},
+        {
+            "$set": {
+                "professional.approval_status": "hidden",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    if not res.matched_count:
+        raise HTTPException(404, "Professional not found")
+    return {"status": "ok", "user_id": user_id, "approval_status": "hidden"}
+
+
+@router.post("/professionals/{user_id}/unhide")
+async def admin_unhide_professional(
+    user_id: str, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
+    db = get_db()
+    res = await db.users.update_one(
+        {"id": user_id, "professional.is_professional": True},
+        {
+            "$set": {
+                "professional.approval_status": "self",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    if not res.matched_count:
+        raise HTTPException(404, "Professional not found")
+    return {"status": "ok", "user_id": user_id, "approval_status": "self"}
+
+
+# -------------------- ad campaigns (Phase U) --------------------
+@router.get("/ads/campaigns")
+async def admin_list_ad_campaigns(
+    limit: int = Query(50, ge=1, le=200),
+    skip: int = Query(0, ge=0),
+    status: str | None = Query(None),
+    _: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    db = get_db()
+    flt: dict[str, Any] = {}
+    if status:
+        flt["status"] = status
+    total = await db.ad_campaigns.count_documents(flt)
+    cursor = (
+        db.ad_campaigns.find(flt, {"_id": 0})
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    items = [doc async for doc in cursor]
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+@router.post("/ads/campaigns/{campaign_id}/disable")
+async def admin_disable_campaign(
+    campaign_id: str, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
+    db = get_db()
+    res = await db.ad_campaigns.update_one(
+        {"id": campaign_id},
+        {
+            "$set": {
+                "status": "disabled",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    if not res.matched_count:
+        raise HTTPException(404, "Campaign not found")
+    return {"status": "ok", "id": campaign_id, "new_status": "disabled"}
+
+
+@router.post("/ads/campaigns/{campaign_id}/enable")
+async def admin_enable_campaign(
+    campaign_id: str, _: dict = Depends(require_admin)
+) -> dict[str, Any]:
+    db = get_db()
+    res = await db.ad_campaigns.update_one(
+        {"id": campaign_id},
+        {
+            "$set": {
+                "status": "active",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    if not res.matched_count:
+        raise HTTPException(404, "Campaign not found")
+    return {"status": "ok", "id": campaign_id, "new_status": "active"}

@@ -39,6 +39,9 @@ class UpdateUserIn(BaseModel):
     body_measurements: dict[str, Any] | None = None
     hair: dict[str, Any] | None = None
 
+    # --- Phase U: Professional ---
+    professional: dict[str, Any] | None = None
+
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)) -> dict[str, Any]:

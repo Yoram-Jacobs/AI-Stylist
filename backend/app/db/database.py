@@ -91,6 +91,23 @@ async def ensure_indexes() -> None:
     await db.trend_reports.create_index(
         [("origin_id", 1), ("language", 1)], sparse=True
     )
+
+    # Phase U — professionals directory + ad campaigns
+    await db.users.create_index(
+        [("professional.is_professional", 1), ("professional.approval_status", 1)],
+        sparse=True,
+    )
+    await db.users.create_index(
+        [("professional.profession", 1)], sparse=True
+    )
+    await db.ad_campaigns.create_index([("owner_id", 1), ("created_at", -1)])
+    await db.ad_campaigns.create_index(
+        [
+            ("status", 1),
+            ("target_country", 1),
+            ("target_region", 1),
+        ]
+    )
     logger.info("MongoDB indexes ensured")
 
 

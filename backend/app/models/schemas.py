@@ -118,6 +118,12 @@ class User(BaseDoc):
     # Hair profile (length / type / color / style).
     hair: dict[str, Any] | None = None
 
+    # --- Professional (Phase U) ----------------------------------------
+    # Self-service "is fashion professional?" toggle + business card.
+    # When is_professional=True the user appears in the /experts directory
+    # (unless approval_status='hidden' by admin moderation).
+    professional: dict[str, Any] | None = None
+
 
 # ------------------------- Closet items -------------------------
 class RetailMetadata(BaseModel):
@@ -334,3 +340,36 @@ class StylistAdvice(BaseModel):
     do_dont: list[str] = Field(default_factory=list)
     tts_audio_base64: str | None = None
     latency_ms: dict[str, int] = Field(default_factory=dict)
+
+
+# --------------------- Phase U: Ad Campaigns ---------------------
+AdCampaignStatus = Literal["draft", "active", "paused", "ended", "disabled"]
+
+
+class AdCreative(BaseModel):
+    headline: str
+    body: str | None = None
+    image_url: str | None = None
+    cta_label: str | None = None
+    cta_url: str | None = None
+
+
+class AdCampaign(BaseDoc):
+    owner_id: str
+    name: str
+    profession: str | None = None  # Stylist, Barber, Fashion designer, etc.
+    creative: AdCreative
+    # Billing (counters only for MVP — PayPlus not yet wired).
+    daily_budget_cents: int = 0
+    bid_cents: int = 0  # auction-lite weight
+    # Scheduling window (ISO dates).
+    start_date: str | None = None
+    end_date: str | None = None
+    # Regional targeting.
+    target_country: str | None = None  # ISO-2 (e.g. IL, US)
+    target_region: str | None = None  # region/state name (free-form for MVP)
+    status: AdCampaignStatus = "draft"
+    # Live counters.
+    impressions: int = 0
+    clicks: int = 0
+    spent_cents: int = 0

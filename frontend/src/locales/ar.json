@@ -5,6 +5,8 @@
     "closet": "الخزانة",
     "stylist": "المصمم",
     "market": "السوق",
+    "experts": "الخبراء",
+    "ads": "إعلاناتي",
     "me": "أنا",
     "settings": "الإعدادات",
     "transactions": "المعاملات",
@@ -409,7 +411,24 @@
     },
     "saveProfile": "حفظ التغييرات",
     "savedProfile": "تم حفظ الملف الشخصي",
-    "autofilledFromGoogle": "تم التعبئة تلقائيًا من Google — يمكنك التعديل في أي وقت."
+    "autofilledFromGoogle": "تم التعبئة تلقائيًا من Google — يمكنك التعديل في أي وقت.",
+    "professional": {
+      "sectionTitle": "خبير أزياء محترف",
+      "checkboxLabel": "أنا خبير أزياء محترف",
+      "checkboxHint": "اظهر في دليل الخبراء وشغّل إعلانات إقليمية.",
+      "profession": "المهنة",
+      "professionPlaceholder": "مثال: مصمم، خياط، حلاق، مصمم أزياء",
+      "business": "تفاصيل العمل",
+      "businessName": "اسم العمل",
+      "businessAddress": "عنوان العمل",
+      "businessPhone": "هاتف العمل",
+      "businessEmail": "بريد العمل",
+      "businessWebsite": "الموقع الإلكتروني",
+      "businessDescription": "وصف مختصر",
+      "visibilityNote": "يظهر في دليل الخبراء على /experts.",
+      "hiddenBadge": "مخفي من قبل الإشراف",
+      "save": "حفظ تفاصيل المحترف"
+    }
   },
   "admin": {
     "title": "الإدارة",
@@ -660,5 +679,86 @@
     "accuracyLabel": "الدقة",
     "metersShort": "م",
     "kmShort": "كم"
+  },
+  "experts": {
+    "title": "اسأل محترفًا",
+    "subtitle": "تصفّح خبراء الأزياء الموثوقين — مصممين، خياطين، حلاقين — في منطقتك.",
+    "filters": {
+      "profession": "المهنة",
+      "anyProfession": "أي مهنة",
+      "country": "الدولة",
+      "region": "المدينة أو المنطقة",
+      "search": "بحث بالاسم أو اسم العمل",
+      "clear": "مسح التصفية"
+    },
+    "emptyTitle": "لا يوجد خبراء بعد",
+    "emptyBody": "جرّب توسيع التصفية، أو عد قريبًا — ينضم محترفون جدد كل أسبوع.",
+    "contact": "تواصل",
+    "visitWebsite": "زيارة الموقع",
+    "callNow": "اتصال",
+    "sendEmail": "بريد إلكتروني",
+    "professionLabel": "المهنة",
+    "cityLabel": "المقر",
+    "countLabel_one": "خبير واحد",
+    "countLabel_other": "{{count}} خبراء",
+    "becomeExpertCta": "هل أنت محترف أزياء؟ فعّل ذلك من الملف الشخصي.",
+    "loadMore": "عرض المزيد"
+  },
+  "ads": {
+    "title": "حملاتي الإعلانية",
+    "subtitle": "روّج لخدماتك في منطقتك عبر شريط إعلاني بمزاد خفيف.",
+    "newCampaign": "حملة جديدة",
+    "editCampaign": "تعديل الحملة",
+    "campaignName": "اسم الحملة",
+    "profession": "المهنة (اختياري)",
+    "creative": {
+      "title": "الإبداع",
+      "headline": "العنوان",
+      "body": "نص قصير",
+      "imageUrl": "رابط صورة (اختياري)",
+      "ctaLabel": "نص الزر",
+      "ctaUrl": "رابط الزر"
+    },
+    "budget": {
+      "title": "الميزانية والعرض",
+      "daily": "ميزانية يومية (قروش)",
+      "bid": "عرض لكل ظهور (قروش)",
+      "hint": "MVP: عدّادات فقط. الفوترة الفعلية تُفعَّل عند ربط PayPlus."
+    },
+    "schedule": {
+      "title": "الجدول",
+      "start": "تاريخ البدء",
+      "end": "تاريخ الانتهاء"
+    },
+    "targeting": {
+      "title": "الاستهداف الإقليمي",
+      "country": "رمز الدولة (مثل IL, US)",
+      "region": "المدينة / المنطقة"
+    },
+    "statusLabel": "الحالة",
+    "status_draft": "مسودة",
+    "status_active": "نشطة",
+    "status_paused": "موقوفة",
+    "status_ended": "منتهية",
+    "status_disabled": "موقوفة من الإشراف",
+    "saveCampaign": "حفظ الحملة",
+    "deleteCampaign": "حذف",
+    "pause": "إيقاف",
+    "resume": "استئناف",
+    "metrics": {
+      "impressions": "الظهور",
+      "clicks": "النقرات",
+      "spent": "المصروف"
+    },
+    "empty": "لا توجد حملات بعد — أنشئ أولى حملاتك لتظهر في الشريط الإقليمي.",
+    "onlyProfessionals": "فعّل ملف المحترف لإنشاء حملات إعلانية.",
+    "campaignCreated": "تم إنشاء الحملة",
+    "campaignSaved": "تم حفظ الحملة",
+    "campaignDeleted": "تم حذف الحملة",
+    "saveFailed": "تعذّر حفظ الحملة"
+  },
+  "ticker": {
+    "label": "برعاية في منطقتك",
+    "empty": "لا توجد مواضع رعاية بعد"
   }
 }

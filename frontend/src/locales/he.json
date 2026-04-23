@@ -5,6 +5,8 @@
     "closet": "ארון",
     "stylist": "סטייליסט",
     "market": "שוק",
+    "experts": "מומחים",
+    "ads": "המודעות שלי",
     "me": "אני",
     "settings": "הגדרות",
     "transactions": "עסקאות",
@@ -601,7 +603,24 @@
     },
     "saveProfile": "שמור שינויים",
     "savedProfile": "הפרופיל נשמר",
-    "autofilledFromGoogle": "מולא אוטומטית מ-Google — ניתן לערוך בכל עת."
+    "autofilledFromGoogle": "מולא אוטומטית מ-Google — ניתן לערוך בכל עת.",
+    "professional": {
+      "sectionTitle": "מומחה אופנה מקצועי",
+      "checkboxLabel": "אני מומחה/ית אופנה מקצועי/ת",
+      "checkboxHint": "להופיע בספריית המומחים ולהפעיל מודעות איזוריות.",
+      "profession": "מקצוע",
+      "professionPlaceholder": "לדוגמה: סטייליסט, חייט, ספר, מעצב אופנה",
+      "business": "פרטי עסק",
+      "businessName": "שם העסק",
+      "businessAddress": "כתובת העסק",
+      "businessPhone": "טלפון העסק",
+      "businessEmail": "אימייל העסק",
+      "businessWebsite": "אתר אינטרנט",
+      "businessDescription": "תיאור קצר",
+      "visibilityNote": "יופיע בספריית המומחים תחת /experts.",
+      "hiddenBadge": "הוסתר על ידי המנהלים",
+      "save": "שמור פרטים מקצועיים"
+    }
   },
   "admin": {
     "title": "ניהול",
@@ -852,5 +871,86 @@
     "accuracyLabel": "דיוק",
     "metersShort": "מ׳",
     "kmShort": "ק״מ"
+  },
+  "experts": {
+    "title": "שאל מומחה",
+    "subtitle": "עיין במומחי אופנה מאומתים — סטייליסטים, חייטים, ספרים ומעצבים — באזורך.",
+    "filters": {
+      "profession": "מקצוע",
+      "anyProfession": "כל המקצועות",
+      "country": "מדינה",
+      "region": "עיר או אזור",
+      "search": "חיפוש לפי שם או עסק",
+      "clear": "נקה סינון"
+    },
+    "emptyTitle": "אין עדיין מומחים",
+    "emptyBody": "נסה להרחיב את הסינון, או חזור בקרוב — מומחים חדשים מצטרפים כל שבוע.",
+    "contact": "יצירת קשר",
+    "visitWebsite": "פתח אתר",
+    "callNow": "התקשר",
+    "sendEmail": "שלח אימייל",
+    "professionLabel": "מקצוע",
+    "cityLabel": "ממוקם ב",
+    "countLabel_one": "{{count}} מומחה",
+    "countLabel_other": "{{count}} מומחים",
+    "becomeExpertCta": "את/ה מקצוען/ית אופנה? הפעל/י בפרופיל שלך.",
+    "loadMore": "טען עוד"
+  },
+  "ads": {
+    "title": "קמפיינים שלי",
+    "subtitle": "קדם את שירותיך באזור שלך עם רצועת מודעות באוקציה קלה.",
+    "newCampaign": "קמפיין חדש",
+    "editCampaign": "עריכת קמפיין",
+    "campaignName": "שם הקמפיין",
+    "profession": "מקצוע (לא חובה)",
+    "creative": {
+      "title": "קריאייטיב",
+      "headline": "כותרת",
+      "body": "טקסט קצר",
+      "imageUrl": "כתובת תמונה (לא חובה)",
+      "ctaLabel": "תווית כפתור",
+      "ctaUrl": "קישור כפתור"
+    },
+    "budget": {
+      "title": "תקציב והצעה",
+      "daily": "תקציב יומי (אגורות)",
+      "bid": "הצעה להצגה (אגורות)",
+      "hint": "MVP: מונים בלבד. חיוב בפועל יופעל עם חיבור PayPlus."
+    },
+    "schedule": {
+      "title": "לוח זמנים",
+      "start": "תאריך התחלה",
+      "end": "תאריך סיום"
+    },
+    "targeting": {
+      "title": "מיקוד אזורי",
+      "country": "קוד מדינה (למשל IL, US)",
+      "region": "עיר / אזור"
+    },
+    "statusLabel": "סטטוס",
+    "status_draft": "טיוטה",
+    "status_active": "פעיל",
+    "status_paused": "מושהה",
+    "status_ended": "הסתיים",
+    "status_disabled": "הושבת על ידי מנהל",
+    "saveCampaign": "שמור קמפיין",
+    "deleteCampaign": "מחק",
+    "pause": "השהה",
+    "resume": "המשך",
+    "metrics": {
+      "impressions": "הצגות",
+      "clicks": "קליקים",
+      "spent": "הוצאה"
+    },
+    "empty": "אין עדיין קמפיינים — צור את הראשון שלך כדי להופיע ברצועה.",
+    "onlyProfessionals": "הפעל את פרופיל המקצוען ליצירת קמפיינים.",
+    "campaignCreated": "הקמפיין נוצר",
+    "campaignSaved": "הקמפיין עודכן",
+    "campaignDeleted": "הקמפיין נמחק",
+    "saveFailed": "שמירת הקמפיין נכשלה"
+  },
+  "ticker": {
+    "label": "בחסות באזורך",
+    "empty": "אין עדיין מיקומי חסות"
   }
 }

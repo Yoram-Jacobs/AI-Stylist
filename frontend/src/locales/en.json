@@ -5,6 +5,8 @@
     "closet": "Closet",
     "stylist": "Stylist",
     "market": "Market",
+    "experts": "Experts",
+    "ads": "My ads",
     "me": "Me",
     "settings": "Settings",
     "transactions": "Transactions",
@@ -601,7 +603,24 @@
     },
     "saveProfile": "Save changes",
     "savedProfile": "Profile saved",
-    "autofilledFromGoogle": "Auto-filled from Google — edit anytime."
+    "autofilledFromGoogle": "Auto-filled from Google — edit anytime.",
+    "professional": {
+      "sectionTitle": "Professional fashion expert",
+      "checkboxLabel": "I'm a professional fashion expert",
+      "checkboxHint": "Appear in the Experts directory and run regional ads.",
+      "profession": "Profession",
+      "professionPlaceholder": "e.g. Stylist, Tailor, Barber, Fashion designer",
+      "business": "Business details",
+      "businessName": "Business name",
+      "businessAddress": "Business address",
+      "businessPhone": "Business phone",
+      "businessEmail": "Business email",
+      "businessWebsite": "Website",
+      "businessDescription": "Short description",
+      "visibilityNote": "Visible in the Experts directory at /experts.",
+      "hiddenBadge": "Hidden by moderator",
+      "save": "Save professional details"
+    }
   },
   "admin": {
     "title": "Admin",
@@ -852,5 +871,86 @@
     "accuracyLabel": "Accuracy",
     "metersShort": "m",
     "kmShort": "km"
+  },
+  "experts": {
+    "title": "Ask a professional",
+    "subtitle": "Browse verified fashion experts — stylists, tailors, barbers, designers — in your region.",
+    "filters": {
+      "profession": "Profession",
+      "anyProfession": "Any profession",
+      "country": "Country",
+      "region": "City or region",
+      "search": "Search by name or business",
+      "clear": "Clear filters"
+    },
+    "emptyTitle": "No experts yet",
+    "emptyBody": "Try widening your filters, or come back soon — new professionals are joining every week.",
+    "contact": "Contact",
+    "visitWebsite": "Visit website",
+    "callNow": "Call",
+    "sendEmail": "Email",
+    "professionLabel": "Profession",
+    "cityLabel": "Based in",
+    "countLabel_one": "{{count}} expert",
+    "countLabel_other": "{{count}} experts",
+    "becomeExpertCta": "Are you a fashion professional? Enable it in your profile.",
+    "loadMore": "Load more"
+  },
+  "ads": {
+    "title": "My ad campaigns",
+    "subtitle": "Promote your services in your region with an auction-lite running strip.",
+    "newCampaign": "New campaign",
+    "editCampaign": "Edit campaign",
+    "campaignName": "Campaign name",
+    "profession": "Profession (optional)",
+    "creative": {
+      "title": "Creative",
+      "headline": "Headline",
+      "body": "Short body",
+      "imageUrl": "Image URL (optional)",
+      "ctaLabel": "CTA label",
+      "ctaUrl": "CTA link"
+    },
+    "budget": {
+      "title": "Budget & bid",
+      "daily": "Daily budget (cents)",
+      "bid": "Bid per impression (cents)",
+      "hint": "MVP: counters only. Real billing will activate once PayPlus is connected."
+    },
+    "schedule": {
+      "title": "Schedule",
+      "start": "Start date",
+      "end": "End date"
+    },
+    "targeting": {
+      "title": "Regional targeting",
+      "country": "Country code (e.g. IL, US)",
+      "region": "City / region"
+    },
+    "statusLabel": "Status",
+    "status_draft": "Draft",
+    "status_active": "Active",
+    "status_paused": "Paused",
+    "status_ended": "Ended",
+    "status_disabled": "Disabled by moderator",
+    "saveCampaign": "Save campaign",
+    "deleteCampaign": "Delete",
+    "pause": "Pause",
+    "resume": "Resume",
+    "metrics": {
+      "impressions": "Impressions",
+      "clicks": "Clicks",
+      "spent": "Spent"
+    },
+    "empty": "No campaigns yet — create your first one to appear in the regional ticker.",
+    "onlyProfessionals": "Enable the Professional profile to create ad campaigns.",
+    "campaignCreated": "Campaign created",
+    "campaignSaved": "Campaign updated",
+    "campaignDeleted": "Campaign deleted",
+    "saveFailed": "Could not save campaign"
+  },
+  "ticker": {
+    "label": "Sponsored in your region",
+    "empty": "No sponsored placements yet"
   }
 }

@@ -5,7 +5,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Home, Shirt, Sparkles, Store, LogOut, Settings, Receipt, Shield } from 'lucide-react';
+import { Home, Shirt, Sparkles, Store, LogOut, Settings, Receipt, Shield, UserRound, Megaphone } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
@@ -14,12 +14,14 @@ export const TopNav = () => {
   const { user, logout } = useAuth();
   const nav = useNavigate();
   const initials = (user?.display_name || user?.email || 'U').slice(0, 1).toUpperCase();
+  const isPro = !!user?.professional?.is_professional;
 
   const LINKS = [
     { to: '/home', icon: Home, key: 'home', label: t('nav.home') },
     { to: '/closet', icon: Shirt, key: 'closet', label: t('nav.closet') },
     { to: '/stylist', icon: Sparkles, key: 'stylist', label: t('nav.stylist') },
     { to: '/market', icon: Store, key: 'market', label: t('nav.market') },
+    { to: '/experts', icon: UserRound, key: 'experts', label: t('nav.experts') },
   ];
 
   return (
@@ -69,6 +71,11 @@ export const TopNav = () => {
               <DropdownMenuItem onClick={() => nav('/transactions')} data-testid="topnav-menu-transactions">
                 <Receipt className="h-4 w-4 me-2" /> {t('nav.transactions')}
               </DropdownMenuItem>
+              {isPro && (
+                <DropdownMenuItem onClick={() => nav('/ads')} data-testid="topnav-menu-ads">
+                  <Megaphone className="h-4 w-4 me-2" /> {t('nav.ads')}
+                </DropdownMenuItem>
+              )}
               {(user.roles || []).includes('admin') && (
                 <DropdownMenuItem onClick={() => nav('/admin')} data-testid="topnav-menu-admin">
                   <Shield className="h-4 w-4 me-2" /> {t('nav.admin')}

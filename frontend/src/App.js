@@ -21,6 +21,8 @@ import ListingDetail from '@/pages/ListingDetail';
 import Profile from '@/pages/Profile';
 import Transactions from '@/pages/Transactions';
 import Admin from '@/pages/Admin';
+import ExpertsDirectory from '@/pages/ExpertsDirectory';
+import AdsManager from '@/pages/AdsManager';
 
 function App() {
   return (
@@ -52,6 +54,8 @@ function App() {
               <Route path="/market/:id" element={<ListingDetail />} />
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/admin" element={<Admin />} />
+              <Route path="/experts" element={<ExpertsDirectory />} />
+              <Route path="/ads" element={<AdsManager />} />
               <Route path="/me" element={<Profile />} />
               <Route path="/" element={<Navigate to="/home" replace />} />
             </Route>
