@@ -1,42 +1,42 @@
 [
   {
-    "content": "Add taxonomy namespace to en.json and he.json",
+    "content": "Extend StylistSession schema (title, snippet) + stylist_memory helpers (list/create/get/delete)",
     "status": "completed"
   },
   {
-    "content": "Create /app/frontend/src/lib/taxonomy.js helper",
+    "content": "Update /stylist endpoint to accept session_id + generate session title on first turn",
     "status": "completed"
   },
   {
-    "content": "Refactor SourceTagBadge.jsx to localize Private/Shared/Retail",
+    "content": "Add /stylist/sessions CRUD routes + update /stylist/history to take session_id",
     "status": "completed"
   },
   {
-    "content": "Refactor CalendarConnect.jsx (full localization of card)",
+    "content": "Extend trend_scout buckets + schema (image_url, source_url, source_name, video_url)",
     "status": "completed"
   },
   {
-    "content": "Refactor Closet.jsx category filter + item card",
+    "content": "Add GET /trends/fashion-scout endpoint",
     "status": "completed"
   },
   {
-    "content": "Refactor AddItem.jsx to use localized dropdown options + labels",
+    "content": "Add API helpers in frontend api.js",
     "status": "completed"
   },
   {
-    "content": "Refactor ItemDetail.jsx to use localized dropdown options",
+    "content": "Build ConversationSidebar component",
     "status": "completed"
   },
   {
-    "content": "Refactor Marketplace.jsx filter dropdowns",
+    "content": "Build FashionScoutPanel component",
     "status": "completed"
   },
   {
-    "content": "Build + esbuild check passed",
+    "content": "Redesign Stylist.jsx to 3-panel layout + embed closet images in recommendation cards",
     "status": "completed"
   },
   {
-    "content": "Hebrew-mode screenshot QA verified - all dropdowns translated",
+    "content": "Lint + screenshot QA in Hebrew and English — all green",
     "status": "completed"
   }
 ]

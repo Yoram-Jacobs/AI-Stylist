@@ -260,6 +260,9 @@ class StylistSession(BaseDoc):
     memory: dict[str, Any] = Field(default_factory=dict)
     turns: int = 0
     last_active_at: str = Field(default_factory=_now_iso)
+    title: str | None = None
+    snippet: str | None = None
+    archived: bool = False
 
 
 class StylistMessage(BaseDoc):

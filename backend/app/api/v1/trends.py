@@ -6,7 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.services.auth import get_current_user, require_admin
-from app.services.trend_scout import latest_trend_cards, run_trend_scout
+from app.services.trend_scout import (
+    fashion_scout_feed,
+    latest_trend_cards,
+    run_trend_scout,
+)
 
 router = APIRouter(prefix="/trends", tags=["trends"])
 
@@ -17,6 +21,15 @@ async def get_latest_trends(
 ) -> dict[str, Any]:
     """Public-safe read: newest card(s) per bucket for the Home page feed."""
     cards = await latest_trend_cards(limit_per_bucket=per_bucket)
+    return {"cards": cards, "count": len(cards)}
+
+
+@router.get("/fashion-scout")
+async def get_fashion_scout_feed(
+    limit: int = Query(default=12, ge=1, le=50),
+) -> dict[str, Any]:
+    """Newest-first flat feed for the Stylist right-panel news-flash."""
+    cards = await fashion_scout_feed(limit=limit)
     return {"cards": cards, "count": len(cards)}
 
 

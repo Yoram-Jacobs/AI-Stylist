@@ -100,8 +100,18 @@ export const api = {
     client.post('/stylist', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
-  stylistHistory: (limit = 20) =>
-    client.get('/stylist/history', { params: { limit } }).then((r) => r.data),
+  stylistHistory: (sessionId = null, limit = 200) =>
+    client
+      .get('/stylist/history', {
+        params: sessionId ? { session_id: sessionId, limit } : { limit },
+      })
+      .then((r) => r.data),
+  stylistSessions: () =>
+    client.get('/stylist/sessions').then((r) => r.data),
+  stylistCreateSession: () =>
+    client.post('/stylist/sessions').then((r) => r.data),
+  stylistDeleteSession: (sessionId) =>
+    client.delete(`/stylist/sessions/${sessionId}`).then((r) => r.data),
 
   // outfit completion (Phase P)
   completeOutfit: ({ itemIds, includeMarketplace = false, occasion = null, limit = 6 }) =>
@@ -134,6 +144,8 @@ export const api = {
   // trend-scout
   trendsLatest: (perBucket = 1) =>
     client.get('/trends/latest', { params: { per_bucket: perBucket } }).then((r) => r.data),
+  fashionScoutFeed: (limit = 12) =>
+    client.get('/trends/fashion-scout', { params: { limit } }).then((r) => r.data),
   trendsRunNowDev: (force = true) =>
     client.post('/trends/run-now-dev', null, { params: { force } }).then((r) => r.data),
 

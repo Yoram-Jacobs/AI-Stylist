@@ -1,10 +1,9 @@
-"""/api/v1/stylist — authenticated multimodal stylist route (Phase 2).
+"""/api/v1/stylist — authenticated multimodal stylist route (Phase 2 + R).
 
-Changes vs Phase 1:
-  * Requires a user (JWT bearer or dev-bypass).
-  * Hydrates `closet_summary` from the user's actual closet.
-  * Persists the user + assistant turns into `stylist_sessions` + `stylist_messages`.
-  * Hydrates the last few conversation turns as context for Gemini.
+Phase R adds multi-session support:
+  * accepts an optional ``session_id`` form field on POST /stylist
+  * sessions CRUD under /stylist/sessions
+  * history is per-session
 """
 from __future__ import annotations
 
@@ -16,17 +15,65 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.services.auth import get_current_user
 from app.services.calendar_service import calendar_service
 from app.services.logic import get_styling_advice
+from app.services.session_titles import generate_session_title
 from app.services.stylist_memory import (
     append_message,
     closet_summary_for,
-    get_or_create_session,
+    create_session,
+    delete_session,
+    full_history,
+    get_or_create_active_session,
+    get_session,
+    list_sessions,
     recent_messages,
+    update_session,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stylist", tags=["stylist"])
 
 
+def _safe_session(session: dict) -> dict:
+    """Strip Mongo _id to keep the payload JSON-safe."""
+    return {k: v for k, v in session.items() if k != "_id"}
+
+
+# ---------------------------------------------------------------------------
+# Sessions CRUD
+# ---------------------------------------------------------------------------
+@router.get("/sessions")
+async def stylist_sessions(
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Newest-first list of the user's conversation sessions."""
+    sessions = await list_sessions(user["id"], limit=limit)
+    return {"sessions": [_safe_session(s) for s in sessions]}
+
+
+@router.post("/sessions")
+async def stylist_create_session(
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Create a fresh session. The title will be filled on the first turn."""
+    session = await create_session(user["id"])
+    return _safe_session(session)
+
+
+@router.delete("/sessions/{session_id}")
+async def stylist_delete_session(
+    session_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    ok = await delete_session(session_id, user["id"])
+    if not ok:
+        raise HTTPException(404, "Session not found")
+    return {"deleted": True, "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
+# POST /stylist — primary conversational endpoint
+# ---------------------------------------------------------------------------
 @router.post("")
 async def stylist_endpoint(
     text: str | None = Form(default=None),
@@ -41,6 +88,7 @@ async def stylist_endpoint(
     voice_id: str = Form(default="aura-2-thalia-en"),
     occasion: str | None = Form(default=None),
     skip_tts: bool = Form(default=False),
+    session_id: str | None = Form(default=None),
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     if not text and not voice_audio:
@@ -66,26 +114,28 @@ async def stylist_endpoint(
         if real_events:
             calendar_events = real_events
         else:
-            # Fall back to a single mocked event so the stylist still has
-            # something to ground its reasoning when the user is not
-            # connected to Google Calendar.
             calendar_events = [calendar_service.mock_event(occasion or "Work day")]
 
-    # Determine / prefer the user's home location if lat/lng not supplied.
     if lat is None or lng is None:
         home = user.get("home_location") or {}
         lat = lat if lat is not None else home.get("lat")
         lng = lng if lng is not None else home.get("lng")
 
-    session = await get_or_create_session(user["id"])
+    # Resolve target session: explicit id > last active > create fresh.
+    session: dict | None = None
+    if session_id:
+        session = await get_session(session_id, user["id"])
+        if not session:
+            raise HTTPException(404, "Session not found")
+    else:
+        session = await get_or_create_active_session(user["id"])
+
+    is_first_turn = (session.get("turns") or 0) == 0
+
     history = await recent_messages(session["id"], limit=4)
     closet = await closet_summary_for(user["id"], limit=40)
 
     user_profile = {
-        # Prefer the language explicitly sent by the client (live UI selection)
-        # and fall back to the persisted user preference. This ensures Gemini
-        # receives the right directive even if the client-side locale hasn't
-        # been flushed to the DB yet.
         "preferred_language": (language or user.get("preferred_language") or "en").lower(),
         "preferred_voice_id": user.get("preferred_voice_id", voice_id),
         "style_profile": user.get("style_profile"),
@@ -100,7 +150,6 @@ async def stylist_endpoint(
         ],
     }
 
-    # Persist the user turn BEFORE calling providers so we never lose intent.
     await append_message(
         session_id=session["id"],
         role="user",
@@ -117,6 +166,18 @@ async def stylist_endpoint(
         image_refs=[],
         context={"lat": lat, "lng": lng, "include_calendar": include_calendar},
     )
+
+    # Kick off title generation for brand-new sessions. We do it synchronously
+    # because it's a fast Gemini Flash call and we want the sidebar label
+    # populated by the time the response arrives. Failures are non-fatal.
+    if is_first_turn and text:
+        try:
+            title = await generate_session_title(text, language=language)
+            if title:
+                await update_session(session["id"], user["id"], title=title)
+                session["title"] = title
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Title generation failed for %s: %s", session["id"], exc)
 
     try:
         advice = await get_styling_advice(
@@ -169,14 +230,35 @@ async def stylist_endpoint(
         latency_ms=advice.get("latency_ms") or {},
     )
 
-    return {"session_id": session["id"], "advice": advice}
+    return {
+        "session_id": session["id"],
+        "session": _safe_session(
+            await get_session(session["id"], user["id"]) or session
+        ),
+        "advice": advice,
+    }
 
 
+# ---------------------------------------------------------------------------
+# GET /stylist/history
+# ---------------------------------------------------------------------------
 @router.get("/history")
 async def stylist_history(
-    limit: int = 20,
+    session_id: str | None = None,
+    limit: int = 200,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    session = await get_or_create_session(user["id"])
-    msgs = await recent_messages(session["id"], limit=limit)
-    return {"session_id": session["id"], "messages": msgs}
+    """Return full message history for a specific session (defaults to the
+    user's most recent active session)."""
+    if session_id:
+        session = await get_session(session_id, user["id"])
+        if not session:
+            raise HTTPException(404, "Session not found")
+    else:
+        session = await get_or_create_active_session(user["id"])
+    msgs = await full_history(session["id"], limit=limit)
+    return {
+        "session_id": session["id"],
+        "session": _safe_session(session),
+        "messages": [{k: v for k, v in m.items() if k != "_id"} for m in msgs],
+    }

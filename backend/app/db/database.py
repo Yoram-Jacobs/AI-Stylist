@@ -60,7 +60,15 @@ async def ensure_indexes() -> None:
         name="stripe_checkout_session_id_unique_partial",
     )
 
-    await db.stylist_sessions.create_index("user_id", unique=True)
+    # Multi-session: one user can have many conversation threads, so we
+    # index user_id non-uniquely alongside last_active_at for the sidebar
+    # list. The legacy unique index (if present) is dropped on boot.
+    try:
+        await db.stylist_sessions.drop_index("user_id_1")
+    except Exception:  # noqa: BLE001
+        # Index may not exist (fresh DB) — safe to ignore.
+        pass
+    await db.stylist_sessions.create_index([("user_id", 1), ("last_active_at", -1)])
     await db.stylist_messages.create_index([("session_id", 1), ("created_at", -1)])
 
     await db.embeddings.create_index(
