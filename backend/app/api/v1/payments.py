@@ -196,7 +196,7 @@ _PACK_PRICES = {"10": 1000, "25": 2500, "50": 5000}
 class TopupIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pack: Literal["10", "25", "50", "custom"]
-    custom_amount_cents: int | None = Field(default=None, ge=100, le=100000)
+    custom_amount_cents: int | None = Field(default=None, ge=0, le=100000)
     currency: str = "USD"
 
 
@@ -264,6 +264,14 @@ async def create_topup(
     currency = payload.currency.upper()
     if payload.pack == "custom":
         amount_cents = int(payload.custom_amount_cents or 0)
+        if amount_cents < 100:
+            raise HTTPException(
+                400,
+                {
+                    "code": "amount_too_small",
+                    "message": "Custom top-up amount must be at least 1.00.",
+                },
+            )
     else:
         amount_cents = _PACK_PRICES[payload.pack]
     if amount_cents < 100:

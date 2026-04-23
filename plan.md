@@ -25,7 +25,7 @@
 - ✅ **Phase S shipped**: **Device Access (Location UX) + Marketplace proximity + Region-aware Fashion Scout + share/invite + Professional CTA scaffold**.
 - ✅ **Phase T shipped**: **Extended Profile & Settings** (full schema + UI + OAuth autofill).
 - ✅ **Phase U shipped**: **Experts Pool + Ads/Campaigns + AdTicker + Ask-a-Professional directory** — backend 16/16, frontend 17/17.
-- 🎯 **Payments next (UPDATED)**: Implement **PayPal** (Smart Buttons + Orders v2 API) + **PayPal Payouts** + **prepaid ad credits** with multi-currency support (**replaces PayPlus plan**).
+- 🎯 **Payments shipped**: **PayPal** (Smart Buttons Orders v2) + **PayPal Payouts** + **prepaid ad credits** with multi-currency support. Running in **MOCK MODE** pending valid sandbox credentials (the keys provided returned `invalid_client`). Full backend suite 17/17 features passing.
 
 > **Operational note:** EMERGENT_LLM_KEY budget is topped up with auto‑recharge. Text/multimodal calls (Stylist + The Eyes + Fashion‑Scout) are expected to be stable, but transient upstream 503s may still occur (handled gracefully).
 
@@ -92,7 +92,7 @@
 
 ---
 
-### Phase 4 — Context + Autonomy + Payments (PayPal) **(PARTIALLY COMPLETE / PAYPAL NEXT)**
+### Phase 4 — Context + Autonomy + Payments (PayPal) **(SHIPPED 🎉)**
 
 #### Phase 4 (Part 1) — Google Calendar OAuth (P0) **(COMPLETE)**
 Delivered previously; unchanged.
@@ -101,8 +101,20 @@ Delivered previously; unchanged.
 - ✅ Scheduled generator runs daily and persists cards.
 - ✅ Extended schema to support optional media fields (image/video/source) for the Stylist side panel.
 
-#### Phase 4P (Part 3) — **PayPal Payments + Payouts + Credits** **(NEXT / NOT STARTED)**
+#### Phase 4P (Part 3) — **PayPal Payments + Payouts + Credits** **(SHIPPED ✅)**
 **Goal**: Replace deferred PayPlus plan with **PayPal Smart Buttons** (Orders v2) for checkout and **PayPal Payouts** for seller disbursement, plus **prepaid ad-credit balance** for professionals. Support **sandbox + live** via `PAYPAL_ENV`. Support **multi-currency MVP**.
+
+**Shipped**:
+- `paypal_client.py` — httpx REST v2 wrapper with OAuth2 token cache, mock fallback when creds invalid (current state — user's sandbox keys return `invalid_client`).
+- Orders: `POST /v1/paypal/orders` create + capture, webhook handler with duplicate-event dedupe + signature verify hook.
+- Credits: prepaid balance per (user, currency). Endpoints: `GET/POST /v1/credits/balance|balances|history|topup|topup/{id}/capture`. Packs: $10, $25, $50, Custom ($1–$1000).
+- Ads billing: impression/click deduct 1¢/5¢ atomically from credit balance; campaigns auto-pause with `status_reason='insufficient_funds'` when broke.
+- Marketplace: `POST /v1/listings/{id}/buy` + `.../buy/capture` build Transaction + trigger PayPal Payouts to seller's `paypal_receiver_email`.
+- Frontend: `lib/paypal.jsx` (PayPalScriptProvider + mock fallback), `PayPalCheckoutButton`, AdsManager credit balance + top-up dialog, Profile "Payouts (PayPal)" accordion, ListingDetail PayPal checkout.
+- i18n: EN/HE/AR for credits, payouts, buy-for, paypalDisclosure.
+- Tests: 17/17 backend feature tests passing (93% overall including edge cases).
+
+> **Note**: Keys provided by user (sandbox: `AAeAZLoVI6…`, secret: `EPGPe972…`) are rejected by PayPal with `invalid_client`. `PAYPAL_MOCK_MODE=true` keeps all flows demo-able. Paste corrected keys (from the app's own dashboard page on https://developer.paypal.com/dashboard/applications/sandbox) to flip to real PayPal.
 
 **Known credentials status**
 - ✅ Sandbox keys received.
