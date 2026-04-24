@@ -11,7 +11,6 @@ restart in exchange for zero infra (no Redis, no Mongo write-amplification).
 """
 from __future__ import annotations
 
-import asyncio
 import threading
 import time
 from collections import defaultdict, deque

@@ -102,7 +102,8 @@ export default function Stylist() {
       const { sessions: rows } = await api.stylistSessions();
       setSessions(rows || []);
       return rows || [];
-    } catch {
+    } catch (err) {
+      console.debug('[Stylist] loadSessions failed:', err?.message || err);
       return [];
     } finally {
       setSessionsLoading(false);
@@ -120,7 +121,8 @@ export default function Stylist() {
         payload: m.assistant_payload,
       }));
       setMessages(hydrated);
-    } catch {
+    } catch (err) {
+      console.debug('[Stylist] loadMessagesFor failed:', err?.message || err);
       setMessages([]);
     } finally {
       setMessagesLoading(false);
@@ -139,19 +141,23 @@ export default function Stylist() {
       try {
         const s = await api.calendarStatus();
         setCalendarConnected(!!s?.connected);
-      } catch {
-        /* silent */
+      } catch (err) {
+        // Non-fatal: calendar status is a hint UI, never required for chat.
+        console.debug('[Stylist] calendarStatus failed:', err?.message || err);
       }
     })();
     if (ttsSupportedRef.current) {
-      ensureVoicesLoaded().catch(() => {});
+      ensureVoicesLoaded().catch((err) => {
+        console.debug('[Stylist] voices load failed:', err?.message || err);
+      });
     }
     return () => {
       cancelSpeak();
       try {
         recognitionRef.current?.abort?.();
-      } catch {
-        /* ignore */
+      } catch (err) {
+        // SpeechRecognition abort throws on some browsers after it's already stopped.
+        console.debug('[Stylist] recognition abort:', err?.message || err);
       }
     };
   }, [loadSessions, loadMessagesFor]);
@@ -245,7 +251,8 @@ export default function Stylist() {
       };
       rec.start();
       return true;
-    } catch {
+    } catch (err) {
+      console.debug('[Stylist] startNativeRecognition failed:', err?.message || err);
       recognitionRef.current = null;
       return false;
     }
@@ -268,7 +275,8 @@ export default function Stylist() {
       };
       mr.start();
       setRecording(true);
-    } catch {
+    } catch (err) {
+      console.debug('[Stylist] startMediaRecorder failed:', err?.message || err);
       toast.error(t('stylist.micError'));
     }
   };
@@ -282,8 +290,9 @@ export default function Stylist() {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch {
-        /* ignore */
+      } catch (err) {
+        // SpeechRecognition.stop() throws on some browsers after it's already stopped.
+        console.debug('[Stylist] recognition stop:', err?.message || err);
       }
       recognitionRef.current = null;
       return;
@@ -300,8 +309,8 @@ export default function Stylist() {
     try {
       setSpeakingId(id);
       await speak(txt, { lang: userLang });
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.debug('[Stylist] playLocalSpeech failed:', err?.message || err);
     } finally {
       setSpeakingId(null);
     }
@@ -478,7 +487,7 @@ export default function Stylist() {
                     <div className="mt-3 space-y-3">
                       {(m.payload.outfit_recommendations || []).map((rec, i) => (
                         <OutfitRecommendationCard
-                          key={i}
+                          key={rec.id || `${m.id || 'msg'}-rec-${i}`}
                           rec={rec}
                           index={i}
                           sessionId={activeSessionId}
@@ -491,7 +500,7 @@ export default function Stylist() {
                           </div>
                           <ul className="list-disc ps-5 space-y-0.5">
                             {m.payload.do_dont.map((d, k) => (
-                              <li key={k}>{d}</li>
+                              <li key={`${m.id || 'msg'}-dd-${k}-${String(d).slice(0, 24)}`}>{d}</li>
                             ))}
                           </ul>
                         </div>

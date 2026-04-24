@@ -300,7 +300,7 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
                 <div className="h-4 rounded shimmer w-1/2" />
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="aspect-square rounded-xl shimmer" />
+                    <div key={`skeleton-${i}`} className="aspect-square rounded-xl shimmer" />
                   ))}
                 </div>
               </div>
@@ -350,7 +350,7 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
                     {result.do_dont?.length > 0 && (
                       <ul className="text-xs text-muted-foreground list-disc pl-5 mt-3 space-y-0.5">
                         {result.do_dont.map((d, i) => (
-                          <li key={i}>{d}</li>
+                          <li key={`dd-${i}-${String(d).slice(0, 24)}`}>{d}</li>
                         ))}
                       </ul>
                     )}
@@ -362,7 +362,7 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
                   <div className="space-y-3">
                     {result.outfit_recommendations.map((rec, i) => (
                       <div
-                        key={i}
+                        key={rec.id || `rec-${i}-${rec.name || 'outfit'}`}
                         className="rounded-2xl border border-border bg-secondary/60 p-4"
                       >
                         <div className="caps-label text-[hsl(var(--accent))]">
@@ -371,7 +371,7 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
                         <div className="font-display text-base mt-1">{rec.name}</div>
                         <ul className="text-xs text-muted-foreground list-disc pl-5 mt-2 space-y-0.5">
                           {(rec.items || []).map((it, j) => (
-                            <li key={j}>{it.description || it.role}</li>
+                            <li key={`${rec.id || i}-item-${j}-${it.role || ''}`}>{it.description || it.role}</li>
                           ))}
                         </ul>
                         {rec.why && <p className="text-xs mt-2 italic">{rec.why}</p>}

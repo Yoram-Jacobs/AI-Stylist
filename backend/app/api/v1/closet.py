@@ -10,7 +10,7 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field

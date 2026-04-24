@@ -28,7 +28,9 @@ from app.services import provider_activity
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
-_MOCK_TOKEN = "MOCK_TOKEN"
+# Sentinel string — *not* a real secret. Used in-process to flag when the
+# OAuth flow fell back to mock mode. Scanner `S105` disabled below.
+_MOCK_TOKEN = "MOCK_TOKEN_SENTINEL"  # noqa: S105
 
 
 def _is_mock_token(tok: str) -> bool:
