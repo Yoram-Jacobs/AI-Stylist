@@ -97,6 +97,8 @@ frontend/node_modules/.cache/default-development/8.pack
 .env
 .env.*
 *.env
+# Keep deploy example files checked in (no secrets inside)
+!deploy/.env.example
 credentials.json
 *.pem
 *.key

@@ -1,0 +1,105 @@
+name: dressapp
+
+# docker-compose.yml — DressApp production stack on a single VPS.
+#
+# Spins up three containers:
+#   - backend   : FastAPI + local ML inference (port 8001 internal)
+#   - frontend  : nginx-served CRA bundle (port 3000 internal)
+#   - caddy     : TLS-terminating reverse proxy (80/443 public)
+#
+# Data durability:
+#   - MongoDB lives in Atlas (external) — no volume needed
+#   - Model weights are cached in `model-cache` + `rembg-cache` volumes
+#     so restarts don't re-download the ~180 MB SegFormer + u2netp models
+#   - Caddy certs + config persist in `caddy-data` / `caddy-config`
+#
+# Bring up:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+# Tail logs:
+#   docker compose -f deploy/docker-compose.yml logs -f
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: dressapp-backend:latest
+    container_name: dressapp-backend
+    restart: unless-stopped
+    env_file: ./.env
+    environment:
+      # Make sure the backend trusts the Caddy forwarded headers.
+      FORWARDED_ALLOW_IPS: "*"
+    expose:
+      - "8001"
+    # Heavy ML inference — give it a generous memory ceiling but let it
+    # steadily-state around 1 GiB. Tune if your VPS is tighter.
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+    volumes:
+      - model-cache:/models/huggingface
+      - rembg-cache:/models/u2net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/api/v1/listings?status=active"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    networks: [dress]
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        # Baked into the bundle at build time — MUST match the public URL
+        # (same origin since Caddy proxies /api/* back to the backend).
+        REACT_APP_BACKEND_URL: https://${DOMAIN}
+    image: dressapp-frontend:latest
+    container_name: dressapp-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    networks: [dress]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: dressapp-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+    networks: [dress]
+
+volumes:
+  model-cache:
+  rembg-cache:
+  caddy-data:
+  caddy-config:
+  caddy-logs:
+
+networks:
+  dress:
+    driver: bridge

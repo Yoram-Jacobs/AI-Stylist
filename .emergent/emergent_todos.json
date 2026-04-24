@@ -1,50 +1,38 @@
 [
   {
-    "content": "Install deps: beautifulsoup4 + html5-qrcode",
+    "content": "Pre-deploy audit via deployment_agent — identified 4 blockers (ML deps, OAuth hardcoding, .gitignore, DB_NAME)",
     "status": "completed"
   },
   {
-    "content": "Backend: add dpp_data to ClosetItem + CreateItemIn schemas",
+    "content": "Fix: hardcoded Google OAuth URLs → now dynamic (derived from request host, respects X-Forwarded-* headers)",
     "status": "completed"
   },
   {
-    "content": "Backend: dpp_parser.py service — inline JSON, URL fetch, JSON-LD (incl @graph), SSRF guards, image download, material+colour normalisation",
+    "content": "Fix: cleared hardcoded preview URLs from backend/.env (kept as empty strings for dynamic resolution)",
     "status": "completed"
   },
   {
-    "content": "Backend: POST /api/v1/closet/import-dpp (analyze-shaped response)",
+    "content": "Fix: .gitignore verified — already covers test_credentials.md; added !deploy/.env.example exception",
     "status": "completed"
   },
   {
-    "content": "Backend: POST /api/v1/closet/{id}/photo (add/replace with The Eyes single-item + CLIP re-embed)",
+    "content": "Deploy kit for Hetzner VPS + docker-compose: Dockerfile.backend (CPU torch, tini, model-cache volumes)",
     "status": "completed"
   },
   {
-    "content": "Frontend: DppScanner component (camera+file tabs, html5-qrcode)",
+    "content": "Deploy kit: Dockerfile.frontend (multi-stage CRA build, nginx runtime, SPA fallback)",
     "status": "completed"
   },
   {
-    "content": "Frontend: 'Scan DPP' tile in AddItem flow + secondary toolbar",
+    "content": "Deploy kit: Caddyfile (auto-HTTPS via Let's Encrypt, /api/* → backend, /* → frontend, security headers)",
     "status": "completed"
   },
   {
-    "content": "Frontend: 'Scan QR' global CTA in TopNav",
+    "content": "Deploy kit: docker-compose.yml with health checks + model-cache volumes + 3 GB memory ceiling",
     "status": "completed"
   },
   {
-    "content": "Frontend: DPP panel + Add photo/Replace photo button on ItemDetail",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: DPP-only placeholder on Closet card (QR icon + 'DPP' caps-label)",
-    "status": "completed"
-  },
-  {
-    "content": "i18n: full English copy for dpp.scanner/panel/nav/photo + errors",
-    "status": "completed"
-  },
-  {
-    "content": "E2E test: inline JSON DPP → import → save → add photo → auto-segment; SSRF guards; malformed JSON handling — all passing",
+    "content": "Deploy kit: .env.example + DEPLOY.md (11-section step-by-step Hetzner guide: Atlas → Docker → DNS → boot → OAuth → PayPal → ops)",
     "status": "completed"
   }
 ]

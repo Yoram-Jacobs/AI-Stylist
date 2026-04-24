@@ -1,0 +1,62 @@
+# Backend Dockerfile — DressApp (FastAPI + local ML inference)
+#
+# Produces a single container that runs the FastAPI app with CPU-only
+# PyTorch + SegFormer + rembg for The Eyes pipeline. Sized for a 4 GB
+# Hetzner CX22 or similar (~2 GB steady-state RSS, ~3 GB peak during
+# model warm-up).
+#
+# Build:
+#   docker build -f deploy/Dockerfile.backend -t dressapp-backend:latest .
+# Run (for local testing):
+#   docker run --rm -p 8001:8001 --env-file backend/.env dressapp-backend:latest
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/models/huggingface \
+    TRANSFORMERS_CACHE=/models/huggingface \
+    U2NET_HOME=/models/u2net
+
+# System packages required by onnxruntime, scikit-image, opencv, PIL.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libglib2.0-0 \
+        libgomp1 \
+        libjpeg62-turbo \
+        libpng16-16 \
+        libgl1 \
+        ca-certificates \
+        curl \
+        tini \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# --- Python dependencies ---------------------------------------------
+# Install CPU-only torch/torchvision FIRST from the pytorch wheel index
+# to avoid pulling the ~2 GB CUDA wheels from PyPI.
+RUN pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/cpu \
+      torch==2.5.1 torchvision==0.20.1
+
+COPY backend/requirements.txt ./requirements.txt
+# Torch is already installed above — pip will skip it here.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# --- Application code ------------------------------------------------
+COPY backend/ ./backend/
+
+# Pre-create the model-cache mountpoint with writable perms.
+RUN mkdir -p /models/huggingface /models/u2net
+
+# The container listens on 8001 (same as dev).
+EXPOSE 8001
+
+# Tini reaps zombie children (uvicorn spawns onnxruntime/inference workers).
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+WORKDIR /app/backend
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]

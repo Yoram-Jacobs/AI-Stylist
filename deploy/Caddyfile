@@ -1,0 +1,63 @@
+# Caddy reverse-proxy config for DressApp production.
+#
+# Automatically obtains + renews a Let's Encrypt cert for the domain
+# in $DOMAIN. Routes /api/* to the backend container on :8001 and
+# everything else to the frontend container on :3000.
+#
+# To run locally without TLS (e.g. during smoke-test on the VPS),
+# replace `{$DOMAIN}` with `:80` and comment out the `tls` line.
+
+{
+    # Global options
+    email {$CADDY_ACME_EMAIL}
+    # Uncomment to use staging Let's Encrypt while testing:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+
+    # Backend API — matched first so it never falls through to the SPA.
+    handle /api/* {
+        reverse_proxy backend:8001 {
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host  {host}
+            header_up X-Real-IP         {remote_host}
+            transport http {
+                read_timeout 300s
+                write_timeout 300s
+                dial_timeout 10s
+            }
+        }
+    }
+
+    # Static frontend SPA.
+    handle {
+        reverse_proxy frontend:3000 {
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host  {host}
+        }
+    }
+
+    # Health check endpoint (used by monitoring / uptime pings).
+    @healthcheck path /_health
+    handle @healthcheck {
+        respond "ok" 200
+    }
+
+    # Reasonable security headers for a modern SPA.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        Permissions-Policy        "camera=(self), microphone=(self), geolocation=()"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+    }
+}
