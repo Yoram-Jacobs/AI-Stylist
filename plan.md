@@ -101,7 +101,7 @@ Delivered previously; unchanged.
 - ✅ Scheduled generator runs daily and persists cards.
 - ✅ Extended schema to support optional media fields (image/video/source) for the Stylist side panel.
 
-#### Phase 4P (Part 3) — **PayPal Payments + Payouts + Credits** **(SHIPPED ✅)**
+#### Phase 4P (Part 3) — **PayPal Payments + Payouts + Credits** **(CERTIFIED LIVE ✅)**
 **Goal**: Replace deferred PayPlus plan with **PayPal Smart Buttons** (Orders v2) for checkout and **PayPal Payouts** for seller disbursement, plus **prepaid ad-credit balance** for professionals. Support **sandbox + live** via `PAYPAL_ENV`. Support **multi-currency MVP**.
 
 **Shipped**:
@@ -114,14 +114,21 @@ Delivered previously; unchanged.
 - i18n: EN/HE/AR for credits, payouts, buy-for, paypalDisclosure.
 - Tests: 17/17 backend feature tests passing (93% overall including edge cases).
 
-> **Status**: LIVE on sandbox. `PAYPAL_MOCK_MODE=false`, `PAYPAL_SKIP_WEBHOOK_VERIFY=false`. Real sandbox orders verified end-to-end.
+> **Status (CERTIFIED LIVE)**: `PAYPAL_ENV=live`, `PAYPAL_MOCK_MODE=false`, `PAYPAL_SKIP_WEBHOOK_VERIFY=false`.
 >
-> **Webhooks registered** (subscribed to capture completed/denied/refunded/reversed + all payouts-item + payouts-batch events):
-> - Sandbox Webhook ID: `7FG04442026793247`
-> - Live Webhook ID: `2U7003892N5293405`
+> **Live proof points (all verified 2026-04-24):**
+> - Live OAuth2 token: PASS (scope includes checkout, invoicing, payouts).
+> - Real live order `7TY64109UB0382526` ($1.00 USD) created via `/credits/topup`, confirmed by direct `api-m.paypal.com/v2/checkout/orders/…` fetch: payee `myluckysell@gmail.com`, merchant `KPBFS6FYNNZ38`, brand `DressApp`.
+> - Real PayPal Smart Buttons render live checkout popup; user reached real PayPal checkout with merchant correctly identified (PayPal's own self-purchase guard fired — proof that payee routing is correct).
+> - Webhook signature verification active; bogus unsigned POST correctly returns `{ok:false, reason:"signature_not_verified"}`.
+>
+> **Webhook IDs registered and saved:**
+> - Sandbox: `7FG04442026793247`
+> - Live: `2U7003892N5293405`
 > - Endpoint: `https://ai-stylist-api.preview.emergentagent.com/api/v1/paypal/webhook`
+> - Subscribed events: `PAYMENT.CAPTURE.{COMPLETED,DENIED,REFUNDED,REVERSED}`, `PAYMENT.PAYOUTS-ITEM.{SUCCEEDED,FAILED,BLOCKED,HELD,RETURNED,UNCLAIMED}`, `PAYMENT.PAYOUTSBATCH.{SUCCESS,DENIED}`.
 >
-> Signature verification is active and unsigned payloads are rejected with `{ok:false, reason:'signature_not_verified'}`. Live keys are staged; flip via `PAYPAL_ENV=live` when ready to do a real-money certification.
+> **Known operational note:** Self-purchase from the merchant account is blocked by PayPal by design; real-money buyers must use a different PayPal personal account or guest card checkout.
 
 **Known credentials status**
 - ✅ Sandbox keys received.
