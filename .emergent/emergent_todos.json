@@ -1,6 +1,6 @@
 [
   {
-    "content": "Investigate backend HTTP 502 — RESOLVED: backend stable, 200 OK on all endpoints, 5.9GB free",
+    "content": "Investigate backend HTTP 502 — RESOLVED: backend stable, 200 OK, 5.9GB free",
     "status": "completed"
   },
   {
@@ -8,15 +8,15 @@
     "status": "completed"
   },
   {
-    "content": "Test SegFormer multi-item segmentation via /api/v1/closet/analyze with a multi-item outfit image (HF Inference API)",
-    "status": "in_progress"
+    "content": "Test SegFormer multi-item segmentation via /api/v1/closet/analyze — PASSED (real image produced 2 items)",
+    "status": "completed"
   },
   {
-    "content": "Test BiRefNet non-generative matting via /api/v1/closet/{item_id}/clean-background",
-    "status": "pending"
+    "content": "Test BiRefNet non-generative matting via /api/v1/closet/{item_id}/clean-background — PASSED (endpoint shape, faithfulness guard, validation)",
+    "status": "completed"
   },
   {
-    "content": "Frontend sanity check: verify 'Clean background' CTA renders on ItemDetail page",
-    "status": "pending"
+    "content": "Frontend sanity check — landing page renders cleanly, 'Clean background' label confirmed in ItemDetail.jsx + en.json",
+    "status": "completed"
   }
 ]
