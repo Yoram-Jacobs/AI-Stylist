@@ -594,8 +594,13 @@ class GarmentVisionService:
                         {
                             "label": p["label"].lower().replace("-", "_"),
                             "kind": p["category"],  # top / bottom / dress / ...
-                            "bbox": p["bbox"],
+                            "bbox": p["bbox"],  # [ymin,xmin,ymax,xmax] 0-1000
                             "score": p["score"],
+                            # Preserve full-res mask so analyze_outfit can
+                            # build semantic PNG cutouts instead of bbox
+                            # rectangles. Not serialised to JSON anywhere.
+                            "mask": p.get("mask"),
+                            "source": "clothing_parser",
                         }
                         for p in parser_items
                     ]
@@ -871,19 +876,70 @@ class GarmentVisionService:
             ]
 
         # 2) Crop each bbox on a thread-pool (Pillow work is CPU-bound).
-        crops: list[tuple[dict[str, Any], bytes]] = []
+        # We use two strategies in order of fidelity:
+        #   (a) When the detection came from the local SegFormer parser
+        #       (rare — only when the self-hosted box is configured) we
+        #       have a pixel-perfect mask; produce a PNG cutout directly.
+        #   (b) Otherwise we bbox-crop first, then — if AUTO_MATTE_CROPS
+        #       is enabled — pipe the JPEG through rembg to strip the
+        #       background. This turns Gemini's rough rectangles into
+        #       clean per-item cards and directly fixes the "crops look
+        #       like the full outfit" regression users reported.
+        crops: list[tuple[dict[str, Any], bytes, str]] = []
 
-        def _crop_all() -> list[tuple[dict[str, Any], bytes]]:
-            out: list[tuple[dict[str, Any], bytes]] = []
+        def _bbox_crop_all() -> list[tuple[dict[str, Any], bytes, str]]:
+            from app.services import clothing_parser
+
+            out: list[tuple[dict[str, Any], bytes, str]] = []
             for det in useful:
-                cropped = _crop_to_bbox(image_bytes, det["bbox"])
-                if not cropped:
-                    continue
-                crop_bytes, _xy = cropped
-                out.append((det, crop_bytes))
+                mask = det.get("mask")
+                if mask is not None:
+                    result = clothing_parser.crop_with_mask(
+                        image_bytes, det["bbox"], mask
+                    )
+                    if not result:
+                        continue
+                    crop_bytes, _xy = result
+                    out.append((det, crop_bytes, "image/png"))
+                else:
+                    result = _crop_to_bbox(image_bytes, det["bbox"])
+                    if not result:
+                        continue
+                    crop_bytes, _xy = result
+                    out.append((det, crop_bytes, "image/jpeg"))
             return out
 
-        crops = await asyncio.to_thread(_crop_all)
+        raw_crops = await asyncio.to_thread(_bbox_crop_all)
+
+        if settings.AUTO_MATTE_CROPS and raw_crops:
+            # Pipe each JPEG crop through rembg (PNG crops already have
+            # a semantic cutout). Serialise to avoid concurrent sessions
+            # on a single onnxruntime instance; each call is ~1-2 s on
+            # CPU with u2netp, so 4 items ~= 8 s — acceptable.
+            from app.services import background_matting
+
+            matted_crops: list[tuple[dict[str, Any], bytes, str]] = []
+            for det, cbytes, mime in raw_crops:
+                if mime == "image/png":
+                    matted_crops.append((det, cbytes, mime))
+                    continue
+                try:
+                    matted = await background_matting.matte_crop(cbytes)
+                except Exception as exc:  # noqa: BLE001
+                    logger.info(
+                        "auto-matte failed for %s: %s — keeping bbox crop",
+                        det.get("label"),
+                        repr(exc)[:120],
+                    )
+                    matted = None
+                if matted:
+                    matted_crops.append((det, matted, "image/png"))
+                else:
+                    matted_crops.append((det, cbytes, mime))
+            crops = matted_crops
+        else:
+            crops = raw_crops
+
         if not crops:
             # Every crop was rejected (tiny / invalid bbox). Degrade gracefully.
             single = await self.analyze(image_bytes, language=language)
@@ -905,7 +961,9 @@ class GarmentVisionService:
         #    ample. Pro remains the default for single-image analysis.
         sem = asyncio.Semaphore(6)
 
-        async def _one(det: dict[str, Any], crop_bytes: bytes) -> dict[str, Any] | None:
+        async def _one(
+            det: dict[str, Any], crop_bytes: bytes, crop_mime: str
+        ) -> dict[str, Any] | None:
             async with sem:
                 try:
                     analysis = await self.analyze(
@@ -941,12 +999,12 @@ class GarmentVisionService:
                     "kind": det.get("kind") or "garment",
                     "bbox": det.get("bbox"),
                     "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                    "crop_mime": "image/jpeg",
+                    "crop_mime": crop_mime,
                     "analysis": analysis,
                     "reconstruction": reconstruction_payload,
                 }
 
-        results = await asyncio.gather(*[_one(d, b) for d, b in crops])
+        results = await asyncio.gather(*[_one(d, b, m) for d, b, m in crops])
         items = [r for r in results if r]
         # If every parallel call failed, fall back once.
         if not items:

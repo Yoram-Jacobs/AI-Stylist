@@ -1,22 +1,30 @@
 [
   {
-    "content": "Investigate backend HTTP 502 — RESOLVED: backend stable, 200 OK, 5.9GB free",
+    "content": "Pivot: Gemini splits outfits, rembg cleans each crop into semantic cutout. SegFormer disabled (OOM in pod).",
     "status": "completed"
   },
   {
-    "content": "Verify new vision pipeline files & wiring (clothing_parser, background_matting, vision_verifier, closet.py clean-background)",
+    "content": "Config: rembg model=u2netp (4.7MB), AUTO_MATTE_CROPS=true, USE_LOCAL_CLOTHING_PARSER=false (defaults safe for pod limits)",
     "status": "completed"
   },
   {
-    "content": "Test SegFormer multi-item segmentation via /api/v1/closet/analyze — PASSED (real image produced 2 items)",
+    "content": "clothing_parser.py: local SegFormer gated behind flag; crop_with_mask utility preserved for future self-hosted inference-server",
     "status": "completed"
   },
   {
-    "content": "Test BiRefNet non-generative matting via /api/v1/closet/{item_id}/clean-background — PASSED (endpoint shape, faithfulness guard, validation)",
+    "content": "garment_vision.py: _crop_all auto-pipes each Gemini bbox crop through rembg matte_crop → PNG cutouts instead of bbox JPEGs",
     "status": "completed"
   },
   {
-    "content": "Frontend sanity check — landing page renders cleanly, 'Clean background' label confirmed in ItemDetail.jsx + en.json",
+    "content": "Smoke-test rembg u2netp end-to-end (cold 4.8s, warm 0.7s, opaque 25%, no OOM)",
+    "status": "completed"
+  },
+  {
+    "content": "Live-tested /analyze + /clean-background with user's real outfit (5 items, 5 PNG cutouts, applied=True, cos=0.996)",
+    "status": "completed"
+  },
+  {
+    "content": "Cleaned up 1GB of unused birefnet weights; requirements.txt refreshed",
     "status": "completed"
   }
 ]

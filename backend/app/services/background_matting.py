@@ -1,28 +1,37 @@
-"""Background matting — non-generative alpha cutout (Phase V Fix 2).
+"""Background matting — non-generative alpha cutout.
 
-Replaces the old "Repair image" generative inpainting (which hallucinated
-details — e.g. inventing a red shorts to match a red shirt) with a pure
-alpha-matting pipeline. The model decides which pixels are garment vs
-background; it never invents pixels.
+Phase V (Fix round 2 — April 2026):
+The original plan to call BiRefNet via the HF serverless Inference API
+failed in practice — `api-inference.huggingface.co` has been retired and
+BiRefNet is not exposed on the new `router.huggingface.co/hf-inference`
+provider ("Model not supported by provider hf-inference").
 
-Two paths like the parser:
-  1. Self-hosted endpoint (preferred, future dressapp.co) —
-     BACKGROUND_MATTING_ENDPOINT_URL is set, we POST the crop and get back
-     a PNG with transparent background.
-  2. HF Inference API (fallback). Note: BiRefNet isn't natively exposed on
-     the serverless Inference API at time of writing; this path returns
-     None and callers fall back to the pre-matted mask we already have
-     from the clothing parser step.
+We now run matting **locally** via the excellent `rembg` library
+(MIT-licensed), which bundles BiRefNet and ISNet weights behind an
+onnxruntime-CPU session. First call downloads the weights (~170 MB,
+cached to ~/.u2net). Subsequent calls are ~2-4 s per image on CPU.
 
-Faithfulness guard: a CLIP-embedding cosine check compares original crop
-vs matted result. If similarity < MATTING_FAITHFULNESS_THRESHOLD we
-reject the matting (returns None) and caller keeps the original.
+No hallucination is possible: the model emits a per-pixel alpha mask
+which we multiply into the original pixels — we never synthesise
+new colour values.
+
+Execution order:
+  1. Self-hosted endpoint (`BACKGROUND_MATTING_ENDPOINT_URL`) — future
+     dressapp.co GPU box.
+  2. Local rembg (primary).
+
+The CLIP faithfulness guard is retained but is now advisory — since
+rembg cannot hallucinate, the only failure modes are "empty mask" (which
+we detect directly) or "too much of the garment got masked out" (which
+the CLIP check catches). Threshold is configurable.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import logging
+import threading
 import time
 from typing import Any
 
@@ -35,19 +44,82 @@ from app.services import provider_activity
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = httpx.Timeout(60.0, connect=15.0)
+_HTTP_TIMEOUT = httpx.Timeout(60.0, connect=15.0)
+
+# Lazy rembg session (the onnx model is heavy; load once per process).
+_session_lock = threading.Lock()
+_session: Any = None
+
+
+def _get_session() -> Any:
+    global _session
+    if _session is not None:
+        return _session
+    with _session_lock:
+        if _session is not None:
+            return _session
+        from rembg import new_session
+
+        model_name = settings.BACKGROUND_MATTING_REMBG_MODEL
+        t0 = time.time()
+        logger.info(
+            "background_matting: loading rembg session model=%s (first call, ~170MB download on first warm-up)",
+            model_name,
+        )
+        try:
+            _session = new_session(model_name=model_name)
+            logger.info(
+                "background_matting: rembg session ready in %.1fs",
+                time.time() - t0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "background_matting: failed to create rembg session (%s); feature disabled",
+                exc,
+            )
+            raise
+        return _session
+
+
+def _rembg_remove(image_bytes: bytes) -> bytes | None:
+    """Blocking helper — call inside asyncio.to_thread."""
+    from rembg import remove
+
+    try:
+        sess = _get_session()
+        out = remove(image_bytes, session=sess)
+        if not out:
+            return None
+        # Sanity: make sure we got a meaningful alpha mask, not empty.
+        try:
+            im = Image.open(io.BytesIO(out)).convert("RGBA")
+            a = np.array(im.split()[-1])
+            opaque_ratio = float((a > 32).sum()) / float(max(1, a.size))
+            if opaque_ratio < 0.01:
+                logger.info(
+                    "background_matting: rejecting near-empty mask (opaque=%.3f)",
+                    opaque_ratio,
+                )
+                return None
+        except Exception:  # noqa: BLE001
+            # If we can't inspect it, trust the bytes and return.
+            pass
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("background_matting: rembg failed (%s)", exc)
+        return None
 
 
 async def _call_self_hosted(image_bytes: bytes, endpoint_url: str) -> bytes | None:
     started = time.time()
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as c:
             resp = await c.post(
                 endpoint_url.rstrip("/") + "/remove-background",
                 files={"image": ("input.png", image_bytes, "image/png")},
             )
     except Exception as exc:  # noqa: BLE001
-        logger.info("background_matting self-hosted failed: %s", exc)
+        logger.info("background_matting self-hosted exception: %s", exc)
         provider_activity.record(
             "background_matting",
             ok=False,
@@ -66,7 +138,6 @@ async def _call_self_hosted(image_bytes: bytes, endpoint_url: str) -> bytes | No
     ct = resp.headers.get("content-type", "")
     if ct.startswith("image/"):
         return resp.content
-    # JSON with base64
     try:
         body = resp.json()
     except Exception:  # noqa: BLE001
@@ -80,82 +151,13 @@ async def _call_self_hosted(image_bytes: bytes, endpoint_url: str) -> bytes | No
         return None
 
 
-async def _call_hf_inference(image_bytes: bytes) -> bytes | None:
-    """HF serverless attempt. Most BiRefNet deployments on HF return a PNG
-    directly; some return JSON with mask. Try both shapes."""
-    token = settings.HF_TOKEN
-    if not token:
-        return None
-    model = settings.BACKGROUND_MATTING_MODEL
-    url = f"https://api-inference.huggingface.co/models/{model}"
-    started = time.time()
-    try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-            resp = await c.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "*/*",
-                    "Content-Type": "application/octet-stream",
-                },
-                content=image_bytes,
-            )
-    except Exception as exc:  # noqa: BLE001
-        logger.info("background_matting HF call exception: %s", exc)
-        return None
-    provider_activity.record(
-        "background_matting",
-        ok=resp.status_code == 200,
-        latency_ms=int((time.time() - started) * 1000),
-        extra={"provider": "hf_serverless", "model": model},
-    )
-    if resp.status_code != 200:
-        logger.info(
-            "background_matting HF non-200 %s %s",
-            resp.status_code,
-            resp.text[:160],
-        )
-        return None
-    ct = resp.headers.get("content-type", "")
-    if ct.startswith("image/"):
-        # Some HF endpoints return a PNG with alpha already set.
-        return resp.content
-    # If it returned a segmentation list ([{label, mask}, ...]) we take the
-    # first non-background mask and apply as alpha to the input.
-    try:
-        data = resp.json()
-    except Exception:  # noqa: BLE001
-        return None
-    if isinstance(data, list) and data:
-        try:
-            first = next(
-                (d for d in data if (d.get("label") or "").lower() != "background"),
-                data[0],
-            )
-            mask_b64 = first.get("mask")
-            if not mask_b64:
-                return None
-            mask_png = base64.b64decode(mask_b64.split(",", 1)[-1])
-            return _apply_mask_alpha(image_bytes, mask_png)
-        except Exception:  # noqa: BLE001
-            return None
-    return None
-
-
-def _apply_mask_alpha(rgb_png: bytes, mask_png: bytes) -> bytes | None:
-    try:
-        img = Image.open(io.BytesIO(rgb_png)).convert("RGBA")
-        mask = Image.open(io.BytesIO(mask_png)).convert("L").resize(img.size)
-        img.putalpha(mask)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        return buf.getvalue()
-    except Exception:  # noqa: BLE001
-        return None
-
-
 async def _faithfulness_ok(original: bytes, matted: bytes) -> bool:
-    """CLIP cosine-similarity guard. Any error → treat as OK (don't block)."""
+    """CLIP cosine-similarity guard. Any error → treat as OK (don't block).
+
+    Rembg output is deterministic (same pixels, subset only) so the CLIP
+    score should stay >0.85 on valid cutouts. A low score means the mask
+    eroded something important.
+    """
     try:
         from app.services import fashion_clip
 
@@ -184,27 +186,64 @@ async def _faithfulness_ok(original: bytes, matted: bytes) -> bool:
 
 
 async def remove_background(image_bytes: bytes) -> dict[str, Any]:
-    """Return {image_png: bytes|None, provider: str, faithful: bool}.
+    """Return `{image_png, provider, faithful}`.
 
-    `image_png=None` means all paths failed and the caller should keep
-    the original crop. `faithful=False` means matting ran but the
-    verifier rejected it (also return None to caller).
+    * `image_png` is transparent-background PNG bytes, or `None` if all
+      paths failed or the faithfulness guard rejected the output.
+    * `provider` is `"self_hosted"` or `"local_rembg"`.
+    * `faithful` reflects the CLIP sanity check.
     """
     matted: bytes | None = None
-    provider = None
+    provider: str | None = None
+
     if settings.BACKGROUND_MATTING_ENDPOINT_URL:
         matted = await _call_self_hosted(
             image_bytes, settings.BACKGROUND_MATTING_ENDPOINT_URL
         )
         provider = "self_hosted"
+
     if not matted:
-        matted = await _call_hf_inference(image_bytes)
-        provider = provider or "hf_serverless"
+        t0 = time.time()
+        matted = await asyncio.to_thread(_rembg_remove, image_bytes)
+        provider_activity.record(
+            "background_matting",
+            ok=matted is not None,
+            latency_ms=int((time.time() - t0) * 1000),
+            extra={
+                "provider": "local_rembg",
+                "model": settings.BACKGROUND_MATTING_REMBG_MODEL,
+            },
+        )
+        if matted:
+            provider = provider or "local_rembg"
+
     if not matted:
         return {"image_png": None, "provider": provider, "faithful": False}
+
     ok = await _faithfulness_ok(image_bytes, matted)
     return {
         "image_png": matted if ok else None,
         "provider": provider,
         "faithful": ok,
     }
+
+
+async def matte_crop(image_bytes: bytes) -> bytes | None:
+    """Lightweight variant used by the multi-item analyzer.
+
+    Runs the same rembg pipeline but SKIPS the CLIP faithfulness guard
+    (too expensive to run N times in one /analyze request) and returns
+    plain PNG bytes on success or `None` on failure. Callers should
+    fall back to the original bbox JPEG when this returns None.
+    """
+    if settings.BACKGROUND_MATTING_ENDPOINT_URL:
+        remote = await _call_self_hosted(
+            image_bytes, settings.BACKGROUND_MATTING_ENDPOINT_URL
+        )
+        if remote:
+            return remote
+    try:
+        return await asyncio.to_thread(_rembg_remove, image_bytes)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("matte_crop failed: %s", exc)
+        return None

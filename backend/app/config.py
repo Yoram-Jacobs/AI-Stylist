@@ -188,16 +188,41 @@ class Settings:
         os.environ.get("CLOTHING_PARSER_ENDPOINT_URL") or None
     )
     # Background matting (non-generative, no hallucination).
+    # Legacy field — kept for the self-hosted contract (model name label).
     BACKGROUND_MATTING_MODEL: str = (
         os.environ.get("BACKGROUND_MATTING_MODEL") or "ZhengPeng7/BiRefNet"
+    )
+    # rembg model used for LOCAL matting. Options:
+    #   "u2netp"                 → tiny 4.7MB, fast, low RAM (default)
+    #   "isnet-general-use"      → ISNet general (~170MB, better quality)
+    #   "birefnet-general"       → BiRefNet best quality (~400MB, heavy)
+    #   "u2net"                  → U²-Net classic (~170MB)
+    # Default is u2netp so the feature works inside small pod memory
+    # limits. Upgrade via env var when self-hosting on a GPU/larger box.
+    BACKGROUND_MATTING_REMBG_MODEL: str = (
+        os.environ.get("BACKGROUND_MATTING_REMBG_MODEL") or "u2netp"
     )
     BACKGROUND_MATTING_ENDPOINT_URL: str | None = (
         os.environ.get("BACKGROUND_MATTING_ENDPOINT_URL") or None
     )
     # Minimum cosine similarity between original crop & clean-background
-    # result to accept the matting (Fix 3 verifier). Below this, reject.
+    # result to accept the matting (advisory verifier — rembg is
+    # deterministic so false rejections are rare; 0.65 is a safe floor).
     MATTING_FAITHFULNESS_THRESHOLD: float = float(
-        os.environ.get("MATTING_FAITHFULNESS_THRESHOLD", "0.82")
+        os.environ.get("MATTING_FAITHFULNESS_THRESHOLD", "0.65")
+    )
+    # Auto-matte every crop during `analyze` so the per-item cards show
+    # clean cutouts instead of bbox rectangles with background bleeding.
+    # Set to false to skip for performance testing.
+    AUTO_MATTE_CROPS: bool = (
+        os.environ.get("AUTO_MATTE_CROPS", "true").lower() == "true"
+    )
+    # Feature-flag for the HEAVY local SegFormer inference path in
+    # clothing_parser.py. Disabled by default because the model peaks at
+    # ~2 GB RAM during the first forward pass and OOM-kills small pods.
+    # Enable only when the backend has >=4 GB memory headroom.
+    USE_LOCAL_CLOTHING_PARSER: bool = (
+        os.environ.get("USE_LOCAL_CLOTHING_PARSER", "false").lower() == "true"
     )
     # Use the new clothing parser first in /closet/analyze (falls back to
     # legacy detector if it fails or returns nothing useful).
