@@ -177,6 +177,34 @@ class Settings:
         os.environ.get("PAYPAL_PLATFORM_FEE_PERCENT", "7")
     )
 
+    # --- Phase V: Clothing parser + matting (commercial-safe, MIT models) ---
+    # Primary clothing segmentation model (per-class parser).
+    CLOTHING_PARSER_MODEL: str = (
+        os.environ.get("CLOTHING_PARSER_MODEL")
+        or "sayeed99/segformer_b3_clothes"
+    )
+    # Optional self-hosted endpoint (FastAPI on dressapp.co). Blank = HF API.
+    CLOTHING_PARSER_ENDPOINT_URL: str | None = (
+        os.environ.get("CLOTHING_PARSER_ENDPOINT_URL") or None
+    )
+    # Background matting (non-generative, no hallucination).
+    BACKGROUND_MATTING_MODEL: str = (
+        os.environ.get("BACKGROUND_MATTING_MODEL") or "ZhengPeng7/BiRefNet"
+    )
+    BACKGROUND_MATTING_ENDPOINT_URL: str | None = (
+        os.environ.get("BACKGROUND_MATTING_ENDPOINT_URL") or None
+    )
+    # Minimum cosine similarity between original crop & clean-background
+    # result to accept the matting (Fix 3 verifier). Below this, reject.
+    MATTING_FAITHFULNESS_THRESHOLD: float = float(
+        os.environ.get("MATTING_FAITHFULNESS_THRESHOLD", "0.82")
+    )
+    # Use the new clothing parser first in /closet/analyze (falls back to
+    # legacy detector if it fails or returns nothing useful).
+    USE_CLOTHING_PARSER: bool = (
+        os.environ.get("USE_CLOTHING_PARSER", "true").lower() == "true"
+    )
+
     @property
     def paypal_client_id(self) -> str | None:
         return (

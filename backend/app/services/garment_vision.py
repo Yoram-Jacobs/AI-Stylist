@@ -575,9 +575,35 @@ class GarmentVisionService:
     async def detect_items(self, image_bytes: bytes) -> list[dict[str, Any]]:
         """Return a list of ``{label, kind, bbox}`` entries.
 
-        Always runs on the configured detect provider/model (Gemini Flash
-        by default), independent of which model powers ``analyze()``.
+        Phase V: try the commercial-safe clothing parser first
+        (sayeed99/segformer_b3_clothes, MIT). If it returns at least one
+        garment we use those — they're pixel-accurate per-class and split
+        outfits reliably. Otherwise fall back to the Gemini bbox detector.
         """
+        if settings.USE_CLOTHING_PARSER:
+            try:
+                from app.services import clothing_parser
+
+                parser_items = await clothing_parser.parse_garments(image_bytes)
+                if parser_items:
+                    logger.info(
+                        "detect_items: clothing_parser succeeded with %d items",
+                        len(parser_items),
+                    )
+                    return [
+                        {
+                            "label": p["label"].lower().replace("-", "_"),
+                            "kind": p["category"],  # top / bottom / dress / ...
+                            "bbox": p["bbox"],
+                            "score": p["score"],
+                        }
+                        for p in parser_items
+                    ]
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "detect_items: clothing_parser path failed (%s), falling back",
+                    exc,
+                )
         if self.detect_provider != "gemini":
             # Other detectors will be added later; for now only Gemini
             # gives reliable bounding boxes.

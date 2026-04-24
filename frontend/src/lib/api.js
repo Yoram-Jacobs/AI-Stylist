@@ -124,7 +124,7 @@ export const api = {
       })
       .then((r) => r.data),
 
-  // wardrobe reconstructor (Phase Q)
+  // wardrobe reconstructor (Phase Q — now used as fallback only)
   repairItemImage: (itemId, { userHint = null, force = false } = {}) =>
     client
       .post(`/closet/${itemId}/repair`, {
@@ -132,6 +132,9 @@ export const api = {
         force,
       })
       .then((r) => r.data),
+  // Clean background (Phase V Fix 2 — non-generative matting)
+  cleanItemBackground: (itemId) =>
+    client.post(`/closet/${itemId}/clean-background`).then((r) => r.data),
 
   // google calendar
   calendarStatus: () => client.get('/calendar/status').then((r) => r.data),

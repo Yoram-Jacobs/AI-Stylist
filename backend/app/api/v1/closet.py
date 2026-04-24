@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
+from app.config import settings
 from app.models.schemas import (
     ClosetItem,
     DressCode,
@@ -804,6 +805,81 @@ class RepairItemIn(BaseModel):
     # Ignore the automatic category-drift validator. Useful when the
     # user explicitly wants to retry and accept whatever comes back.
     force: bool = False
+
+
+@router.post("/{item_id}/clean-background")
+async def clean_item_background(
+    item_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Phase V Fix 2 — non-generative background matting.
+
+    Replaces the old "Repair image" generative inpainting (which
+    hallucinated matching colours, invented collars, etc.) with a pure
+    alpha-matting pipeline powered by BiRefNet (MIT). The matting model
+    decides which pixels are garment vs. background; it never invents
+    pixels.
+
+    A CLIP faithfulness guard in the matting service rejects matte output
+    that drifts too far from the original crop.
+    """
+    from app.services import background_matting
+
+    db = get_db()
+    item = await repos.find_one(
+        db.closet_items, {"id": item_id, "user_id": user["id"]}
+    )
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    crop_url = item.get("segmented_image_url") or item.get("original_image_url")
+    if not isinstance(crop_url, str) or not crop_url.startswith("data:"):
+        raise HTTPException(
+            400, "Item has no cropped image to matte. Re-analyze the item first."
+        )
+    try:
+        _, _, b64_part = crop_url.partition(",")
+        crop_bytes = base64.b64decode(b64_part)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, "Stored crop is corrupted.") from exc
+
+    result = await background_matting.remove_background(crop_bytes)
+    if not result.get("image_png"):
+        reason = (
+            "faithfulness_guard_rejected"
+            if result.get("provider") and not result.get("faithful")
+            else "matting_unavailable"
+        )
+        return {
+            "item": item,
+            "applied": False,
+            "reason": reason,
+            "detail": (
+                "Matting service is currently unreachable or the result "
+                "drifted too far from the original; keep the existing crop."
+            ),
+        }
+
+    out_b64 = base64.b64encode(result["image_png"]).decode("ascii")
+    data_url = f"data:image/png;base64,{out_b64}"
+    meta = {
+        "method": "matting",
+        "model": settings.BACKGROUND_MATTING_MODEL,
+        "provider": result.get("provider"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {
+            "$set": {
+                "reconstructed_image_url": data_url,
+                "reconstruction_metadata": meta,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    item = await repos.find_one(db.closet_items, {"id": item_id}) or item
+    return {"item": item, "applied": True, "reconstruction": meta}
 
 
 @router.post("/{item_id}/repair")

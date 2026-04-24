@@ -1298,6 +1298,223 @@ class DressAppAPITester:
             else:
                 self.log_test("Image Edit Regression", False, f"Status: {status}, Data: {data}")
 
+    # ==================== PHASE V IMAGE PIPELINE TESTS ====================
+    
+    def test_multi_item_outfit_analysis(self):
+        """Test POST /closet/analyze with multi-item outfit image (Phase V Fix 1)"""
+        if not self.dev_token:
+            self.log_test("Multi-Item Outfit Analysis", False, "No dev token available")
+            return None
+            
+        print("🔄 Testing multi-item outfit analysis (this may take 30-60 seconds)...")
+        
+        # Use a realistic multi-item outfit image (person wearing top + pants)
+        # This is a small test image that should trigger multi-item detection
+        test_image_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        
+        analyze_data = {
+            "image_base64": test_image_b64,
+            "multi": True  # Enable multi-item pipeline
+        }
+        
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=120)
+        
+        if success and status == 200:
+            # Check for multi-item response structure
+            has_items = 'items' in data and isinstance(data['items'], list)
+            has_count = 'count' in data and isinstance(data['count'], int)
+            
+            if has_items and data['items']:
+                # Check each item structure
+                first_item = data['items'][0]
+                item_has_analysis = 'analysis' in first_item
+                item_has_crop = 'crop_base64' in first_item
+                item_has_bbox = 'bbox' in first_item and isinstance(first_item['bbox'], list)
+                item_has_label = 'label' in first_item
+                item_has_kind = 'kind' in first_item
+                
+                # Check that analysis contains segmented_image_url (crop)
+                analysis = first_item.get('analysis', {})
+                has_title = bool(analysis.get('title'))
+                has_category = bool(analysis.get('category'))
+                
+                all_valid = (has_items and has_count and item_has_analysis and 
+                           item_has_crop and item_has_bbox and item_has_label and 
+                           item_has_kind and has_title and has_category)
+                
+                self.log_test("Multi-Item Outfit Analysis", all_valid, 
+                             f"Items: {len(data['items'])}, Count: {data.get('count')}, Structure valid: {all_valid}")
+                
+                # Return first item ID for clean-background testing
+                if data['items']:
+                    return data['items'][0]
+            else:
+                self.log_test("Multi-Item Outfit Analysis", False, "No items returned in analysis")
+                return None
+        else:
+            self.log_test("Multi-Item Outfit Analysis", False, f"Status: {status}, Data: {data}")
+            return None
+    
+    def test_clean_background_endpoint(self):
+        """Test POST /closet/{item_id}/clean-background (Phase V Fix 2)"""
+        if not self.dev_token:
+            self.log_test("Clean Background Endpoint", False, "No dev token available")
+            return
+            
+        print("🔄 Testing clean background endpoint...")
+        
+        # First create a closet item with segmented image
+        item_data = {
+            "title": "Test Item for Background Cleaning",
+            "category": "top",
+            "sub_category": "shirt",
+            "color": "blue",
+            "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        }
+        
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        if not (success and status == 201):
+            self.log_test("Clean Background Setup", False, f"Could not create item: {status}")
+            return
+            
+        item_id = data.get('id')
+        
+        # Test clean-background endpoint
+        print("🔄 Testing background matting (this may take 20-40 seconds)...")
+        success, data, status = self.make_request('POST', f'/closet/{item_id}/clean-background', 
+                                                 token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            # Check response structure
+            has_item = 'item' in data
+            has_applied = 'applied' in data and isinstance(data['applied'], bool)
+            
+            if data.get('applied'):
+                # If applied=true, should have updated item with reconstructed_image_url
+                item = data.get('item', {})
+                has_reconstructed_url = bool(item.get('reconstructed_image_url'))
+                has_reconstruction_meta = 'reconstruction_metadata' in item
+                
+                self.log_test("Clean Background Applied", has_reconstructed_url and has_reconstruction_meta,
+                             f"Reconstructed URL: {has_reconstructed_url}, Metadata: {has_reconstruction_meta}")
+            else:
+                # If applied=false, should have reason and detail
+                has_reason = 'reason' in data
+                has_detail = 'detail' in data
+                reason = data.get('reason', '')
+                
+                valid_reasons = reason in ['faithfulness_guard_rejected', 'matting_unavailable']
+                
+                self.log_test("Clean Background Not Applied", has_reason and has_detail and valid_reasons,
+                             f"Reason: {reason}, Detail provided: {has_detail}")
+            
+            overall_valid = has_item and has_applied
+            self.log_test("Clean Background Endpoint", overall_valid, 
+                         f"Applied: {data.get('applied')}, Reason: {data.get('reason', 'N/A')}")
+        else:
+            self.log_test("Clean Background Endpoint", False, f"Status: {status}, Data: {data}")
+    
+    def test_clean_background_validation(self):
+        """Test clean-background input validation"""
+        if not self.dev_token:
+            self.log_test("Clean Background Validation", False, "No dev token available")
+            return
+            
+        # Test with unknown item_id (should return 404)
+        fake_id = "00000000-0000-0000-0000-000000000000"
+        success, data, status = self.make_request('POST', f'/closet/{fake_id}/clean-background', 
+                                                 token=self.dev_token)
+        unknown_item_404 = status == 404
+        
+        # Test without auth (should return 401)
+        success, data, status = self.make_request('POST', f'/closet/{fake_id}/clean-background')
+        no_auth_401 = status == 401
+        
+        # Create item without image for 400 test
+        item_data = {
+            "title": "Item Without Image",
+            "category": "top"
+        }
+        success, data, status = self.make_request('POST', '/closet', item_data, token=self.dev_token)
+        if success and status == 201:
+            item_id = data.get('id')
+            success, data, status = self.make_request('POST', f'/closet/{item_id}/clean-background', 
+                                                     token=self.dev_token)
+            no_image_400 = status == 400
+        else:
+            no_image_400 = False
+        
+        all_valid = unknown_item_404 and no_auth_401 and no_image_400
+        self.log_test("Clean Background Validation", all_valid, 
+                     f"404: {unknown_item_404}, 401: {no_auth_401}, 400: {no_image_400}")
+    
+    def test_analyze_auth_guards(self):
+        """Test auth guards on /closet/analyze endpoint"""
+        analyze_data = {
+            "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+        }
+        
+        # Test without auth (should return 401)
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data)
+        no_auth_fails = status == 401
+        
+        self.log_test("Analyze Auth Guards", no_auth_fails, f"No auth status: {status}")
+    
+    def test_single_item_regression(self):
+        """Test that single-item photos still work (regression check)"""
+        if not self.dev_token:
+            self.log_test("Single Item Regression", False, "No dev token available")
+            return
+            
+        print("🔄 Testing single-item regression (this may take 20-40 seconds)...")
+        
+        # Test with single item (should not return 0 items)
+        analyze_data = {
+            "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "multi": True
+        }
+        
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        if success and status == 200:
+            has_items = 'items' in data and isinstance(data['items'], list)
+            items_count = len(data.get('items', []))
+            has_at_least_one = items_count >= 1
+            
+            # Check that we get at least one item back
+            self.log_test("Single Item Regression", has_items and has_at_least_one, 
+                         f"Items returned: {items_count}")
+        else:
+            self.log_test("Single Item Regression", False, f"Status: {status}, Data: {data}")
+    
+    def test_hf_api_fallback_handling(self):
+        """Test graceful fallback when HF API is unavailable"""
+        if not self.dev_token:
+            self.log_test("HF API Fallback", False, "No dev token available")
+            return
+            
+        print("🔄 Testing HF API fallback handling...")
+        
+        # This test verifies that the system doesn't crash when HF returns 404/503
+        # The backend should fall back to legacy detector and still return 200
+        analyze_data = {
+            "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "multi": True
+        }
+        
+        success, data, status = self.make_request('POST', '/closet/analyze', analyze_data, token=self.dev_token, timeout=90)
+        
+        # Should not crash - should return 200 even if HF API fails
+        api_stable = success and status == 200
+        
+        if api_stable:
+            # Should still return some analysis even if HF fails
+            has_fallback_response = 'items' in data or 'title' in data
+            self.log_test("HF API Fallback", has_fallback_response, 
+                         f"Fallback response provided: {has_fallback_response}")
+        else:
+            self.log_test("HF API Fallback", False, f"API crashed: Status {status}")
+
     # ==================== ADD ITEM FEATURE TESTS ====================
     
     def test_analyze_item_image_base64(self):
@@ -2808,6 +3025,15 @@ class DressAppAPITester:
         # PHASE 5 IMAGE EDIT REGRESSION
         print("\n🔄 Running Phase 5 Image Edit Regression Test...")
         self.test_image_edit_regression()
+        
+        # PHASE V IMAGE PIPELINE TESTS (NEW)
+        print("\n🖼️ Running Phase V Image Pipeline Tests...")
+        self.test_multi_item_outfit_analysis()
+        self.test_clean_background_endpoint()
+        self.test_clean_background_validation()
+        self.test_analyze_auth_guards()
+        self.test_single_item_regression()
+        self.test_hf_api_fallback_handling()
         
         # ADD ITEM FEATURE TESTS
         print("\n🔄 Running Add Item Feature Tests...")

@@ -215,6 +215,18 @@
     "removeBody": "This can't be undone.",
     "variantGenerated": "New variant generated",
     "editUnavailable": "Image edit unavailable",
+    "cleanBackground": {
+      "label": "Clean background",
+      "subtitle": "Remove the background from the crop using a faithful matting model — no hallucination, no invented details.",
+      "cta": "Clean background",
+      "retryCta": "Clean again",
+      "running": "Cleaning…",
+      "progressHint": "Extracting garment pixels, preserving every detail of the original.",
+      "success": "Background cleaned",
+      "rejected": "Matting produced an off-looking result — keeping the original crop.",
+      "error": "Clean-background failed. Please try again.",
+      "disclaimer": "Uses a non-generative matting model. Your original photo is never replaced with an invented one."
+    },
     "repair": {
       "label": "Image repair",
       "subtitle": "If the photo clips the garment, rebuild a clean, centered product shot. Add a hint (or speak it) to emphasise missing details.",

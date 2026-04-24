@@ -1,50 +1,22 @@
 [
   {
-    "content": "Backend: add env + paypal_client service (OAuth2 token cache, httpx wrapper)",
+    "content": "Investigate backend HTTP 502 — RESOLVED: backend stable, 200 OK on all endpoints, 5.9GB free",
     "status": "completed"
   },
   {
-    "content": "Backend: /paypal/config + /paypal/orders create+capture + webhook",
+    "content": "Verify new vision pipeline files & wiring (clothing_parser, background_matting, vision_verifier, closet.py clean-background)",
     "status": "completed"
   },
   {
-    "content": "Backend: Prepaid ad credits (user_credits, credit_topups, top-up + capture, balance, history)",
-    "status": "completed"
+    "content": "Test SegFormer multi-item segmentation via /api/v1/closet/analyze with a multi-item outfit image (HF Inference API)",
+    "status": "in_progress"
   },
   {
-    "content": "Backend: Wire ad impression/click to deduct credits + auto-pause on insufficient funds",
-    "status": "completed"
+    "content": "Test BiRefNet non-generative matting via /api/v1/closet/{item_id}/clean-background",
+    "status": "pending"
   },
   {
-    "content": "Backend: Marketplace buy flow (order create/capture) + Transaction.paypal pointer",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: PayPal Payouts service + trigger seller payout on capture + paypal_receiver_email on User",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: /lib/paypal.js + PayPalCheckoutButton component",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: AdsManager credit balance card + top-up dialog",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: ListingDetail PayPal checkout button",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Profile Payouts section (paypal_receiver_email)",
-    "status": "completed"
-  },
-  {
-    "content": "i18n EN/HE/AR for paypal/credits/payouts",
-    "status": "completed"
-  },
-  {
-    "content": "Testing agent: backend + frontend PayPal flows",
-    "status": "completed"
+    "content": "Frontend sanity check: verify 'Clean background' CTA renders on ItemDetail page",
+    "status": "pending"
   }
 ]

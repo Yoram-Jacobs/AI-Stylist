@@ -409,25 +409,23 @@ export default function ItemDetail() {
     toast.message(t('itemDetail.changesDiscarded'));
   };
 
-  /* ------------------- repair flow (unchanged from Phase Q) ------------------- */
+  /* ------------------- Clean background (Phase V Fix 2) ------------------- */
   const onRepair = async () => {
     if (repairing) return;
     setRepairing(true);
     setShowingOriginal(false);
     try {
-      const res = await api.repairItemImage(id, {
-        userHint: repairHint.trim() || null,
-      });
+      const res = await api.cleanItemBackground(id);
       if (res.applied) {
-        toast.success(t('itemDetail.repair.success'));
+        toast.success(t('itemDetail.cleanBackground.success'));
         setItem(res.item);
         setForm(toFormState(res.item));
         setRepairHint('');
       } else {
-        toast.warning(res.detail || t('itemDetail.repair.rejected'));
+        toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));
       }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || t('itemDetail.repair.error'));
+      toast.error(err?.response?.data?.detail || t('itemDetail.cleanBackground.error'));
     } finally {
       setRepairing(false);
     }
@@ -623,61 +621,40 @@ export default function ItemDetail() {
             </div>
           )}
 
-          {/* Image Repair card (Phase Q) */}
-          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="item-repair-card">
+          {/* Clean background card (Phase V Fix 2) */}
+          <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="item-clean-bg-card">
             <CardContent className="p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="caps-label text-muted-foreground">
-                  {t('itemDetail.repair.label')}
+                  {t('itemDetail.cleanBackground.label')}
                 </div>
-                {reconstructionReasons.length > 0 && (
-                  <Badge variant="outline" className="text-[10px] py-0 h-5 rounded-full" data-testid="item-repair-reasons-badge">
-                    {reconstructionReasons
-                      .map((r) =>
-                        t(`itemDetail.repair.reasons.${r}`, { defaultValue: r })
-                      )
-                      .join(', ')}
-                  </Badge>
-                )}
               </div>
-              <p className="text-sm text-muted-foreground">{t('itemDetail.repair.subtitle')}</p>
-              <div className="relative">
-                <Textarea
-                  value={dictating ? dictationInterim || repairHint : repairHint}
-                  onChange={(e) => setRepairHint(e.target.value.slice(0, 240))}
-                  placeholder={t('itemDetail.repair.hintPlaceholder')}
-                  rows={2}
-                  className="rounded-xl resize-none pe-12"
-                  data-testid="item-repair-hint-input"
-                  disabled={repairing}
-                />
-                {sttSupported.current && (
-                  <button
-                    type="button"
-                    onClick={dictating ? stopDictation : startDictation}
-                    disabled={repairing}
-                    className={`absolute end-2 bottom-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border transition-colors ${
-                      dictating ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : 'bg-card hover:bg-secondary'
-                    }`}
-                    data-testid="item-repair-mic-button"
-                  >
-                    {dictating ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-                  </button>
-                )}
-              </div>
-              <Button onClick={onRepair} disabled={repairing} className="w-full rounded-xl" data-testid="item-repair-button">
+              <p className="text-sm text-muted-foreground">
+                {t('itemDetail.cleanBackground.subtitle')}
+              </p>
+              <Button
+                onClick={onRepair}
+                disabled={repairing}
+                className="w-full rounded-xl"
+                data-testid="item-clean-bg-button"
+              >
                 {repairing ? (
-                  <><Loader2 className="h-4 w-4 me-2 animate-spin" />{t('itemDetail.repair.running')}</>
+                  <><Loader2 className="h-4 w-4 me-2 animate-spin" />{t('itemDetail.cleanBackground.running')}</>
                 ) : (
-                  <><Wand2 className="h-4 w-4 me-2" />{hasReconstruction ? t('itemDetail.repair.retryCta') : t('itemDetail.repair.cta')}</>
+                  <><Wand2 className="h-4 w-4 me-2" />{hasReconstruction ? t('itemDetail.cleanBackground.retryCta') : t('itemDetail.cleanBackground.cta')}</>
                 )}
               </Button>
               {repairing && (
-                <div className="space-y-2" data-testid="item-repair-progress">
+                <div className="space-y-2" data-testid="item-clean-bg-progress">
                   <div className="h-2 rounded shimmer w-full" />
-                  <p className="text-[11px] text-muted-foreground italic">{t('itemDetail.repair.progressHint')}</p>
+                  <p className="text-[11px] text-muted-foreground italic">
+                    {t('itemDetail.cleanBackground.progressHint')}
+                  </p>
                 </div>
               )}
+              <p className="text-[10px] text-muted-foreground/80 italic">
+                {t('itemDetail.cleanBackground.disclaimer')}
+              </p>
             </CardContent>
           </Card>
         </div>
