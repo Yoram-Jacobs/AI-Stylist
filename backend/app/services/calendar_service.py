@@ -45,28 +45,91 @@ SCOPES = [
 ]
 
 
+def _public_base_url(request: Any) -> str | None:
+    """Return the public origin the browser sees (scheme + host).
+
+    Respects standard reverse-proxy headers (``X-Forwarded-Proto`` /
+    ``X-Forwarded-Host``) so the same code works on localhost, the
+    Emergent preview domain, staging, production and any custom
+    domain (e.g. dressapp.co) — without any .env edits.
+    """
+    try:
+        headers = getattr(request, "headers", {}) or {}
+        scheme = headers.get("x-forwarded-proto")
+        if not scheme:
+            scheme = getattr(getattr(request, "url", None), "scheme", None) or "https"
+        host = (
+            headers.get("x-forwarded-host")
+            or headers.get("host")
+            or getattr(getattr(request, "url", None), "netloc", None)
+        )
+        if not host:
+            return None
+        # Header values can carry a port/comma-separated list — take the first.
+        host = host.split(",")[0].strip()
+        return f"{scheme}://{host}"
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class CalendarService:
     """Thin facade over Google's OAuth + Calendar v3 API."""
 
     def __init__(self) -> None:
         self.client_id = settings.GOOGLE_OAUTH_CLIENT_ID
         self.client_secret = settings.GOOGLE_OAUTH_CLIENT_SECRET
+        # Env-configured overrides are optional — when unset, we compute
+        # the redirect URLs dynamically from the incoming request host so
+        # the same code works on preview, staging, prod and any custom
+        # domain (e.g. dressapp.co) without .env edits.
         self.redirect_uri = settings.GOOGLE_OAUTH_REDIRECT_URI
         self.post_login_redirect = (
-            settings.GOOGLE_OAUTH_POST_LOGIN_REDIRECT or "/me"
+            settings.GOOGLE_OAUTH_POST_LOGIN_REDIRECT or None
         )
 
     @property
     def enabled(self) -> bool:
-        return bool(
-            self.client_id and self.client_secret and self.redirect_uri
-        )
+        """OAuth is usable as soon as a client id + secret are configured.
+        The redirect URI is computed per-request (or env-overridden)."""
+        return bool(self.client_id and self.client_secret)
+
+    def resolve_redirect_uri(self, request: Any = None) -> str | None:
+        """Return the OAuth redirect URI. Prefers the explicit env override
+        (stable across restarts — best for keeping a single entry in the
+        Google Cloud console), otherwise falls back to the incoming
+        request's public-facing origin + the callback path.
+        """
+        if self.redirect_uri:
+            return self.redirect_uri
+        if request is None:
+            return None
+        base = _public_base_url(request)
+        return f"{base}/api/v1/auth/google/callback" if base else None
+
+    def resolve_post_login_redirect(self, request: Any = None) -> str:
+        """Absolute URL where the browser is sent after a successful OAuth
+        handshake. Env override wins; otherwise we build `<origin>/me`
+        from the incoming request so the user lands on the frontend
+        Profile page on whichever domain they're using."""
+        if self.post_login_redirect:
+            return self.post_login_redirect
+        if request is not None:
+            base = _public_base_url(request)
+            if base:
+                return f"{base}/me"
+        return "/me"
 
     # -------------------- OAuth URL --------------------
-    def build_authorization_url(self, state: str) -> str:
+    def build_authorization_url(self, state: str, request: Any = None) -> str:
+        redirect_uri = self.resolve_redirect_uri(request)
+        if not redirect_uri:
+            raise RuntimeError(
+                "Google OAuth redirect URI is not configured "
+                "(set GOOGLE_OAUTH_REDIRECT_URI or call from within an HTTP request)"
+            )
         params = {
             "client_id": self.client_id,
-            "redirect_uri": self.redirect_uri,
+            "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": " ".join(SCOPES),
             "access_type": "offline",
@@ -79,8 +142,17 @@ class CalendarService:
         return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 
     # -------------------- token exchange --------------------
-    async def exchange_code(self, code: str) -> dict[str, Any]:
-        """Swap an auth code for access+refresh tokens. Raises on failure."""
+    async def exchange_code(
+        self, code: str, request: Any = None
+    ) -> dict[str, Any]:
+        """Swap an auth code for access+refresh tokens. Raises on failure.
+
+        The ``redirect_uri`` MUST match the one used on authorization —
+        we resolve it the same way here (env override wins, else derived
+        from the current request's host) so the handshake succeeds on
+        preview, staging, prod, and any custom domain.
+        """
+        redirect_uri = self.resolve_redirect_uri(request)
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 GOOGLE_TOKEN_URL,
@@ -88,7 +160,7 @@ class CalendarService:
                     "code": code,
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
-                    "redirect_uri": self.redirect_uri,
+                    "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
                 },
                 headers={"Accept": "application/json"},

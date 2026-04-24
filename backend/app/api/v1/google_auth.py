@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.config import settings
@@ -48,18 +48,23 @@ def _read_state(token: str) -> str:
 # -------------------- auth routes --------------------
 @auth_router.get("/start")
 async def google_oauth_start(
+    request: Request,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Generate the Google authorization URL for the current DressApp user."""
     if not calendar_service.enabled:
         raise HTTPException(503, "Google OAuth not configured on server")
     state = _build_state(user["id"])
-    url = calendar_service.build_authorization_url(state)
+    try:
+        url = calendar_service.build_authorization_url(state, request=request)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
     return {"authorization_url": url, "state": state}
 
 
 @auth_router.get("/callback")
 async def google_oauth_callback(
+    request: Request,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -67,7 +72,7 @@ async def google_oauth_callback(
     """Handle Google's redirect. Persists tokens on the user and redirects
     the browser back to the frontend Profile page.
     """
-    redirect_base = calendar_service.post_login_redirect or "/me"
+    redirect_base = calendar_service.resolve_post_login_redirect(request)
 
     if error:
         logger.warning("Google OAuth error: %s", error)
@@ -83,7 +88,7 @@ async def google_oauth_callback(
         )
 
     try:
-        tokens = await calendar_service.exchange_code(code)
+        tokens = await calendar_service.exchange_code(code, request=request)
     except Exception:  # noqa: BLE001
         logger.exception("Google token exchange failed")
         return RedirectResponse(
