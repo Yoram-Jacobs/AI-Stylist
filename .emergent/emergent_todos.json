@@ -1,18 +1,50 @@
 [
   {
-    "content": "Diagnose: rembg alone can only strip background from whole person, not isolate individual garments → complaint #2 needs true semantic parser",
+    "content": "Install deps: beautifulsoup4 + html5-qrcode",
     "status": "completed"
   },
   {
-    "content": "Verify 8 GiB pod memory limit → enough for local SegFormer b3 (peak 1.36 GB)",
+    "content": "Backend: add dpp_data to ClosetItem + CreateItemIn schemas",
     "status": "completed"
   },
   {
-    "content": "Re-enable local SegFormer (USE_LOCAL_CLOTHING_PARSER=true) now that OOM risk is eliminated",
+    "content": "Backend: dpp_parser.py service — inline JSON, URL fetch, JSON-LD (incl @graph), SSRF guards, image download, material+colour normalisation",
     "status": "completed"
   },
   {
-    "content": "Live E2E test: 0004.jpg → 3 distinct items (coat, pants, shoes), no duplicates, pixel-perfect per-garment PNG cutouts",
+    "content": "Backend: POST /api/v1/closet/import-dpp (analyze-shaped response)",
+    "status": "completed"
+  },
+  {
+    "content": "Backend: POST /api/v1/closet/{id}/photo (add/replace with The Eyes single-item + CLIP re-embed)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: DppScanner component (camera+file tabs, html5-qrcode)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: 'Scan DPP' tile in AddItem flow + secondary toolbar",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: 'Scan QR' global CTA in TopNav",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: DPP panel + Add photo/Replace photo button on ItemDetail",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: DPP-only placeholder on Closet card (QR icon + 'DPP' caps-label)",
+    "status": "completed"
+  },
+  {
+    "content": "i18n: full English copy for dpp.scanner/panel/nav/photo + errors",
+    "status": "completed"
+  },
+  {
+    "content": "E2E test: inline JSON DPP → import → save → add photo → auto-segment; SSRF guards; malformed JSON handling — all passing",
     "status": "completed"
   }
 ]

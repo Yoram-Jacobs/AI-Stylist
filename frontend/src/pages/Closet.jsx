@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
-  Square, Loader2, ListChecks, Sparkles, Wand2,
+  Square, Loader2, ListChecks, Sparkles, Wand2, QrCode,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -533,6 +533,14 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
             alt={item.title}
             className="w-full h-full object-cover"
           />
+        ) : item.dpp_data ? (
+          <div
+            className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-[hsl(var(--accent))]/10 to-muted text-muted-foreground"
+            data-testid="closet-item-dpp-placeholder"
+          >
+            <QrCode className="h-7 w-7 text-[hsl(var(--accent))]/70" />
+            <span className="caps-label text-[10px]">DPP</span>
+          </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">
             {t('market.noImage')}

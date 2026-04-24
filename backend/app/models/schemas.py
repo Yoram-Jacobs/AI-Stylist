@@ -193,6 +193,12 @@ class ClosetItem(BaseDoc):
     last_worn_at: str | None = None
     notes: str | None = None
     retail_metadata: RetailMetadata | None = None
+    # Phase V6 — EU Digital Product Passport (DPP) data imported via
+    # QR scan. Stored verbatim as a nested document so the UI can render
+    # full provenance (materials %, carbon footprint, country of origin,
+    # care & repair instructions, certifications, source URL, ...)
+    # without polluting the flat taxonomy fields.
+    dpp_data: dict[str, Any] | None = None
 
 
 # ----------------- The Eyes: analyzer response payload -----------------

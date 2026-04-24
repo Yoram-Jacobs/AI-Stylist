@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft, Upload, Plus, Loader2, Eye, Wand2, Shirt, Store,
   HandCoins, Gift, Repeat, Trash2, Save, Tag, AlertTriangle,
-  X, Sparkles, Camera, RefreshCw,
+  X, Sparkles, Camera, RefreshCw, QrCode,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
+import { DppScanner } from '@/components/DppScanner';
 import {
   labelForCategory,
   labelForDressCode,
@@ -93,13 +94,87 @@ const hydrate = (a) => ({
 export default function AddItem() {
   const { t } = useTranslation();
   const nav = useNavigate();
-  const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error}]
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error,dppData?}]
   const [saving, setSaving] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
   const pickFiles = () => fileInputRef.current?.click();
   const openCamera = () => cameraInputRef.current?.click();
+  const openScanner = () => setScanOpen(true);
+
+  // Hydrate from a DPP scan (e.g. user hit "Scan QR" in TopNav → we're
+  // now opening AddItem with ?source=dpp and a draft in sessionStorage).
+  useEffect(() => {
+    if (searchParams.get('source') !== 'dpp') return;
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem('dpp_draft');
+      sessionStorage.removeItem('dpp_draft');
+    } catch (_) { /* ignore */ }
+    // Always clear the query string so a browser refresh doesn't replay.
+    searchParams.delete('source');
+    setSearchParams(searchParams, { replace: true });
+    if (!raw) return;
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch (_) { return; }
+    const res = parsed?.payload;
+    if (!res) return;
+    hydrateFromDpp(res);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const hydrateFromDpp = (res) => {
+    const items = res?.items || [];
+    const first = items[0] || {};
+    const analysis = first.analysis || {};
+    const dppData = first.dpp_data || null;
+    const hasImage = !!first.crop_base64;
+    const mime = first.crop_mime || 'image/png';
+    const previewUrl = hasImage
+      ? `data:${mime};base64,${first.crop_base64}`
+      : null;
+    const draft = {
+      id: `dpp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      file: null,
+      mime: hasImage ? mime : null,
+      previewUrl,
+      base64: hasImage ? first.crop_base64 : null,
+      status: 'ready',
+      progress: 100,
+      fields: hydrate(analysis),
+      error: null,
+      label: first.label || analysis.item_type || null,
+      dppData,
+      source: 'dpp',
+    };
+    setCards((prev) => [draft, ...prev]);
+    toast.success(t('dpp.scanner.imported'));
+  };
+
+  const handleScanDecoded = async (payload) => {
+    setScanOpen(false);
+    if (!payload) return;
+    const loadingId = toast.loading(t('dpp.scanner.importing'));
+    try {
+      const res = await api.importDpp(payload);
+      toast.dismiss(loadingId);
+      if (res?.parse_error) {
+        toast.error(
+          t(`dpp.scanner.errors.${res.parse_error}`, {
+            defaultValue: t('dpp.scanner.noData'),
+          }),
+        );
+        return;
+      }
+      hydrateFromDpp(res);
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(err?.response?.data?.detail || t('dpp.scanner.importFailed'));
+    }
+  };
 
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
@@ -370,6 +445,23 @@ export default function AddItem() {
             >
               <Upload className="h-4 w-4 me-2" /> {t('addItem.uploadPhotos')}
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="rounded-xl"
+              onClick={openScanner}
+              data-testid="add-item-scan-dpp-button"
+            >
+              <QrCode className="h-4 w-4 me-2" /> {t('dpp.nav.scanLabel')}
+            </Button>
+          </div>
+          <div className="mt-4 flex items-center justify-center">
+            <div className="text-xs text-muted-foreground flex items-center gap-2 max-w-md">
+              <Badge variant="outline" className="border-[hsl(var(--accent))] text-[hsl(var(--accent))]">
+                {t('dpp.addItem.tileBadge')}
+              </Badge>
+              <span>{t('dpp.addItem.tileSubtitle')}</span>
+            </div>
           </div>
         </div>
       ) : (
@@ -395,6 +487,16 @@ export default function AddItem() {
             >
               <Plus className="h-4 w-4 me-1.5" /> {t('addItem.addPhotos')}
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="rounded-lg"
+              onClick={openScanner}
+              data-testid="add-item-scan-dpp-more-button"
+            >
+              <QrCode className="h-4 w-4 me-1.5" /> {t('dpp.nav.scanLabel')}
+            </Button>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-testid="add-item-cards-grid">
             {cards.map((card) => (
@@ -410,6 +512,11 @@ export default function AddItem() {
           </div>
         </>
       )}
+      <DppScanner
+        open={scanOpen}
+        onOpenChange={setScanOpen}
+        onDecoded={handleScanDecoded}
+      />
     </div>
   );
 }
@@ -940,8 +1047,8 @@ function buildCreatePayload(card) {
     currency: 'USD',
     marketplace_intent: f.marketplace_intent || 'own',
     tags: f.tags || [],
-    image_base64: asBase64,
-    image_mime: card.mime || card.file?.type || 'image/jpeg',
+    image_base64: asBase64 || undefined,
+    image_mime: asBase64 ? (card.mime || card.file?.type || 'image/jpeg') : undefined,
     // Phase Q: forward the reconstructed image when the user kept it
     reconstructed_image_b64: card.useReconstructed && card.reconstructedB64
       ? card.reconstructedB64
@@ -949,6 +1056,8 @@ function buildCreatePayload(card) {
     reconstruction_metadata: card.useReconstructed && card.reconstructionMeta
       ? card.reconstructionMeta
       : undefined,
+    // Phase V6: preserve DPP provenance imported via QR scan.
+    dpp_data: card.dppData || undefined,
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

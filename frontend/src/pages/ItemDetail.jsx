@@ -16,6 +16,13 @@ import {
   Plus,
   X,
   CheckCircle2,
+  Camera,
+  QrCode,
+  Leaf,
+  Globe2,
+  Wrench,
+  BadgeCheck,
+  ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,6 +50,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
+import { DppPanel } from '@/components/DppPanel';
 import { api } from '@/lib/api';
 import {
   labelForCategory,
@@ -354,6 +362,39 @@ export default function ItemDetail() {
   const [dictating, setDictating] = useState(false);
   const [dictationInterim, setDictationInterim] = useState('');
   const [showingOriginal, setShowingOriginal] = useState(false);
+
+  // Phase V6 — photo add/replace state
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
+  const onPickPhoto = () => photoInputRef.current?.click();
+  const onPhotoFileChosen = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingPhoto(true);
+    const loadingId = toast.loading(t('itemDetail.photo.running'));
+    try {
+      const imageBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const res = await api.setItemPhoto(id, {
+        imageBase64,
+        imageMime: file.type || 'image/jpeg',
+        autoSegment: true,
+      });
+      setItem(res.item);
+      toast.dismiss(loadingId);
+      toast.success(t('itemDetail.photo.success'));
+    } catch (err) {
+      toast.dismiss(loadingId);
+      toast.error(err?.response?.data?.detail || t('itemDetail.photo.error'));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
   const recognitionRef = useRef(null);
   const sttSupported = useRef(isSTTSupported());
 
@@ -562,11 +603,65 @@ export default function ItemDetail() {
                   data-testid="item-detail-main-image"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                  {t('itemDetail.noImage')}
+                <div
+                  className="w-full h-full flex flex-col items-center justify-center gap-3 text-muted-foreground bg-gradient-to-br from-muted/50 to-muted/20 p-6 text-center"
+                  data-testid="item-detail-no-image"
+                >
+                  {item.dpp_data ? (
+                    <>
+                      <QrCode className="h-10 w-10 text-[hsl(var(--accent))]/70" />
+                      <div className="text-sm max-w-xs">
+                        {t('itemDetail.photo.placeholderHint')}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-sm">{t('itemDetail.noImage')}</div>
+                  )}
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    className="rounded-xl mt-1"
+                    onClick={onPickPhoto}
+                    disabled={uploadingPhoto}
+                    data-testid="item-detail-add-photo-btn"
+                  >
+                    {uploadingPhoto ? (
+                      <Loader2 className="h-4 w-4 me-2 animate-spin" />
+                    ) : (
+                      <Camera className="h-4 w-4 me-2" />
+                    )}
+                    {t('itemDetail.photo.addLabel')}
+                  </Button>
                 </div>
               )}
             </AspectRatio>
+            {/* Replace photo button (subtle, shown only when an image exists) */}
+            {preferredImage && (
+              <button
+                type="button"
+                onClick={onPickPhoto}
+                disabled={uploadingPhoto}
+                className="absolute bottom-3 end-3 inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary transition-colors disabled:opacity-60"
+                data-testid="item-detail-replace-photo-btn"
+              >
+                {uploadingPhoto ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Camera className="h-3 w-3" />
+                )}
+                {t('itemDetail.photo.replaceLabel')}
+              </button>
+            )}
+            {/* Hidden file input for add/replace photo */}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              data-testid="item-detail-photo-input"
+              onChange={onPhotoFileChosen}
+            />
             {hasReconstruction && (
               <>
                 <div
@@ -620,6 +715,9 @@ export default function ItemDetail() {
               </div>
             </div>
           )}
+
+          {/* DPP provenance panel (Phase V6) — shown when an item was imported via QR scan */}
+          <DppPanel dppData={item.dpp_data} />
 
           {/* Clean background card (Phase V Fix 2) */}
           <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid="item-clean-bg-card">

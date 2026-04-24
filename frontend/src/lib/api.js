@@ -135,6 +135,24 @@ export const api = {
   // Clean background (Phase V Fix 2 — non-generative matting)
   cleanItemBackground: (itemId) =>
     client.post(`/closet/${itemId}/clean-background`).then((r) => r.data),
+  // Phase V6 — EU Digital Product Passport (DPP) import via QR scan
+  importDpp: (qrPayload) =>
+    client
+      .post('/closet/import-dpp', { qr_payload: qrPayload }, { timeout: 30000 })
+      .then((r) => r.data),
+  // Phase V6 — add or replace an item's photo (runs The Eyes single-item)
+  setItemPhoto: (itemId, { imageBase64, imageMime = 'image/jpeg', autoSegment = true }) =>
+    client
+      .post(
+        `/closet/${itemId}/photo`,
+        {
+          image_base64: imageBase64,
+          image_mime: imageMime,
+          auto_segment: autoSegment,
+        },
+        { timeout: 120000 },
+      )
+      .then((r) => r.data),
 
   // google calendar
   calendarStatus: () => client.get('/calendar/status').then((r) => r.data),

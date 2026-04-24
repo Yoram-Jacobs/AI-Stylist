@@ -94,6 +94,8 @@ class CreateItemIn(BaseModel):
     purchase_date: str | None = None
     notes: str | None = None
     retail_metadata: RetailMetadata | None = None
+    # Phase V6 — DPP data imported via QR scan (optional)
+    dpp_data: dict[str, Any] | None = None
 
 
 class UpdateItemIn(BaseModel):
@@ -192,6 +194,7 @@ async def create_item(
         notes=payload.notes,
         retail_metadata=payload.retail_metadata,
         reconstruction_metadata=payload.reconstruction_metadata,
+        dpp_data=payload.dpp_data,
     )
     doc = item.model_dump()
 
@@ -389,6 +392,66 @@ async def analyze_item_image(
         "count": 1,
         **analysis,
     }
+
+
+# -------------------------------------------------------------------
+# Phase V6 — Digital Product Passport (DPP) QR import
+# -------------------------------------------------------------------
+class ImportDppIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Either the full URL decoded from the QR, or the inline JSON payload
+    # embedded directly in the code (some small-data pilots do this).
+    qr_payload: str
+
+
+@router.post("/import-dpp")
+async def import_dpp(
+    payload: ImportDppIn, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
+    """**Scan DPP** — decode a QR payload into a draft closet item.
+
+    Accepts an EU Digital Product Passport QR payload (a URL pointing to
+    a passport document, or inline JSON). Parses JSON-LD / Schema.org
+    `Product` nodes and returns a response shaped like ``/analyze`` so
+    the existing Add-Item form can hydrate from it without special-
+    casing.
+    """
+    from app.services.dpp_parser import parse_dpp
+
+    result = await parse_dpp(payload.qr_payload)
+    analysis = _safe_analysis(dict(result.get("analysis") or {}))
+    dpp_data = result.get("dpp_data") or {}
+
+    crop_bytes: bytes | None = result.get("image_bytes")
+    crop_mime: str = result.get("image_mime") or "image/jpeg"
+    crop_b64: str | None = (
+        base64.b64encode(crop_bytes).decode("ascii") if crop_bytes else None
+    )
+
+    item_entry: dict[str, Any] = {
+        "label": analysis.get("item_type")
+        or analysis.get("sub_category")
+        or analysis.get("category")
+        or "garment",
+        "kind": "garment",
+        "bbox": [0, 0, 1000, 1000],
+        "crop_base64": crop_b64,
+        "crop_mime": crop_mime if crop_b64 else None,
+        "analysis": analysis,
+        "dpp_data": dpp_data,
+        "source": "dpp",
+    }
+
+    return {
+        "items": [item_entry],
+        "count": 1,
+        "source": "dpp",
+        "has_image": crop_b64 is not None,
+        "parse_error": dpp_data.get("parse_error"),
+        **analysis,
+    }
+
+
 
 
 @router.get("")
@@ -880,6 +943,113 @@ async def clean_item_background(
     )
     item = await repos.find_one(db.closet_items, {"id": item_id}) or item
     return {"item": item, "applied": True, "reconstruction": meta}
+
+
+class PhotoIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    image_base64: str
+    image_mime: str = "image/jpeg"
+    # When True (default) run The Eyes pipeline to produce a clean
+    # semantic cutout before storing. When False we store the raw upload
+    # verbatim (useful when the user already has a product-shot PNG).
+    auto_segment: bool = True
+
+
+@router.post("/{item_id}/photo")
+async def set_item_photo(
+    item_id: str,
+    payload: PhotoIn,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """**Add or replace** the image of an existing closet item.
+
+    Use-cases:
+    * A DPP-imported item has no photo yet — user takes one and attaches it.
+    * An existing item has a poor photo — user replaces it with a better one.
+
+    When ``auto_segment`` is True (default), the upload is run through
+    The Eyes' single-item pipeline (SegFormer → rembg cutout) so the
+    stored photo is already a clean per-garment PNG. Otherwise the raw
+    upload is saved as-is.
+    """
+    db = get_db()
+    item = await repos.find_one(
+        db.closet_items, {"id": item_id, "user_id": user["id"]}
+    )
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    try:
+        raw = base64.b64decode(payload.image_base64, validate=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Invalid image_base64: {exc}") from exc
+    if not raw:
+        raise HTTPException(400, "Empty image payload")
+
+    original_data_url = f"data:{payload.image_mime};base64,{payload.image_base64}"
+    segmented_data_url: str | None = None
+    segmentation_model: str | None = None
+
+    if payload.auto_segment and garment_vision_service is not None:
+        # Single-item pipeline: analyse with max_items=1 so we get a
+        # semantic cutout of the dominant garment. Never fatal — on any
+        # error we just keep the raw upload.
+        try:
+            items = await garment_vision_service.analyze_outfit(
+                raw, max_items=1
+            )
+            if items:
+                first = items[0]
+                b64 = first.get("crop_base64")
+                mime = first.get("crop_mime") or "image/png"
+                if b64:
+                    segmented_data_url = f"data:{mime};base64,{b64}"
+                    segmentation_model = "the_eyes_single"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "set_item_photo: auto-segment failed (%s); keeping raw",
+                repr(exc)[:160],
+            )
+
+    update_doc: dict[str, Any] = {
+        "original_image_url": original_data_url,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        # Clear any previous reconstruction — it was derived from the
+        # old photo and is now stale.
+        "reconstructed_image_url": None,
+        "reconstruction_metadata": None,
+    }
+    if segmented_data_url:
+        update_doc["segmented_image_url"] = segmented_data_url
+        update_doc["segmentation_model"] = segmentation_model
+    else:
+        update_doc["segmented_image_url"] = None
+        update_doc["segmentation_model"] = None
+
+    # Best-effort FashionCLIP re-embedding so semantic search stays fresh.
+    if fashion_clip_service is not None:
+        try:
+            embed_bytes = (
+                base64.b64decode(segmented_data_url.split(",", 1)[1])
+                if segmented_data_url
+                else raw
+            )
+            vec = await fashion_clip_service.embed_image(embed_bytes)
+            if vec:
+                update_doc["clip_embedding"] = vec
+                update_doc["clip_model"] = fashion_clip_service.model_id
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "set_item_photo: CLIP re-embed failed (%s)", repr(exc)[:120]
+            )
+
+    await db.closet_items.update_one({"id": item_id}, {"$set": update_doc})
+    item = await repos.find_one(db.closet_items, {"id": item_id}) or item
+    return {
+        "item": item,
+        "segmented": segmented_data_url is not None,
+    }
+
 
 
 @router.post("/{item_id}/repair")

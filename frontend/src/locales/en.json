@@ -227,6 +227,16 @@
       "error": "Clean-background failed. Please try again.",
       "disclaimer": "Uses a non-generative matting model. Your original photo is never replaced with an invented one."
     },
+    "photo": {
+      "addLabel": "Add photo",
+      "replaceLabel": "Replace photo",
+      "subtitleEmpty": "This item has no photo yet — take or upload one and we'll auto-crop the garment.",
+      "subtitleReplace": "Upload a new photo — we'll auto-crop the garment and refresh search.",
+      "running": "Processing…",
+      "success": "Photo updated",
+      "error": "Couldn't update the photo. Please try again.",
+      "placeholderHint": "DPP-only item — no photo attached"
+    },
     "repair": {
       "label": "Image repair",
       "subtitle": "If the photo clips the garment, rebuild a clean, centered product shot. Add a hint (or speak it) to emphasise missing details.",
@@ -985,5 +995,57 @@
     "toppedUp": "Ad credits added — thanks!",
     "paypalDisclosure": "Secure checkout powered by PayPal. You'll approve the payment in PayPal's window, then we top up your balance instantly.",
     "insufficientFunds": "Insufficient ad credits — your campaign was paused automatically. Top up to resume."
+  },
+  "dpp": {
+    "nav": {
+      "scanLabel": "Scan DPP",
+      "scanShort": "Scan QR"
+    },
+    "addItem": {
+      "tileTitle": "Scan DPP",
+      "tileSubtitle": "Scan an EU Digital Product Passport QR to auto-fill materials, brand, origin, care & more.",
+      "tileBadge": "Traceable"
+    },
+    "scanner": {
+      "title": "Scan Digital Product Passport",
+      "subtitle": "Point your camera at the QR code on the garment's label or tag.",
+      "tabCamera": "Camera",
+      "tabFile": "Upload image",
+      "starting": "Starting camera…",
+      "cameraHint": "The scan will complete automatically — no need to hit a button.",
+      "permissionDenied": "Camera access was denied. You can still upload a photo of the QR code.",
+      "noCamera": "No camera found on this device. Please upload an image instead.",
+      "cameraFailed": "Couldn't start the camera. Try the Upload tab.",
+      "switchToFile": "Upload an image instead",
+      "chooseFile": "Choose an image",
+      "fileHint": "PNG, JPG or HEIC — any photo clearly showing the QR.",
+      "decoding": "Decoding…",
+      "noCodeInImage": "No QR code could be read from that image.",
+      "importing": "Reading passport…",
+      "imported": "Passport imported — review the details and save.",
+      "importFailed": "Couldn't import that passport.",
+      "noData": "No structured data was found behind that QR.",
+      "errors": {
+        "empty_payload": "The QR code was empty.",
+        "inline_json_invalid": "The QR data isn't valid JSON.",
+        "unsupported_scheme": "This QR code isn't a web link we can open.",
+        "url_blocked": "That URL points to a private network and was blocked for safety.",
+        "fetch_failed": "Couldn't fetch the passport document.",
+        "no_structured_data": "No structured passport data was found at that URL.",
+        "no_product_node": "The document didn't contain a recognisable product record."
+      }
+    },
+    "panel": {
+      "title": "Digital Product Passport",
+      "subtitle": "Provenance imported from the garment's DPP QR code.",
+      "sourceLink": "View source passport",
+      "gtin": "GTIN",
+      "countryOfOrigin": "Country of origin",
+      "materials": "Materials",
+      "carbonFootprint": "Carbon footprint",
+      "careInstructions": "Care",
+      "repairInstructions": "Repair",
+      "certifications": "Certifications"
+    }
   }
 }
