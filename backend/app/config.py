@@ -179,9 +179,12 @@ class Settings:
 
     # --- Phase V: Clothing parser + matting (commercial-safe, MIT models) ---
     # Primary clothing segmentation model (per-class parser).
+    # Default → `mattmdjaga/segformer_b2_clothes` (b2 backbone, MIT, ~95 MB
+    # weights, ~1 GB peak RAM during forward pass). Alternatives:
+    #   sayeed99/segformer_b3_clothes  (~180 MB, ~2 GB peak, slightly sharper)
     CLOTHING_PARSER_MODEL: str = (
         os.environ.get("CLOTHING_PARSER_MODEL")
-        or "sayeed99/segformer_b3_clothes"
+        or "mattmdjaga/segformer_b2_clothes"
     )
     # Optional self-hosted endpoint (FastAPI on dressapp.co). Blank = HF API.
     CLOTHING_PARSER_ENDPOINT_URL: str | None = (
@@ -217,12 +220,13 @@ class Settings:
     AUTO_MATTE_CROPS: bool = (
         os.environ.get("AUTO_MATTE_CROPS", "true").lower() == "true"
     )
-    # Feature-flag for the HEAVY local SegFormer inference path in
-    # clothing_parser.py. Disabled by default because the model peaks at
-    # ~2 GB RAM during the first forward pass and OOM-kills small pods.
-    # Enable only when the backend has >=4 GB memory headroom.
+    # Feature-flag for the local SegFormer inference path in
+    # clothing_parser.py. Enabled by default now that we've switched to
+    # segformer_b2_clothes (~95 MB weights, ~1 GB peak RAM) which fits
+    # comfortably inside the 8 GiB pod limit alongside FashionCLIP/rembg.
+    # Disable by setting USE_LOCAL_CLOTHING_PARSER=false if you OOM.
     USE_LOCAL_CLOTHING_PARSER: bool = (
-        os.environ.get("USE_LOCAL_CLOTHING_PARSER", "false").lower() == "true"
+        os.environ.get("USE_LOCAL_CLOTHING_PARSER", "true").lower() == "true"
     )
     # Use the new clothing parser first in /closet/analyze (falls back to
     # legacy detector if it fails or returns nothing useful).

@@ -1,30 +1,18 @@
 [
   {
-    "content": "Pivot: Gemini splits outfits, rembg cleans each crop into semantic cutout. SegFormer disabled (OOM in pod).",
+    "content": "Diagnose: rembg alone can only strip background from whole person, not isolate individual garments → complaint #2 needs true semantic parser",
     "status": "completed"
   },
   {
-    "content": "Config: rembg model=u2netp (4.7MB), AUTO_MATTE_CROPS=true, USE_LOCAL_CLOTHING_PARSER=false (defaults safe for pod limits)",
+    "content": "Verify 8 GiB pod memory limit → enough for local SegFormer b3 (peak 1.36 GB)",
     "status": "completed"
   },
   {
-    "content": "clothing_parser.py: local SegFormer gated behind flag; crop_with_mask utility preserved for future self-hosted inference-server",
+    "content": "Re-enable local SegFormer (USE_LOCAL_CLOTHING_PARSER=true) now that OOM risk is eliminated",
     "status": "completed"
   },
   {
-    "content": "garment_vision.py: _crop_all auto-pipes each Gemini bbox crop through rembg matte_crop → PNG cutouts instead of bbox JPEGs",
-    "status": "completed"
-  },
-  {
-    "content": "Smoke-test rembg u2netp end-to-end (cold 4.8s, warm 0.7s, opaque 25%, no OOM)",
-    "status": "completed"
-  },
-  {
-    "content": "Live-tested /analyze + /clean-background with user's real outfit (5 items, 5 PNG cutouts, applied=True, cos=0.996)",
-    "status": "completed"
-  },
-  {
-    "content": "Cleaned up 1GB of unused birefnet weights; requirements.txt refreshed",
+    "content": "Live E2E test: 0004.jpg → 3 distinct items (coat, pants, shoes), no duplicates, pixel-perfect per-garment PNG cutouts",
     "status": "completed"
   }
 ]
