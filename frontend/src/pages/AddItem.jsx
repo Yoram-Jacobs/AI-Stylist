@@ -98,6 +98,11 @@ export default function AddItem() {
   const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error,dppData?}]
   const [saving, setSaving] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  // Background batch state — shown instead of cards when user uploads
+  // more than BG_THRESHOLD photos at once. Auto-analyzes + auto-saves
+  // each item with sane defaults; user is told to fix any misfits in
+  // /closet afterwards.
+  const [bgBatch, setBgBatch] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -179,6 +184,13 @@ export default function AddItem() {
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
+    // For large batches, skip the per-card editor and let the user fix
+    // any misfits later from /closet. Threshold kept at 5 — anything
+    // above is clearly a "dump my whole wardrobe" moment.
+    const BG_THRESHOLD = 5;
+    if (files.length > BG_THRESHOLD) {
+      return handleBatchBackground(files);
+    }
     const drafts = await Promise.all(
       files.map(async (file) => {
         const b64 = await fileToBase64(file);
@@ -199,6 +211,121 @@ export default function AddItem() {
     setCards((prev) => [...prev, ...drafts]);
     // Kick off parallel analysis.
     drafts.forEach((d) => analyzeCard(d));
+  };
+
+  // ------------------------------------------------------------------
+  // Background batch upload (>5 photos): analyze + auto-save each one
+  // with whatever the analyzer returns, with bounded concurrency. The
+  // user gets a single progress card, then lands on /closet to clean up.
+  // ------------------------------------------------------------------
+  const handleBatchBackground = async (files) => {
+    setBgBatch({ total: files.length, processed: 0, saved: 0, failed: 0 });
+    toast.success(
+      t('addItem.bgUpload.started', {
+        count: files.length,
+        defaultValue: `Uploading ${files.length} photos in the background…`,
+      })
+    );
+
+    const CONCURRENCY = 3;
+    const queue = [...files];
+
+    const processOne = async (file) => {
+      let createdHere = 0;
+      let failedHere = 0;
+      let b64 = null;
+      try {
+        b64 = await fileToBase64(file);
+      } catch (_) {
+        failedHere += 1;
+        setBgBatch((b) => (b ? { ...b, processed: b.processed + 1, failed: b.failed + failedHere } : null));
+        return;
+      }
+
+      // Try analysis; on failure, fall back to saving the raw image
+      // with blank fields so the user still gets the item in /closet.
+      let analysisItems = null;
+      try {
+        const resp = await api.analyzeItemImage({ image_base64: b64 });
+        analysisItems =
+          Array.isArray(resp?.items) && resp.items.length > 0
+            ? resp.items
+            : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
+      } catch (_) {
+        analysisItems = [
+          { analysis: {}, crop_base64: b64, crop_mime: file.type || 'image/jpeg' },
+        ];
+      }
+
+      for (const it of analysisItems) {
+        const cardLike = {
+          base64: it.crop_base64 || b64,
+          mime: it.crop_mime || file.type || 'image/jpeg',
+          file: null,
+          fields: hydrate(it.analysis || {}),
+          useReconstructed: false,
+        };
+        try {
+          await api.createItem(buildCreatePayload(cardLike));
+          createdHere += 1;
+        } catch (_) {
+          failedHere += 1;
+        }
+      }
+
+      setBgBatch((b) =>
+        b
+          ? {
+              ...b,
+              processed: b.processed + 1,
+              saved: b.saved + createdHere,
+              failed: b.failed + failedHere,
+            }
+          : null
+      );
+    };
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length) {
+        const next = queue.shift();
+        if (next) await processOne(next);
+      }
+    });
+    await Promise.all(workers);
+
+    // Read final counts from state via functional update so we don't
+    // race with React batching.
+    setBgBatch((b) => {
+      const saved = b?.saved ?? 0;
+      const failed = b?.failed ?? 0;
+      if (saved && !failed) {
+        toast.success(
+          t('addItem.bgUpload.done', {
+            count: saved,
+            defaultValue: `Saved ${saved} items. Edit any misfits in your closet.`,
+          })
+        );
+      } else if (saved && failed) {
+        toast.message(
+          t('addItem.bgUpload.partial', {
+            saved,
+            failed,
+            defaultValue: `Saved ${saved} · ${failed} failed`,
+          })
+        );
+      } else {
+        toast.error(
+          t('addItem.bgUpload.failed', {
+            defaultValue: 'Could not save any items. Please try again.',
+          })
+        );
+      }
+      // Brief pause so the user sees the final 100% before navigating.
+      setTimeout(() => {
+        if (saved) nav('/closet');
+      }, 1200);
+      return null;
+    });
   };
 
   const analyzeCard = async (card) => {
@@ -366,23 +493,28 @@ export default function AddItem() {
 
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10 pb-28" data-testid="add-item-page">
-      <div className="flex items-center gap-2 mb-6">
-        <Button variant="ghost" size="sm" onClick={() => nav(-1)} className="rounded-full" data-testid="add-item-back">
-          <ArrowLeft className="h-4 w-4 me-2 rtl:rotate-180" /> {t('common.back')}
-        </Button>
-        <div className="flex-1" />
-        <Button onClick={pickFiles} variant="outline" className="rounded-xl" data-testid="add-item-add-more">
-          <Plus className="h-4 w-4 me-2" /> {t('addItem.addPhotos')}
-        </Button>
-        <Button
-          onClick={saveAll}
-          disabled={saving || !cards.some((c) => c.status === 'ready')}
-          className="rounded-xl"
-          data-testid="add-item-save-all"
-        >
-          {saving ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Save className="h-4 w-4 me-2" />}
-          {t('addItem.saveAll')}
-        </Button>
+      <div
+        className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-6 bg-background/85 backdrop-blur-md border-b border-border/40 supports-[backdrop-filter]:bg-background/70"
+        data-testid="add-item-action-bar"
+      >
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => nav(-1)} className="rounded-full" data-testid="add-item-back">
+            <ArrowLeft className="h-4 w-4 me-2 rtl:rotate-180" /> {t('common.back')}
+          </Button>
+          <div className="flex-1" />
+          <Button onClick={pickFiles} variant="outline" className="rounded-xl" disabled={!!bgBatch} data-testid="add-item-add-more">
+            <Plus className="h-4 w-4 me-2" /> {t('addItem.addPhotos')}
+          </Button>
+          <Button
+            onClick={saveAll}
+            disabled={saving || !!bgBatch || !cards.some((c) => c.status === 'ready')}
+            className="rounded-xl"
+            data-testid="add-item-save-all"
+          >
+            {saving ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Save className="h-4 w-4 me-2" />}
+            {t('addItem.saveAll')}
+          </Button>
+        </div>
       </div>
 
       <div className="mb-6">
@@ -415,7 +547,44 @@ export default function AddItem() {
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
       />
 
-      {cards.length === 0 ? (
+      {bgBatch ? (
+        <div
+          className="w-full border border-border rounded-[calc(var(--radius)+10px)] p-8 sm:p-10 bg-card flex flex-col items-center text-center"
+          data-testid="add-item-bg-batch-card"
+          aria-live="polite"
+        >
+          <div className="h-14 w-14 rounded-full bg-secondary flex items-center justify-center mb-3">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+          <div className="font-display text-xl">
+            {t('addItem.bgUpload.processingTitle', { defaultValue: 'Processing your photos…' })}
+          </div>
+          <div className="text-sm text-muted-foreground mt-1 max-w-md">
+            {t('addItem.bgUpload.processingBody', {
+              defaultValue: 'You can leave this page — we’ll keep going in the background. Edit any misfits in your closet when we’re done.',
+            })}
+          </div>
+          <div className="mt-5 w-full max-w-md">
+            <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+              <span data-testid="bg-batch-counter">
+                {bgBatch.processed} / {bgBatch.total}
+              </span>
+              <span>
+                {t('addItem.bgUpload.savedFailed', {
+                  saved: bgBatch.saved,
+                  failed: bgBatch.failed,
+                  defaultValue: `saved ${bgBatch.saved} · failed ${bgBatch.failed}`,
+                })}
+              </span>
+            </div>
+            <Progress
+              value={bgBatch.total ? (bgBatch.processed / bgBatch.total) * 100 : 0}
+              className="h-2"
+              data-testid="bg-batch-progress"
+            />
+          </div>
+        </div>
+      ) : cards.length === 0 ? (
         <div
           className="w-full border-2 border-dashed border-border rounded-[calc(var(--radius)+10px)] p-10 sm:p-12 bg-card flex flex-col items-center text-center"
           data-testid="add-item-dropzone"
