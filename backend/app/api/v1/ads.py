@@ -22,7 +22,7 @@ from app.models.schemas import AdCampaign, AdCreative
 from app.services.auth import get_current_user, get_current_user_optional
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/ads", tags=["ads"])
+router = APIRouter(prefix="/promotions", tags=["promotions"])
 
 
 # ----------------------------- models -----------------------------

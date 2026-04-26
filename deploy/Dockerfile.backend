@@ -44,7 +44,7 @@ RUN pip install --no-cache-dir \
 
 COPY backend/requirements.txt ./requirements.txt
 # Torch is already installed above — pip will skip it here.
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --use-deprecated=legacy-resolver --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
 
 # --- Application code ------------------------------------------------
 COPY backend/ ./backend/
