@@ -26,7 +26,7 @@ def _iso_in_days(days: int) -> str:
 
 
 # Stable IDs so re-runs upsert instead of duplicating.
-DEMO_USER_ID = "demo-user-0001"
+DEMO_USER_IDS = ["demo-user-0001", "demo-user-0002", "demo-user-0003", "demo-user-0004", "demo-user-0005"]
 DEMO_PRO_IDS = ["demo-pro-stylist", "demo-pro-tailor", "demo-pro-designer"]
 DEMO_LISTING_IDS = [f"demo-listing-{i:02d}" for i in range(1, 9)]
 DEMO_CAMPAIGN_IDS = [f"demo-campaign-{i:02d}" for i in range(1, 4)]
@@ -34,35 +34,142 @@ DEMO_CLOSET_IDS = [f"demo-closet-{i:02d}" for i in range(1, 6)]
 
 
 async def seed_user(db) -> None:
-    """One demo customer + three professional profiles."""
-    demo = {
-        "id": DEMO_USER_ID,
-        "email": "demo@dressapp.co",
-        "display_name": "Demo User",
-        "first_name": "Demo",
-        "last_name": "User",
-        "locale": "en-US",
-        "preferred_language": "en",
-        "preferred_voice_id": "aura-2-thalia-en",
-        "style_profile": {
-            "aesthetics": ["minimalist", "smart-casual"],
-            "color_palette": ["navy", "cream", "olive"],
-            "avoid": ["neon"],
-            "body_notes": None,
-            "budget_monthly_cents": 25000,
+    """Five demo customers + three professional profiles."""
+    demo_users = [
+        {
+            "id": DEMO_USER_IDS[0],
+            "email": "demo1@dressapp.co",
+            "display_name": "Demo User 1",
+            "first_name": "Demo1",
+            "last_name": "User",
+            "locale": "en-US",
+            "preferred_language": "en",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["minimalist", "smart-casual"],
+                "color_palette": ["navy", "cream", "olive"],
+                "avoid": ["neon"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "US",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
         },
-        "cultural_context": {
-            "region": "US",
-            "religion": None,
-            "dress_conservativeness": "moderate",
+        {
+            "id": DEMO_USER_IDS[1],
+            "email": "demo2@dressapp.co",
+            "display_name": "Demo User 2",
+            "first_name": "Demo2",
+            "last_name": "User",
+            "locale": "en-US",
+            "preferred_language": "en",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["minimalist", "smart-casual"],
+                "color_palette": ["black", "white", "red"],
+                "avoid": ["colorful"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "GR",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
         },
-        "roles": ["user"],
-        "is_demo": True,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-    }
-    await db.users.update_one({"id": DEMO_USER_ID}, {"$set": demo}, upsert=True)
-    print(f"  ✔ user: {demo['email']}")
+        {
+            "id": DEMO_USER_IDS[2],
+            "email": "demo3@dressapp.co",
+            "display_name": "Demo User 3",
+            "first_name": "Demo3",
+            "last_name": "User",
+            "locale": "he-IL",
+            "preferred_language": "he",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["minimalist", "smart-casual"],
+                "color_palette": ["black", "white", "red"],
+                "avoid": ["colorful"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "IL",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        },
+        {
+            "id": DEMO_USER_IDS[3],
+            "email": "demo4@dressapp.co",
+            "display_name": "Demo User 4",
+            "first_name": "Demo4",
+            "last_name": "User",
+            "locale": "en-US",
+            "preferred_language": "en",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["showoff", "black-tie"],
+                "color_palette": ["black", "white", "red", "yellow", "green", "pink"],
+                "avoid": ["dark"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "US",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        },
+        {
+            "id": DEMO_USER_IDS[4],
+            "email": "demo5@dressapp.co",
+            "display_name": "Demo User 5",
+            "first_name": "Demo5",
+            "last_name": "User",
+            "locale": "en-US",
+            "preferred_language": "en",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["minimalist", "smart-casual"],
+                "color_palette": ["black", "white", "red"],
+                "avoid": ["colorful"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "US",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        },
+    ]
+    for u in demo_users:
+        await db.users.update_one({"id": u["id"]}, {"$set": u}, upsert=True)
+    print(f"  ✔ users: {len(demo_users)}")
 
     pros = [
         {
@@ -224,7 +331,7 @@ async def seed_listings(db) -> None:
             "country": "ES",
         },
     ]
-    sellers = [DEMO_USER_ID, DEMO_PRO_IDS[0], DEMO_PRO_IDS[2]]
+    sellers = [DEMO_USER_IDS[0], DEMO_PRO_IDS[0], DEMO_PRO_IDS[2]]
     for i, item in enumerate(catalog):
         listing = {
             "id": DEMO_LISTING_IDS[i],
@@ -297,7 +404,7 @@ async def seed_closet(db) -> None:
     for i, it in enumerate(items):
         doc = {
             "id": DEMO_CLOSET_IDS[i],
-            "user_id": DEMO_USER_ID,
+            "user_id": DEMO_USER_IDS[0],
             "source": "Private",
             "title": it["title"],
             "name": it["title"],
@@ -496,7 +603,7 @@ async def main() -> None:
     print("Done. ✨")
     print(
         "\nDemo identifiers (re-running this script is idempotent):\n"
-        f"  user:         {DEMO_USER_ID} (demo@dressapp.co)\n"
+        f"  users:         {len(DEMO_USER_IDS)} (demo1..5@dressapp.co)\n"
         f"  professionals: {len(DEMO_PRO_IDS)}\n"
         f"  listings:      {len(DEMO_LISTING_IDS)}\n"
         f"  closet items:  {len(DEMO_CLOSET_IDS)}\n"
