@@ -397,7 +397,7 @@ async def admin_unhide_professional(
 
 
 # -------------------- ad campaigns (Phase U) --------------------
-@router.get("/ads/campaigns")
+@router.get("/promotions/campaigns")
 async def admin_list_ad_campaigns(
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
@@ -419,7 +419,7 @@ async def admin_list_ad_campaigns(
     return {"items": items, "total": total, "skip": skip, "limit": limit}
 
 
-@router.post("/ads/campaigns/{campaign_id}/disable")
+@router.post("/promotions/campaigns/{campaign_id}/disable")
 async def admin_disable_campaign(
     campaign_id: str, _: dict = Depends(require_admin)
 ) -> dict[str, Any]:
@@ -438,7 +438,7 @@ async def admin_disable_campaign(
     return {"status": "ok", "id": campaign_id, "new_status": "disabled"}
 
 
-@router.post("/ads/campaigns/{campaign_id}/enable")
+@router.post("/promotions/campaigns/{campaign_id}/enable")
 async def admin_enable_campaign(
     campaign_id: str, _: dict = Depends(require_admin)
 ) -> dict[str, Any]:
