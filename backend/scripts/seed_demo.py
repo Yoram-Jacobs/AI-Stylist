@@ -52,10 +52,31 @@ async def seed_user(db) -> None:
             "body_notes": None,
             "budget_monthly_cents": 25000,
         },
-        "cultural_context": {
-            "region": "US",
-            "religion": None,
-            "dress_conservativeness": "moderate",
+        {
+            "id": DEMO_USER_IDS[4],
+            "email": "demo5@dressapp.co",
+            "display_name": "Demo User 5",
+            "first_name": "Demo5",
+            "last_name": "User",
+            "locale": "en-US",
+            "preferred_language": "en",
+            "preferred_voice_id": "aura-2-thalia-en",
+            "style_profile": {
+                "aesthetics": ["minimalist", "smart-casual"],
+                "color_palette": ["black", "white", "red"],
+                "avoid": ["colorful"],
+                "body_notes": None,
+                "budget_monthly_cents": 25000,
+            },
+            "cultural_context": {
+                "region": "US",
+                "religion": None,
+                "dress_conservativeness": "moderate",
+            },
+            "roles": ["user"],
+            "is_demo": True,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
         },
         "roles": ["user"],
         "is_demo": True,
@@ -329,7 +350,7 @@ async def seed_listings(db) -> None:
             "country": "ES",
         },
     ]
-    sellers = [DEMO_USER_ID, DEMO_PRO_IDS[0], DEMO_PRO_IDS[2]]
+    sellers = [DEMO_USER_IDS[0], DEMO_PRO_IDS[0], DEMO_PRO_IDS[2]]
     for i, item in enumerate(catalog):
         listing = {
             "id": DEMO_LISTING_IDS[i],
@@ -402,7 +423,7 @@ async def seed_closet(db) -> None:
     for i, it in enumerate(items):
         doc = {
             "id": DEMO_CLOSET_IDS[i],
-            "user_id": DEMO_USER_ID,
+            "user_id": DEMO_USER_IDS[0],
             "source": "Private",
             "title": it["title"],
             "name": it["title"],
@@ -601,7 +622,7 @@ async def main() -> None:
     print("Done. ✨")
     print(
         "\nDemo identifiers (re-running this script is idempotent):\n"
-        f"  user:         {DEMO_USER_ID} (demo@dressapp.co)\n"
+        f"  users:         {len(DEMO_USER_IDS)} (demo1..5@dressapp.co)\n"
         f"  professionals: {len(DEMO_PRO_IDS)}\n"
         f"  listings:      {len(DEMO_LISTING_IDS)}\n"
         f"  closet items:  {len(DEMO_CLOSET_IDS)}\n"

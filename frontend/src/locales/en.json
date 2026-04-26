@@ -196,7 +196,16 @@
     "removeTagAria": "Remove tag {{label}}",
     "removeEntryAria": "Remove {{label}}",
     "colorSlotPlaceholder": "Color name",
-    "fabricSlotPlaceholder": "Fabric name"
+    "fabricSlotPlaceholder": "Fabric name",
+    "bgUpload": {
+      "started": "Uploading {{count}} photos in the background…",
+      "processingTitle": "Processing your photos…",
+      "processingBody": "You can leave this page — we’ll keep going in the background. Edit any misfits in your closet when we’re done.",
+      "savedFailed": "saved {{saved}} · failed {{failed}}",
+      "done": "Saved {{count}} items. Edit any misfits in your closet.",
+      "partial": "Saved {{saved}} · {{failed}} failed",
+      "failed": "Could not save any items. Please try again."
+    }
   },
   "itemDetail": {
     "back": "Back",
