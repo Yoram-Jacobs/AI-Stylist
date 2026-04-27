@@ -127,11 +127,18 @@ $EDITOR deploy/.env   # fill in the values
 | `DOMAIN` | Your domain (`dressapp.co`) |
 | `CADDY_ACME_EMAIL` | Any valid email for Let's Encrypt notices |
 | `MONGO_URL` | From Atlas (step 4) |
-| `JWT_SECRET` | `openssl rand -hex 48` |
+| `DB_NAME` | Pick a name, e.g. `dressapp_prod` |
+| `JWT_SECRET` | `openssl rand -hex 48` (alphanumeric only is safest) |
 | `EMERGENT_LLM_KEY` | Your Emergent universal key |
-| `PAYPAL_CLIENT_ID` / `_SECRET` / `_WEBHOOK_ID` | From the PayPal developer dashboard (LIVE credentials) |
-| `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | Google Cloud Console |
-| `GROQ_API_KEY` / `DEEPGRAM_API_KEY` / `OPENWEATHERMAP_API_KEY` | Respective provider dashboards |
+| `PAYPAL_LIVE_CLIENT_ID` / `_SECRET` / `_WEBHOOK_ID` | From the PayPal developer dashboard (LIVE credentials) |
+| `PAYPAL_ENV` | `live` for production |
+| `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | Google Cloud Console — the Web client whose **Authorized redirect URIs** include `https://YOUR_DOMAIN/api/v1/auth/google/callback` (and the `www` variant) |
+| `GROQ_API_KEY` / `DEEPGRAM_API_KEY` / `OPENWEATHER_API_KEY` | Respective provider dashboards |
+| `HF_TOKEN` | HuggingFace (only required if you re-enable HF segmentation) |
+
+⚠️ **Quoting**: do **not** wrap values in `"..."` quotes. Docker Compose passes the literal quotes into the container as part of the value.
+
+⚠️ **MongoDB URI sanity-check**: every parameter after `?` must be `key=value`. A trailing orphan like `&appName` (no `=`) will crash pymongo on startup.
 
 Leave `GOOGLE_OAUTH_REDIRECT_URI` and `GOOGLE_OAUTH_POST_LOGIN_REDIRECT`
 **empty** — the backend now derives them from the incoming request
@@ -276,8 +283,15 @@ is plenty for most recoveries).
 | Symptom | Check |
 |---|---|
 | Caddy "certificate_obtain_failed" | DNS hasn't propagated yet, or ports 80/443 are blocked by a firewall. Run `curl ifconfig.me` on the VPS, `dig +short dressapp.co @1.1.1.1`, compare. |
-| Backend OOM (container restarts) | Instance has < 4 GB RAM. Upgrade, or set `USE_LOCAL_CLOTHING_PARSER=false` + `AUTO_MATTE_CROPS=false` in `deploy/.env` to disable the heavy vision models. |
+| Backend OOM (container restarts) | Instance has < 4 GB RAM. Add 4 GB swap (`fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`), or upgrade, or set `USE_LOCAL_CLOTHING_PARSER=false` + `AUTO_MATTE_CROPS=false` in `deploy/.env` to disable the heavy vision models. |
 | `/api/v1/closet/analyze` 500s | `docker compose logs backend`. Most common: missing `EMERGENT_LLM_KEY` or `MONGO_URL` in `.env`. |
-| Google OAuth "redirect_uri_mismatch" | You forgot step 8.1. The URI in the console must EXACTLY match the one the backend sends, which is `https://<DOMAIN>/api/v1/auth/google/callback`. |
+| `pymongo.errors.InvalidURI: MongoDB URI options are key=value pairs.` | `MONGO_URL` has a malformed query parameter (e.g. trailing `&appName` with no `=value`). Fix in `.env` and `docker compose up -d --force-recreate backend`. |
+| `pymongo.errors.OperationFailure: bad auth` | Wrong username/password in `MONGO_URL`. Reset the user's password in Atlas → Database Access. |
+| Mongo connection timeout | Atlas → **Network Access** must include either `0.0.0.0/0` or this VPS's public IP. Get the IP with `curl -4 ifconfig.me`. |
+| Google OAuth "redirect_uri_mismatch" | The OAuth Client whose ID is in `.env` must have your exact callback URL registered. If you have multiple OAuth clients in the project, double-check you're editing the right one — the URL bar of Google Console reveals the active client ID. |
 | PayPal webhook 401 | Webhook ID in `.env` doesn't match what PayPal is signing requests with. Copy the correct ID from the PayPal dashboard. |
 | First `/analyze` takes 30 s | Model warm-up (expected only once per server lifetime, thanks to the cache volume). |
+| Browser shows `ERR_BLOCKED_BY_CLIENT` for some API calls | An ad blocker is blocking the URL because it contains `/ads/`. The promotion ticker uses `/promotions/` (renamed in this repo); if you fork older code, rename `/api/v1/ads/*` accordingly. |
+| `pip install` fails on `emergentintegrations==0.1.0` | The Dockerfile must include `--extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`. Already configured here. |
+| `pip` resolver fails on protobuf / grpcio conflicts | The Dockerfile uses `--use-deprecated=legacy-resolver` to match the dev environment exactly. Already configured. |
+| `docker: unknown command: docker compose` | Ubuntu's `docker.io` package omits the compose plugin. Install it manually: `mkdir -p /usr/local/lib/docker/cli-plugins && curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose`. |
