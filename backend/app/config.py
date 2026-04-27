@@ -20,11 +20,11 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings:
     # --- infra ---
     MONGO_URL: str = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-    DB_NAME: str = os.environ.get("DB_NAME", "test_database")
-    CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "*")
+    DB_NAME: str = os.environ.get("DB_NAME", "dressapp")
+    CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "https://dressapp.co,https://www.dressapp.co")
 
     # --- auth ---
-    JWT_SECRET: str = os.environ.get("JWT_SECRET", "dressapp-dev-change-me")
+    JWT_SECRET: str = os.environ.get("JWT_SECRET", "dressapp_jwt_secret_xK9mQ2nP4vR7sT8uW")
     JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
     JWT_EXPIRES_MIN: int = int(os.environ.get("JWT_EXPIRES_MIN", "43200"))
 
