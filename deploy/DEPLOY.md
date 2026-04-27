@@ -93,7 +93,7 @@ Verify with `dig +short dressapp.co @1.1.1.1`.
 5. **Connect → Drivers → Python** → copy the URI. It looks like:
 
    ```
-   mongodb+srv://USER:<password>@CLUSTER.mongodb.net/?retryWrites=true&w=majority&appName=DressApp
+   mongodb+srv://USER:ZtEiK00yRYC9ucjv@CLUSTER.mongodb.net/?retryWrites=true&w=majority&appName=DressApp
    ```
 
    Replace `<password>`. You'll paste this into `deploy/.env`.
@@ -104,8 +104,8 @@ Verify with `dig +short dressapp.co @1.1.1.1`.
 
 ```bash
 cd /srv
-git clone https://github.com/YOUR_ORG/dressapp.git
-cd dressapp
+git clone https://github.com/Yoram-Jacobs/AI-Stylist.git
+cd AI-Stylist
 ```
 
 (Alternatively use `scp` / `rsync` if you haven't pushed to a remote yet.)
@@ -125,7 +125,7 @@ $EDITOR deploy/.env   # fill in the values
 | Key | Where to get it |
 |---|---|
 | `DOMAIN` | Your domain (`dressapp.co`) |
-| `CADDY_ACME_EMAIL` | Any valid email for Let's Encrypt notices |
+| `CADDY_ACME_EMAIL` | lokoprod@gmail.com|
 | `MONGO_URL` | From Atlas (step 4) |
 | `DB_NAME` | Pick a name, e.g. `dressapp_prod` |
 | `JWT_SECRET` | `openssl rand -hex 48` (alphanumeric only is safest) |

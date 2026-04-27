@@ -16,31 +16,6 @@
         <link rel="manifest" href="/manifest.json" />
         <title>DressApp — closet, marketplace & AI stylist</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
-        <script>
-            // Conditionally load the Emergent telemetry script ONLY on the Emergent preview/native domain.
-            // On the custom production domain, this script wraps XMLHttpRequest.send() in a way that
-            // breaks authenticated requests (e.g. /api/v1/closet returns "Missing bearer token").
-            // See: https://app.emergent.sh — script is required there for badge/analytics.
-            (function () {
-                try {
-                    var host = window.location.hostname || "";
-                    var isEmergentHost =
-                        host.endsWith(".emergentagent.com") ||
-                        host.endsWith(".emergent.sh") ||
-                        host.endsWith(".emergent.host");
-                    if (isEmergentHost) {
-                        var s = document.createElement("script");
-                        s.src = "https://assets.emergent.sh/scripts/emergent-main.js";
-                        s.async = false;
-                        document.head.appendChild(s);
-                    }
-                } catch (err) {
-                    // Fail silently — the script is non-essential for app functionality.
-                }
-            })();
-        </script>
-    </head>
-    <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
         <div id="root"></div>
         <!--
@@ -53,31 +28,7 @@
       To begin the development, run `npm start` or `yarn start`.
       To create a production bundle, use `npm run build` or `yarn build`.
     -->
-        <a
-            id="emergent-badge"
-            target="_blank"
-            href="https://app.emergent.sh/?utm_source=emergent-badge"
-            style="
-                display: inline-flex !important;
-                box-sizing: border-box;
-                width: 178px;
-                height: 40px;
-                padding: 8px 12px 8px 12px;
-                align-items: center !important;
-                gap: 8px;
-                border-radius: 50px !important;
-                background: #000 !important;
-                position: fixed !important;
-                bottom: 16px;
-                right: 16px;
-                text-decoration: none;
-                font-family: -apple-system, BlinkMacSystemFont,
-                    &quot;Segoe UI&quot;, Roboto, Oxygen, Ubuntu, Cantarell,
-                    &quot;Open Sans&quot;, &quot;Helvetica Neue&quot;,
-                    sans-serif !important;
-                font-size: 12px !important;
-                z-index: 9999 !important;
-            "
+        
         >
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M15.5702 8.13142C15.7729 8.0412 16.0007 8.18878 15.9892 8.4103C15.8374 11.3192 14.0965 14.0405 11.2531 15.3065C8.40964 16.5725 5.2224 16.0453 2.95912 14.2117C2.78676 14.072 2.82955 13.804 3.03219 13.7137L4.95677 12.8568C5.04866 12.8159 5.15446 12.823 5.24204 12.8725C6.73377 13.7153 8.59176 13.8649 10.2772 13.1145C11.9626 12.3641 13.0947 10.8833 13.4665 9.21075C13.4883 9.11256 13.5539 9.02918 13.6457 8.98827L15.5702 8.13142Z" fill="white"/>
@@ -160,12 +111,7 @@
                     }),
                     (e.__SV = 1));
             })(document, window.posthog || []);
-            posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
-                session_recording: {
-                    recordCrossOriginIframes: true,
-                    capturePerformance: false,
+            
                 },
             });
         </script>
