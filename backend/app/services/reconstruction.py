@@ -2,15 +2,16 @@
 
 Takes a potentially-bad garment crop (from the multi-item extractor or a
 single upload) and decides whether it needs reconstruction. When it does,
-we drive HF FLUX with a rich semantic prompt built from The Eyes'
-analysis to produce a clean, centered, full-item product image.
+we prefer **Nano Banana** (`gemini-2.5-flash-image`, native Google SDK,
+requires ``GEMINI_API_KEY``) and fall back to **HF FLUX.1-schnell** when
+the direct Gemini key isn't configured (dev preview).
 
 Public API
 ----------
 * ``should_reconstruct(analysis, bbox, frame_size) -> (bool, list[str])``
   Fast, local heuristics. Returns ``(needs_repair, reasons)``.
 * ``reconstruct(crop_bytes, analysis, *, validate=True) -> dict | None``
-  Runs the HF FLUX edit with a composed prompt and (optionally)
+  Runs the chosen reconstructor with a composed prompt and (optionally)
   sanity-checks the output by re-analysing the generated image. Returns
   ``{image_b64, mime_type, prompt, validated, rejected_reason}`` or
   ``None`` on unrecoverable failure.
@@ -23,6 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.services.gemini_image_service import gemini_image_service
 from app.services.hf_image_service import hf_image_service
 
 logger = logging.getLogger(__name__)
@@ -184,11 +186,16 @@ async def reconstruct(
     On a pipeline-level failure we return ``None`` and log a warning —
     the caller must keep using the original crop.
     """
-    if hf_image_service is None:
+    # Prefer Nano Banana when a direct Gemini key is configured (better
+    # quality, no hallucinated category drift). Fall back to HF FLUX in
+    # dev preview where only the Emergent key is available.
+    image_service = gemini_image_service or hf_image_service
+    if image_service is None:
         return None
+    using = "nano-banana" if image_service is gemini_image_service else "hf-flux"
     prompt = _build_reconstruction_prompt(analysis)
     try:
-        out = await hf_image_service.edit(
+        out = await image_service.edit(
             crop_bytes,
             prompt,
             garment_metadata={
@@ -202,7 +209,11 @@ async def reconstruct(
             },
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Reconstruction HF edit failed: %s", repr(exc)[:200])
+        logger.warning(
+            "Reconstruction edit failed (engine=%s): %s",
+            using,
+            repr(exc)[:200],
+        )
         return None
     image_b64 = out.get("image_b64")
     if not image_b64:
@@ -242,6 +253,7 @@ async def reconstruct(
         "mime_type": out.get("mime_type", "image/png"),
         "prompt": prompt,
         "model": out.get("model_used"),
+        "engine": using,
         "reasons": reasons or [],
         "validated": validated,
         "rejected_reason": rejected_reason,

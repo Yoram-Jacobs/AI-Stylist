@@ -28,10 +28,44 @@ class Settings:
     JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
     JWT_EXPIRES_MIN: int = int(os.environ.get("JWT_EXPIRES_MIN", "43200"))
 
-    # --- LLM (Emergent Universal Key, Gemini 2.5 Pro) ---
-    EMERGENT_LLM_KEY: str | None = os.environ.get("EMERGENT_LLM_KEY")
+    # --- LLM keys ----------------------------------------------------
+    # Two valid configurations, in order of precedence:
+    #
+    # 1. **Direct Gemini** (production): set ``GEMINI_API_KEY`` in .env.
+    #    Every Gemini-routed call (Stylist, The Eyes, Trend-Scout, ...)
+    #    talks to Google's API natively via litellm — no Emergent proxy
+    #    in the path. Required for Nano Banana image generation, which
+    #    the Emergent proxy does not support.
+    #
+    # 2. **Emergent Universal Key** (dev preview): set ``EMERGENT_LLM_KEY``
+    #    only. Routes through the Emergent proxy. Free for dev work but
+    #    cannot do Nano Banana, and counts against the user's credit
+    #    balance.
+    #
+    # Both can be set; ``GEMINI_API_KEY`` always wins for chat calls.
+    EMERGENT_LLM_KEY: str | None = os.environ.get("EMERGENT_LLM_KEY") or None
+    GEMINI_API_KEY: str | None = (
+        os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")  # accept the canonical google-genai name too
+        or None
+    )
     DEFAULT_STYLIST_MODEL: str = os.environ.get("DEFAULT_STYLIST_MODEL", "gemini-2.5-pro")
     DEFAULT_STYLIST_PROVIDER: str = os.environ.get("DEFAULT_STYLIST_PROVIDER", "gemini")
+
+    @property
+    def gemini_chat_key(self) -> str | None:
+        """Pick the right key for litellm-backed Gemini chat calls.
+
+        Production deployments set ``GEMINI_API_KEY``; dev preview falls
+        back to ``EMERGENT_LLM_KEY`` (which litellm sends through the
+        Emergent proxy because the key starts with ``sk-emergent-``).
+        """
+        return self.GEMINI_API_KEY or self.EMERGENT_LLM_KEY
+
+    @property
+    def has_native_gemini(self) -> bool:
+        """True when a direct Google key is configured (enables Nano Banana)."""
+        return bool(self.GEMINI_API_KEY)
 
     # --- Hugging Face (garment segmentation) ---
     HF_TOKEN: str | None = os.environ.get("HF_TOKEN") or None
@@ -41,9 +75,13 @@ class Settings:
         "HF_SAM_MODEL", "mattmdjaga/segformer_b2_clothes"
     )
 
-    # --- Gemini Nano Banana (image generation + edit) ---
+    # --- Gemini Nano Banana (image generation + edit) -----------------
+    # Native Google model id. Requires ``GEMINI_API_KEY`` — the Emergent
+    # proxy does not route image-generation traffic, which is why we
+    # historically fell back to HF FLUX. In production with a direct
+    # key, this is preferred over FLUX (sharper, no category drift).
     GEMINI_IMAGE_MODEL: str = os.environ.get(
-        "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"
+        "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"
     )
 
     # --- The Eyes (garment vision analyzer) ---
@@ -64,7 +102,7 @@ class Settings:
         "GARMENT_VISION_PROVIDER", "gemini"
     )
     GARMENT_VISION_MODEL: str = os.environ.get(
-        "GARMENT_VISION_MODEL", "gemini-2.5-pro"
+        "GARMENT_VISION_MODEL", "gemini-2.5-flash"
     )
     # When set, the HF path hits this OpenAI-compatible endpoint URL
     # instead of going through HF Inference Providers routing. Use this
