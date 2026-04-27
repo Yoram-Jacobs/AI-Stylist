@@ -36,6 +36,14 @@ async def ensure_indexes() -> None:
     await db.closet_items.create_index(
         [("user_id", 1), ("source", 1), ("category", 1)]
     )
+    # Compound index to back the main /closet list query
+    # (`find({user_id}).sort(created_at DESC)`). Without this index Atlas
+    # M0 tries an in-memory sort, caps at 32 MB, and 500s once the
+    # closet has a few dozen items carrying base64 crop thumbnails.
+    await db.closet_items.create_index(
+        [("user_id", 1), ("created_at", -1)],
+        name="user_id_1_created_at_-1",
+    )
     await db.closet_items.create_index(
         [("title", "text"), ("brand", "text"), ("tags", "text")]
     )

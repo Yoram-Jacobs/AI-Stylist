@@ -474,10 +474,21 @@ async def list_items(
     items = await repos.find_many(
         db.closet_items, query, sort=[("created_at", -1)], limit=limit, skip=skip
     )
-    # Strip the 512-float embedding vector from the list response \u2014 it's
-    # only needed by /closet/search and would otherwise bloat the payload.
+    # Strip heavy blobs from the list response — the closet card only
+    # needs ``image_url``; the full analysis/reconstruction/embedding
+    # payloads are fetched on-demand via ``GET /closet/{id}``.
+    # Without this the /closet list response balloons to multi-MB once
+    # items have base64 crop thumbnails + reconstruction payloads.
     for it in items:
         it.pop("clip_embedding", None)
+        it.pop("crop_base64", None)
+        it.pop("crop_mime", None)
+        recon = it.get("reconstruction")
+        if isinstance(recon, dict):
+            recon.pop("image_b64", None)
+        raw = it.get("raw")
+        if isinstance(raw, dict):
+            raw.pop("preview", None)
     total = await repos.count(db.closet_items, query)
     return {"items": items, "total": total, "limit": limit, "skip": skip}
 

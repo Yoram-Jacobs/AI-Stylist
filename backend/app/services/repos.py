@@ -38,7 +38,12 @@ async def find_many(
 ) -> list[dict[str, Any]]:
     cursor = coll.find(query, {"_id": 0})
     if sort:
-        cursor = cursor.sort(sort)
+        # Atlas M0 imposes a 32 MB in-memory sort cap. Closet documents
+        # carry base64 crop thumbnails + reconstruction payloads, so the
+        # sort buffer easily blows through that limit. `allow_disk_use`
+        # lets Mongo spill the sort to disk (no-op and cost-free when
+        # the query is already served by an index).
+        cursor = cursor.sort(sort).allow_disk_use(True)
     if skip:
         cursor = cursor.skip(skip)
     cursor = cursor.limit(limit)
