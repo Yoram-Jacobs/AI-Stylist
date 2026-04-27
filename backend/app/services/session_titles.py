@@ -45,7 +45,7 @@ async def generate_session_title(text: str, language: str = "en") -> str:
     text = (text or "").strip()
     if not text:
         return "New conversation"
-    api_key = settings.EMERGENT_LLM_KEY
+    api_key = settings.gemini_chat_key
     if not api_key:
         return _fallback_title(text)
 

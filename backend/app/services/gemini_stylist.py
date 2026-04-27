@@ -87,9 +87,17 @@ def _language_directive(code: str | None) -> str:
 
 class GeminiStylistService:
     def __init__(self) -> None:
-        if not settings.EMERGENT_LLM_KEY:
-            raise RuntimeError("EMERGENT_LLM_KEY is not configured.")
-        self.api_key = settings.EMERGENT_LLM_KEY
+        # ``gemini_chat_key`` returns GEMINI_API_KEY (production) when set,
+        # else EMERGENT_LLM_KEY (dev preview). litellm — under the hood
+        # of emergentintegrations — auto-detects which path to take based
+        # on the key prefix, so the call site stays identical in both
+        # deployments.
+        if not settings.gemini_chat_key:
+            raise RuntimeError(
+                "No Gemini chat key configured. Set GEMINI_API_KEY (production) "
+                "or EMERGENT_LLM_KEY (dev) in /app/backend/.env."
+            )
+        self.api_key = settings.gemini_chat_key
         self.model = settings.DEFAULT_STYLIST_MODEL
         self.provider = settings.DEFAULT_STYLIST_PROVIDER
 
@@ -196,5 +204,5 @@ def image_bytes_to_base64(img: bytes) -> str:
 
 
 gemini_stylist_service = (
-    GeminiStylistService() if settings.EMERGENT_LLM_KEY else None
+    GeminiStylistService() if settings.gemini_chat_key else None
 )

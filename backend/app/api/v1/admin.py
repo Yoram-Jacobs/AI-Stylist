@@ -271,8 +271,18 @@ async def llm_usage(_: dict = Depends(require_admin)) -> dict[str, Any]:
     """Best-effort probe of the Emergent universal-key usage endpoint.
 
     The Emergent proxy exposes a usage endpoint; if it ever changes we just
-    return an informational stub instead of failing the dashboard.
+    return an informational stub instead of failing the dashboard. When
+    production has flipped to a direct Gemini key, the Emergent endpoint
+    is irrelevant — we surface that explicitly.
     """
+    if settings.has_native_gemini and not settings.EMERGENT_LLM_KEY:
+        return {
+            "available": False,
+            "reason": "Production is using a direct GEMINI_API_KEY; Emergent "
+            "usage is not applicable. Check usage at "
+            "https://aistudio.google.com/apikey or in Google Cloud Console.",
+            "backend": "google-direct",
+        }
     if not settings.EMERGENT_LLM_KEY:
         return {"available": False, "reason": "EMERGENT_LLM_KEY not set"}
     headers = {"Authorization": f"Bearer {settings.EMERGENT_LLM_KEY}"}
@@ -318,6 +328,7 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
         },
         "keys_present": {
             "EMERGENT_LLM_KEY": _has(settings.EMERGENT_LLM_KEY),
+            "GEMINI_API_KEY": _has(settings.GEMINI_API_KEY),
             "HF_TOKEN": _has(settings.HF_TOKEN),
             "GROQ_API_KEY": _has(settings.GROQ_API_KEY),
             "DEEPGRAM_API_KEY": _has(settings.DEEPGRAM_API_KEY),
@@ -325,6 +336,9 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
             "GOOGLE_OAUTH_CLIENT_ID": _has(settings.GOOGLE_OAUTH_CLIENT_ID),
             "GOOGLE_OAUTH_CLIENT_SECRET": _has(settings.GOOGLE_OAUTH_CLIENT_SECRET),
         },
+        "llm_backend": (
+            "google-direct" if settings.has_native_gemini else "emergent-proxy"
+        ),
         "trend_scout": {
             "enabled": settings.TREND_SCOUT_ENABLED,
             "schedule_utc": settings.TREND_SCOUT_SCHEDULE_UTC,

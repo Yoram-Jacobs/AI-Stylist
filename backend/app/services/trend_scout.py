@@ -169,16 +169,21 @@ def _clean_url(value: Any) -> str | None:
 
 
 async def _generate_one(bucket: dict[str, str]) -> dict[str, Any] | None:
-    api_key = settings.EMERGENT_LLM_KEY
+    api_key = settings.gemini_chat_key
     if not api_key:
-        raise RuntimeError("EMERGENT_LLM_KEY missing — cannot run Trend-Scout")
+        raise RuntimeError(
+            "No Gemini chat key set (GEMINI_API_KEY / EMERGENT_LLM_KEY) — "
+            "cannot run Trend-Scout"
+        )
     chat = LlmChat(
         api_key=api_key,
         session_id=f"fashionscout-{bucket['slug']}-{uuid.uuid4().hex[:8]}",
         system_message=SYSTEM_PROMPT,
     )
+    # Phase: Flash is fast/cheap and ample for trend scouting (per user
+    # preference — Pro reserved for the Stylist).
     chat.with_model(
-        settings.DEFAULT_STYLIST_PROVIDER, settings.DEFAULT_STYLIST_MODEL
+        settings.DEFAULT_STYLIST_PROVIDER, "gemini-2.5-flash"
     )
     try:
         raw = await chat.send_message(UserMessage(text=bucket["prompt"]))
@@ -342,7 +347,7 @@ async def _translate_card(
     Returns a fresh document with a new id so the cached list operates on
     stable primary keys.
     """
-    api_key = settings.EMERGENT_LLM_KEY
+    api_key = settings.gemini_chat_key
     if not api_key:
         return None
     lang_name = {

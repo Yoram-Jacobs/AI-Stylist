@@ -113,9 +113,9 @@ async def audit(
     montage = _make_montage(candidate_crops)
     if montage is None:
         return {**default, "skipped": True}
-    api_key = settings.EMERGENT_LLM_KEY
+    api_key = settings.gemini_chat_key
     if not api_key:
-        logger.info("vision_verifier: EMERGENT_LLM_KEY missing, skipping")
+        logger.info("vision_verifier: no Gemini chat key, skipping")
         return {**default, "skipped": True}
     try:
         from emergentintegrations.llm.chat import (

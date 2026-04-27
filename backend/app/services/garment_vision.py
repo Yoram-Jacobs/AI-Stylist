@@ -553,13 +553,14 @@ class GarmentVisionService:
         # Per-crop analyser (multi-item pipeline).
         self.crop_model = settings.GARMENT_VISION_CROP_MODEL
         self.max_items = settings.GARMENT_VISION_MAX_ITEMS
-        # Legacy Emergent key kept for the detector and any caller who
-        # explicitly opts into the gemini provider.
-        self.api_key = settings.EMERGENT_LLM_KEY
+        # Gemini chat key — direct GEMINI_API_KEY (production) wins,
+        # else EMERGENT_LLM_KEY (dev). litellm handles routing.
+        self.api_key = settings.gemini_chat_key
         # Fail fast when the service cannot actually run anything.
         if self.provider == "gemini" and not self.api_key:
             raise RuntimeError(
-                "GARMENT_VISION_PROVIDER=gemini but EMERGENT_LLM_KEY is unset."
+                "GARMENT_VISION_PROVIDER=gemini but neither GEMINI_API_KEY "
+                "nor EMERGENT_LLM_KEY is set."
             )
         if self.provider == "hf" and not settings.HF_TOKEN:
             raise RuntimeError(
@@ -567,7 +568,7 @@ class GarmentVisionService:
             )
         if self.detect_provider == "gemini" and not self.api_key:
             logger.warning(
-                "Detection requires EMERGENT_LLM_KEY; multi-item pipeline will "
+                "Detection requires a Gemini chat key; multi-item pipeline will "
                 "degrade to single-item analysis."
             )
 
@@ -618,7 +619,7 @@ class GarmentVisionService:
             )
             return []
         if not self.api_key:
-            logger.warning("No EMERGENT_LLM_KEY; skipping detection.")
+            logger.warning("No Gemini chat key; skipping detection.")
             return []
         shrunk = _shrink_for_vision(image_bytes, max_side=1024, q=80)
         b64 = base64.b64encode(shrunk).decode("ascii")
@@ -1034,13 +1035,14 @@ def _build_vision_service() -> GarmentVisionService | None:
     want_hf = settings.GARMENT_VISION_PROVIDER == "hf"
     want_gemini_analyze = settings.GARMENT_VISION_PROVIDER == "gemini"
     has_hf = bool(settings.HF_TOKEN)
-    has_emergent = bool(settings.EMERGENT_LLM_KEY)
+    has_gemini_chat = bool(settings.gemini_chat_key)
     if want_hf and not has_hf:
         logger.warning("Garment vision disabled: provider=hf but HF_TOKEN missing.")
         return None
-    if want_gemini_analyze and not has_emergent:
+    if want_gemini_analyze and not has_gemini_chat:
         logger.warning(
-            "Garment vision disabled: provider=gemini but EMERGENT_LLM_KEY missing."
+            "Garment vision disabled: provider=gemini but no Gemini chat key set "
+            "(GEMINI_API_KEY / EMERGENT_LLM_KEY)."
         )
         return None
     try:

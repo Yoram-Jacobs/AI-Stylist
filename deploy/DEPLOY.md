@@ -129,7 +129,8 @@ $EDITOR deploy/.env   # fill in the values
 | `MONGO_URL` | From Atlas (step 4) |
 | `DB_NAME` | Pick a name, e.g. `dressapp_prod` |
 | `JWT_SECRET` | `openssl rand -hex 48` (alphanumeric only is safest) |
-| `EMERGENT_LLM_KEY` | Your Emergent universal key |
+| `EMERGENT_LLM_KEY` | Your Emergent universal key (DEV-style fallback only — leave empty in production if you set `GEMINI_API_KEY` below) |
+| `GEMINI_API_KEY` | **PRODUCTION:** your direct Google AI Studio key from https://aistudio.google.com/apikey. When set, all Gemini chat calls (Stylist, The Eyes, Trend-Scout) bypass the Emergent proxy and talk to Google directly, **and** Nano Banana (`gemini-2.5-flash-image`) image generation is enabled — replacing HF FLUX for the Wardrobe Reconstructor. |
 | `PAYPAL_LIVE_CLIENT_ID` / `_SECRET` / `_WEBHOOK_ID` | From the PayPal developer dashboard (LIVE credentials) |
 | `PAYPAL_ENV` | `live` for production |
 | `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | Google Cloud Console — the Web client whose **Authorized redirect URIs** include `https://YOUR_DOMAIN/api/v1/auth/google/callback` (and the `www` variant) |

@@ -5,9 +5,13 @@ template at runtime). This file is committed; the real `.env` is not.
 """
 
 REQUIRED_FOR_POC = [
-    # LLM — the universal Emergent key
+    # LLM — at least ONE of these must be set:
+    #   * EMERGENT_LLM_KEY   → dev preview, routes through Emergent proxy
+    #   * GEMINI_API_KEY     → production, talks to Google directly + enables
+    #                          Nano Banana image generation
     "EMERGENT_LLM_KEY",
-    # Vision (Hugging Face SAM segmentation + Gemini Nano Banana image gen/edit)
+    "GEMINI_API_KEY",
+    # Vision (Hugging Face SegFormer for cutout/segmentation)
     "HF_TOKEN",
     # Voice input (Groq Whisper-v3)
     "GROQ_API_KEY",

@@ -57,7 +57,10 @@ async def get_styling_advice(
     if not (user_text or voice_audio):
         raise ValueError("user_text or voice_audio is required")
     if gemini_stylist_service is None:
-        raise RuntimeError("Gemini service not configured (EMERGENT_LLM_KEY missing)")
+        raise RuntimeError(
+            "Gemini stylist service not configured. Set GEMINI_API_KEY "
+            "(production) or EMERGENT_LLM_KEY (dev) in /app/backend/.env."
+        )
 
     latency: dict[str, int] = {}
     result: dict[str, Any] = {
