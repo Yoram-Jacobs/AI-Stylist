@@ -16,7 +16,29 @@
         <link rel="manifest" href="/manifest.json" />
         <title>DressApp — closet, marketplace & AI stylist</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
-        <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
+        <script>
+            // Conditionally load the Emergent telemetry script ONLY on the Emergent preview/native domain.
+            // On the custom production domain, this script wraps XMLHttpRequest.send() in a way that
+            // breaks authenticated requests (e.g. /api/v1/closet returns "Missing bearer token").
+            // See: https://app.emergent.sh — script is required there for badge/analytics.
+            (function () {
+                try {
+                    var host = window.location.hostname || "";
+                    var isEmergentHost =
+                        host.endsWith(".emergentagent.com") ||
+                        host.endsWith(".emergent.sh") ||
+                        host.endsWith(".emergent.host");
+                    if (isEmergentHost) {
+                        var s = document.createElement("script");
+                        s.src = "https://assets.emergent.sh/scripts/emergent-main.js";
+                        s.async = false;
+                        document.head.appendChild(s);
+                    }
+                } catch (err) {
+                    // Fail silently — the script is non-essential for app functionality.
+                }
+            })();
+        </script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
