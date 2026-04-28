@@ -367,6 +367,100 @@ class StylistAdvice(BaseModel):
     latency_ms: dict[str, int] = Field(default_factory=dict)
 
 
+# --------------------- Phase R: Outfit Composer (Stylist Power-Up) ---------------------
+# Schema design notes:
+# - These are returned alongside the existing StylistAdvice contract so old
+#   chat clients keep working; the canvas is opt-in via a tap-to-expand UI.
+# - Persisted inside ``StylistMessage.assistant_payload`` under the key
+#   ``outfit_canvas`` so the canvas survives chat history + sharing.
+# - Marketplace + pro suggestions are *included* in the canvas envelope
+#   rather than separate API calls so the UI renders atomically — fewer
+#   round-trips, no flicker.
+
+OutfitSlotRole = Literal[
+    "top", "bottom", "dress", "outerwear", "shoes", "accessory", "bag", "headwear"
+]
+
+
+class CandidateGarment(BaseModel):
+    """One uploaded image after garment_vision analysis + dedup grouping."""
+
+    candidate_id: str  # uuid for client cross-references
+    source: Literal["upload", "closet"] = "upload"
+    image_data_url: str | None = None  # small data URL preview (<= 60 KB)
+    closet_item_id: str | None = None  # set when source='closet'
+    title: str | None = None
+    category: str | None = None
+    sub_category: str | None = None
+    color: str | None = None
+    pattern: str | None = None
+    material: str | None = None
+    brand: str | None = None
+    formality: str | None = None
+    season: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    quality_score: float = 0.0  # internal — composer's confidence the analysis is good
+    brief_match_score: float = 0.0  # 0..1 — how well candidate fits the user's brief
+    dedup_group_id: str | None = None  # candidates sharing this id are near-duplicates
+
+
+class OutfitSlot(BaseModel):
+    role: OutfitSlotRole
+    candidate_id: str | None = None  # references CandidateGarment.candidate_id
+    rationale: str | None = None
+    is_gap: bool = False  # True when no candidate fills this slot — drives marketplace strip
+
+
+class RejectedCandidate(BaseModel):
+    candidate_id: str
+    reason: Literal[
+        "duplicate", "wrong_category", "color_clash",
+        "wrong_formality", "wrong_season", "off_brief", "low_quality"
+    ]
+    detail: str | None = None
+    kept_candidate_id: str | None = None  # for 'duplicate' — points at the surviving twin
+
+
+class MarketplaceSuggestion(BaseModel):
+    listing_id: str
+    title: str
+    image_url: str | None = None
+    price_cents: int | None = None
+    currency: str | None = None
+    seller_display_name: str | None = None
+    fills_slot: OutfitSlotRole | None = None
+    match_score: float = 0.0
+    why: str | None = None
+
+
+class ProfessionalSuggestion(BaseModel):
+    professional_id: str
+    display_name: str
+    profession: str | None = None
+    avatar_url: str | None = None
+    location: str | None = None
+    why_suggested: str  # human-readable rationale, e.g. "Alterations needed for the wedding suit"
+    triggered_by: list[str] = Field(default_factory=list)  # which keywords/signals fired
+
+
+class OutfitCanvas(BaseModel):
+    """Top-level structured response for the Stylist Composer."""
+
+    canvas_id: str
+    schema_version: int = 1
+    brief: str
+    language: str = "en"
+    summary: str  # short text summary shown as a chat bubble
+    detailed_rationale: str | None = None
+    slots: list[OutfitSlot] = Field(default_factory=list)
+    candidates: list[CandidateGarment] = Field(default_factory=list)
+    rejected: list[RejectedCandidate] = Field(default_factory=list)
+    marketplace_suggestions: list[MarketplaceSuggestion] = Field(default_factory=list)
+    professional_suggestion: ProfessionalSuggestion | None = None
+    model_used: str | None = None
+    latency_ms: dict[str, int] = Field(default_factory=dict)
+
+
 # --------------------- Phase U: Ad Campaigns ---------------------
 AdCampaignStatus = Literal["draft", "active", "paused", "ended", "disabled"]
 

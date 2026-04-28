@@ -113,6 +113,13 @@ export const api = {
   stylistDeleteSession: (sessionId) =>
     client.delete(`/stylist/sessions/${sessionId}`).then((r) => r.data),
 
+  // Phase R — Stylist Power-Up: multi-image outfit composer
+  composeOutfit: (formData) =>
+    client.post('/stylist/compose-outfit', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 240000,  // composer can take 30-60s when N images need analysis
+    }).then((r) => r.data),
+
   // outfit completion (Phase P)
   completeOutfit: ({ itemIds, includeMarketplace = false, occasion = null, limit = 6 }) =>
     client

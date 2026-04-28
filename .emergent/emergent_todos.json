@@ -1,26 +1,46 @@
 [
   {
-    "content": "Backend: add make_thumbnail() util — data-URL in, small JPEG data-URL out",
+    "content": "R.1.a — Add schemas: CandidateGarment, OutfitCanvas, MarketplaceSuggestion, ProfessionalSuggestion (app/models/schemas.py)",
     "status": "completed"
   },
   {
-    "content": "Backend: /closet list endpoint generates + caches thumbnail_data_url, strips heavy *_image_url fields from response",
+    "content": "R.1.b — Create app/services/outfit_composer.py: per-image analysis → dedup → score → compose → gap-detect",
     "status": "completed"
   },
   {
-    "content": "Frontend: Closet.jsx prefers thumbnail_data_url for card render (fallback to existing fields)",
+    "content": "R.1.c — Create app/services/marketplace_search.py: query listings by category/budget/tags, ranked",
     "status": "completed"
   },
   {
-    "content": "Frontend: module-level closet cache so navigation doesn't re-trigger 25MB fetch (stale-while-revalidate)",
+    "content": "R.1.d — Create app/services/professional_matcher.py: heuristic keyword → specialty → /professionals query",
     "status": "completed"
   },
   {
-    "content": "Backend: when user opens /closet/:id detail, still return full *_image_url fields",
+    "content": "R.1.e — Add POST /api/v1/stylist/compose-outfit (multipart) wiring all of the above + persist as StylistMessage",
     "status": "completed"
   },
   {
-    "content": "Lint + restart + verify dev preview still works",
+    "content": "R.2.a — Stylist.jsx: attachment button, image-chip preview, send-with-images calls compose-outfit",
     "status": "completed"
+  },
+  {
+    "content": "R.2.b — New OutfitCanvas.jsx component (head-to-toe slots, rejected panel, marketplace strip, pro card)",
+    "status": "completed"
+  },
+  {
+    "content": "R.2.c — New /stylist/compose route (deferred — in-chat composer covers MVP per choice 1c)",
+    "status": "cancelled"
+  },
+  {
+    "content": "R.3 — Backend smoke-test compose-outfit with fixture images (✓)",
+    "status": "completed"
+  },
+  {
+    "content": "R.3 — Frontend lint + production build (✓)",
+    "status": "completed"
+  },
+  {
+    "content": "R.3 — End-to-end live screenshot test",
+    "status": "in_progress"
   }
 ]

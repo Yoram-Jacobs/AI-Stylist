@@ -262,3 +262,123 @@ async def stylist_history(
         "session": _safe_session(session),
         "messages": [{k: v for k, v in m.items() if k != "_id"} for m in msgs],
     }
+
+
+
+# ─── Phase R: Outfit Composer ───────────────────────────────
+@router.post("/compose-outfit")
+async def compose_outfit_endpoint(
+    text: str = Form(""),
+    language: str = Form("en"),
+    session_id: str | None = Form(None),
+    images: list[UploadFile] = File(default_factory=list),
+    budget_cents: int | None = Form(None),
+    currency: str | None = Form(None),
+    dress_code: str | None = Form(None),
+    season: str | None = Form(None),
+    must_include: str | None = Form(None),  # comma-separated
+    avoid: str | None = Form(None),  # comma-separated
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Multi-image outfit composer.
+
+    Accepts up to ~8 images + a brief and returns a structured
+    ``OutfitCanvas`` containing selected slots, rejected duplicates,
+    marketplace gap suggestions, and an optional pro referral.
+
+    The result is persisted as an assistant ``StylistMessage`` so the
+    canvas survives chat history and can be re-rendered later.
+    """
+    from app.services import outfit_composer
+
+    # Read all upload bytes up front (FastAPI streams them otherwise).
+    image_bytes_list: list[bytes] = []
+    for f in images or []:
+        if not f or not f.filename:
+            continue
+        raw = await f.read()
+        if raw:
+            image_bytes_list.append(raw)
+    if not image_bytes_list and not (text or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Send at least one image OR a text brief.",
+        )
+
+    constraints: dict[str, Any] = {}
+    if budget_cents:
+        constraints["budget_cents"] = int(budget_cents)
+        constraints["currency"] = currency or "USD"
+    if dress_code:
+        constraints["dress_code"] = dress_code
+    if season:
+        constraints["season"] = season
+    if must_include:
+        constraints["must_include"] = [
+            s.strip() for s in must_include.split(",") if s.strip()
+        ]
+    if avoid:
+        constraints["avoid"] = [s.strip() for s in avoid.split(",") if s.strip()]
+
+    try:
+        canvas = await outfit_composer.compose_outfit(
+            user=user,
+            brief=text or "",
+            image_bytes_list=image_bytes_list,
+            language=language,
+            constraints=constraints,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Never 500 the composer — return a clear empty canvas + reason.
+        logger.exception("compose-outfit failed: %s", exc)
+        return {
+            "canvas": {
+                "canvas_id": "",
+                "schema_version": 1,
+                "brief": text or "",
+                "language": language,
+                "summary": (
+                    "Sorry — couldn't compose an outfit just now. Please try again."
+                ),
+                "slots": [],
+                "candidates": [],
+                "rejected": [],
+                "marketplace_suggestions": [],
+                "professional_suggestion": None,
+                "model_used": None,
+                "latency_ms": {},
+            },
+            "error": str(exc)[:200],
+        }
+
+    # Persist as an assistant message inside the user's stylist session.
+    try:
+        if session_id:
+            session = await get_session(session_id, user_id=user["id"])
+            if not session:
+                session = await get_or_create_active_session(user["id"])
+        else:
+            session = await get_or_create_active_session(user["id"])
+        await append_message(
+            session_id=session["id"],
+            role="user",
+            input_modality="image+text" if image_bytes_list else "text",
+            transcript=text or "(compose outfit)",
+            image_refs=[],
+            context={"compose": True, "image_count": len(image_bytes_list)},
+        )
+        await append_message(
+            session_id=session["id"],
+            role="assistant",
+            input_modality="tool_result",
+            transcript=canvas.get("summary"),
+            image_refs=[],
+            context={},
+            assistant_payload={"outfit_canvas": canvas},
+        )
+        canvas_session_id = session["id"]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("compose-outfit persistence skipped: %s", repr(exc)[:200])
+        canvas_session_id = None
+
+    return {"canvas": canvas, "session_id": canvas_session_id}
