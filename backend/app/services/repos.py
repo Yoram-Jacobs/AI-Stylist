@@ -23,8 +23,20 @@ async def insert(coll: AsyncIOMotorCollection, doc: dict[str, Any]) -> dict[str,
 
 
 async def find_one(
-    coll: AsyncIOMotorCollection, query: dict[str, Any]
+    coll: AsyncIOMotorCollection,
+    query: dict[str, Any],
+    *,
+    sort: list[tuple[str, int]] | None = None,
 ) -> dict[str, Any] | None:
+    # Optional ``sort`` lets callers fetch the latest-by-timestamp doc
+    # (used by ``stylist_memory.get_or_create_active_session`` and a
+    # handful of other last-write-wins lookups). When absent we keep
+    # the legacy fast path.
+    if sort:
+        cursor = coll.find(query, {"_id": 0}).sort(sort).limit(1)
+        async for d in cursor:
+            return strip_id(d)
+        return None
     return strip_id(await coll.find_one(query, {"_id": 0}))
 
 
