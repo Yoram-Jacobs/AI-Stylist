@@ -58,10 +58,19 @@ def _public_base_url(request: Any) -> str | None:
     ``X-Forwarded-Host``) so the same code works on localhost, the
     Emergent preview domain, staging, production and any custom
     domain (e.g. dressapp.co) — without any .env edits.
+
+    Hardening: if we receive a host that looks like a real public
+    domain (``dressapp.co``, ``*.preview.emergentagent.com``, anything
+    that isn't ``localhost`` / ``127.0.0.1``) we *force* ``https``.
+    This protects against misconfigured nginx that doesn't forward
+    ``X-Forwarded-Proto`` — without that header FastAPI sees the
+    upstream HTTP hop as ``http`` and we'd hand Google a redirect_uri
+    that fails to match the ``https`` URI registered in the OAuth
+    console (the most common cause of ``token_exchange_failed``).
     """
     try:
         headers = getattr(request, "headers", {}) or {}
-        scheme = headers.get("x-forwarded-proto")
+        scheme = (headers.get("x-forwarded-proto") or "").split(",")[0].strip()
         if not scheme:
             scheme = getattr(getattr(request, "url", None), "scheme", None) or "https"
         host = (
@@ -73,6 +82,11 @@ def _public_base_url(request: Any) -> str | None:
             return None
         # Header values can carry a port/comma-separated list — take the first.
         host = host.split(",")[0].strip()
+        # Force https for anything that isn't an explicit localhost/loopback.
+        host_lower = host.split(":")[0].lower()
+        is_local = host_lower in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+        if not is_local and scheme != "https":
+            scheme = "https"
         return f"{scheme}://{host}"
     except Exception:  # noqa: BLE001
         return None
@@ -179,6 +193,11 @@ class CalendarService:
         redirect_uri = self.resolve_redirect_uri(
             request, callback_path=callback_path
         )
+        logger.info(
+            "Google OAuth token exchange: redirect_uri=%s callback_path=%s",
+            redirect_uri,
+            callback_path,
+        )
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 GOOGLE_TOKEN_URL,
@@ -192,6 +211,12 @@ class CalendarService:
                 headers={"Accept": "application/json"},
             )
         if resp.status_code != 200:
+            logger.error(
+                "Google token exchange failed status=%s redirect_uri=%s body=%s",
+                resp.status_code,
+                redirect_uri,
+                resp.text[:500],
+            )
             raise RuntimeError(
                 f"Google token exchange failed ({resp.status_code}): {resp.text[:200]}"
             )

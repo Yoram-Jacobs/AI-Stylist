@@ -238,6 +238,37 @@ async def google_login_start(
     return {"authorization_url": url, "with_calendar": bool(with_calendar)}
 
 
+@auth_router.get("/login/diag")
+async def google_login_diag(request: Request) -> dict[str, Any]:
+    """Read-only diagnostic that returns the *exact* redirect_uri the
+    backend will send to Google for the sign-in flow. Use this to verify
+    the URI registered in your Google Cloud Console matches byte-for-byte.
+
+    Safe to expose: no secrets are leaked, only the public client_id and
+    the request-derived origin.
+    """
+    redirect_uri = calendar_service.resolve_redirect_uri(
+        request, callback_path=LOGIN_CALLBACK_PATH
+    )
+    calendar_redirect_uri = calendar_service.resolve_redirect_uri(request)
+    return {
+        "enabled": calendar_service.enabled,
+        "client_id_present": bool(calendar_service.client_id),
+        "client_id_tail": (
+            (calendar_service.client_id or "")[-12:]
+            if calendar_service.client_id
+            else None
+        ),
+        "login_redirect_uri": redirect_uri,
+        "calendar_redirect_uri": calendar_redirect_uri,
+        "headers_seen": {
+            "host": request.headers.get("host"),
+            "x-forwarded-host": request.headers.get("x-forwarded-host"),
+            "x-forwarded-proto": request.headers.get("x-forwarded-proto"),
+        },
+    }
+
+
 @auth_router.get("/login/callback")
 async def google_login_callback(
     request: Request,
@@ -272,9 +303,15 @@ async def google_login_callback(
         tokens = await calendar_service.exchange_code(
             code, request=request, callback_path=LOGIN_CALLBACK_PATH
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("Google sign-in token exchange failed")
-        return _login_error_redirect(origin, "token_exchange_failed")
+        # Surface a compact reason so the user can see it in the URL hash
+        # without having to grep backend logs. We URL-quote-plus to avoid
+        # breaking the fragment parser on ``=`` / ``&`` characters.
+        from urllib.parse import quote_plus
+
+        reason = quote_plus(f"token_exchange_failed: {str(exc)[:160]}")
+        return RedirectResponse(f"{origin}{LOGIN_FRONTEND_PATH}#error={reason}")
 
     access_token = tokens.get("access_token")
     if not access_token:
