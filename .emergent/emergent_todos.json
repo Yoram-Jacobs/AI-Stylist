@@ -20,7 +20,7 @@
     "status": "completed"
   },
   {
-    "content": "R.2.a — Stylist.jsx: attachment button, image-chip preview, send-with-images calls compose-outfit",
+    "content": "R.2.a — Stylist.jsx: attachment button (multi-select), image-chip preview, send-with-images calls compose-outfit",
     "status": "completed"
   },
   {
@@ -32,15 +32,15 @@
     "status": "cancelled"
   },
   {
-    "content": "R.3 — Backend smoke-test compose-outfit with fixture images (✓)",
+    "content": "R.3 — Backend smoke-test compose-outfit with fixture images (✓ — 8/9 testing-agent tests passed)",
     "status": "completed"
   },
   {
-    "content": "R.3 — Frontend lint + production build (✓)",
+    "content": "R.3 — Frontend lint + production build (✓ — yarn build OK, ESLint clean)",
     "status": "completed"
   },
   {
-    "content": "R.3 — End-to-end live screenshot test",
-    "status": "in_progress"
+    "content": "R.3 — End-to-end live screenshot test (✓)",
+    "status": "completed"
   }
 ]
