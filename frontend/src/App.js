@@ -11,6 +11,7 @@ import { SeoBase } from '@/components/SeoBase';
 
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
+import AuthCallback from '@/pages/AuthCallback';
 import Home from '@/pages/Home';
 import Closet from '@/pages/Closet';
 import AddItem from '@/pages/AddItem';
@@ -45,6 +46,9 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
             </Route>
+            {/* OAuth callback — outside PublicOnly so it can install the
+                token and forward, regardless of current auth state. */}
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route element={<AppLayout />}>
               <Route path="/home" element={<Home />} />
               <Route path="/closet" element={<Closet />} />

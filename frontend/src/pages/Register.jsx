@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 
 export default function Register() {
   const { t } = useTranslation();
@@ -40,6 +41,21 @@ export default function Register() {
           <CardContent className="p-6 md:p-8">
             <h1 className="font-display text-3xl md:text-4xl leading-[1.02] mb-2">{t('auth.createAccount')}</h1>
             <p className="text-sm text-muted-foreground mb-6">{t('auth.registerSub')}</p>
+
+            <div className="mb-6" data-testid="google-signup-block">
+              <GoogleAuthButton
+                next="/home"
+                label={t('auth.continueWithGoogle')}
+                testId="register-google-button"
+              />
+            </div>
+
+            <div className="flex items-center gap-3 mb-6">
+              <div className="h-px bg-border flex-1" />
+              <div className="caps-label text-muted-foreground">{t('common.or')}</div>
+              <div className="h-px bg-border flex-1" />
+            </div>
+
             <form onSubmit={submit} className="space-y-4" data-testid="register-form">
               <div>
                 <Label htmlFor="name">{t('auth.displayName')}</Label>

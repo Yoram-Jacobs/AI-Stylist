@@ -365,6 +365,16 @@ class StylistAdvice(BaseModel):
     do_dont: list[str] = Field(default_factory=list)
     tts_audio_base64: str | None = None
     latency_ms: dict[str, int] = Field(default_factory=dict)
+    # --- Phase S: horizon expansion ----------------------------------
+    # Populated by ``stylist_widen.widen_stylist_response`` when the
+    # primary advice references items the user doesn't own (or the user
+    # explicitly toggled "Search wider"). All optional / empty by default
+    # so old chat clients keep rendering normally.
+    marketplace_suggestions: list["MarketplaceSuggestion"] = Field(default_factory=list)
+    fashion_scout_picks: list[dict[str, Any]] = Field(default_factory=list)
+    generated_examples: list[dict[str, Any]] = Field(default_factory=list)
+    widened_for: list[str] = Field(default_factory=list)
+    applied_preferences: list[str] = Field(default_factory=list)
 
 
 # --------------------- Phase R: Outfit Composer (Stylist Power-Up) ---------------------

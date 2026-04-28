@@ -73,7 +73,14 @@
     "register": "צור חשבון",
     "registerFailed": "ההרשמה נכשלה",
     "alreadyHaveAccount": "כבר יש לך חשבון?",
-    "signInLink": "התחבר"
+    "signInLink": "התחבר",
+    "continueWithGoogle": "המשך עם Google",
+    "alsoConnectCalendar": "חבר גם את היומן שלי",
+    "signedInWithGoogle": "התחברת עם Google",
+    "calendarPersistWarning": "התחברת, אך לא הצלחנו לחבר את היומן. תוכל לנסות שוב מהפרופיל.",
+    "finishingSignIn": "מסיים התחברות…",
+    "finishingSignInSub": "אנחנו בודקים את חשבון Google שלך ומכניסים אותך פנימה.",
+    "backToLogin": "חזרה להתחברות"
   },
   "home": {
     "todayLabel": "היום",

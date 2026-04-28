@@ -51,6 +51,7 @@ async def get_styling_advice(
     cultural_rules: list[dict[str, Any]] | None = None,
     user_profile: dict[str, Any] | None = None,
     closet_summary: list[dict[str, Any]] | None = None,
+    user_preferences_block: str | None = None,
     synthesize_tts: bool = True,
 ) -> dict[str, Any]:
     """Run the full multimodal stylist pipeline and return a combined payload."""
@@ -169,6 +170,7 @@ async def get_styling_advice(
         cultural_rules=cultural_rules,
         user_profile=user_profile,
         closet_summary=closet_summary,
+        user_preferences_block=user_preferences_block,
     )
     latency["gemini_ms"] = int((time.perf_counter() - t0) * 1000)
 
