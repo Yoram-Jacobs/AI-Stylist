@@ -1,34 +1,26 @@
 [
   {
-    "content": "Add GEMINI_API_KEY support to config.py + helper that picks correct key (Gemini key prod / Emergent key dev). Switch GARMENT_VISION_MODEL default Pro → Flash per user.",
+    "content": "Backend: add make_thumbnail() util — data-URL in, small JPEG data-URL out",
     "status": "completed"
   },
   {
-    "content": "Update all services that read EMERGENT_LLM_KEY directly → use new helper (gemini_stylist, garment_vision, trend_scout, session_titles, vision_verifier, admin)",
+    "content": "Backend: /closet list endpoint generates + caches thumbnail_data_url, strips heavy *_image_url fields from response",
     "status": "completed"
   },
   {
-    "content": "Build new gemini_image_service.py using native google-genai SDK for Nano Banana (text→image + image+text→image edit)",
+    "content": "Frontend: Closet.jsx prefers thumbnail_data_url for card render (fallback to existing fields)",
     "status": "completed"
   },
   {
-    "content": "Update reconstruction.py: prefer Nano Banana when GEMINI_API_KEY is set, fall back to HF FLUX otherwise",
+    "content": "Frontend: module-level closet cache so navigation doesn't re-trigger 25MB fetch (stale-while-revalidate)",
     "status": "completed"
   },
   {
-    "content": "Add GEMINI_API_KEY slot to /app/backend/.env (commented placeholder) + secrets_template.py",
+    "content": "Backend: when user opens /closet/:id detail, still return full *_image_url fields",
     "status": "completed"
   },
   {
-    "content": "Lint backend, restart, verify dev preview still works (regression check)",
-    "status": "completed"
-  },
-  {
-    "content": "Document the env-var swap in DEPLOY.md so user knows what to add to VPS .env",
-    "status": "completed"
-  },
-  {
-    "content": "Resolve VPS unfinished-merge issue + provide final deploy one-liner",
+    "content": "Lint + restart + verify dev preview still works",
     "status": "completed"
   }
 ]
