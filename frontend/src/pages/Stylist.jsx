@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { WaveformAudioPlayer } from '@/components/WaveformAudioPlayer';
 import { ConversationSidebar } from '@/components/stylist/ConversationSidebar';
+import { OutfitCanvasMessage } from '@/components/OutfitCanvas';
 import { FashionScoutPanel } from '@/components/stylist/FashionScoutPanel';
 import { OutfitRecommendationCard } from '@/components/stylist/OutfitRecommendationCard';
 import { api } from '@/lib/api';
@@ -72,6 +73,9 @@ export default function Stylist() {
   // Composer state
   const [text, setText] = useState('');
   const [imageFile, setImageFile] = useState(null);
+  // Phase R: extra attachments (>1 image triggers the multi-image
+  // outfit composer instead of the single-image stylist endpoint).
+  const [extraImages, setExtraImages] = useState([]);
   const [includeCalendar, setIncludeCalendar] = useState(false);
   const [occasion, setOccasion] = useState('');
   const [calendarConnected, setCalendarConnected] = useState(false);
@@ -119,6 +123,9 @@ export default function Stylist() {
         role: m.role,
         transcript: m.transcript,
         payload: m.assistant_payload,
+        // Phase R: hydrate the outfit canvas if this message is one
+        // produced by the multi-image composer endpoint.
+        outfit_canvas: m.assistant_payload?.outfit_canvas || null,
       }));
       setMessages(hydrated);
     } catch (err) {
@@ -324,6 +331,52 @@ export default function Stylist() {
   const sendTurn = async ({ voiceBlob = null, overrideText = null } = {}) => {
     if (busy) return;
     const outgoingText = (overrideText ?? text).trim();
+    // Route: 2+ images → multi-image outfit composer (Phase R).
+    // The composer endpoint also auto-persists an assistant message, so
+    // we don't need a parallel call to /stylist.
+    const allImages = [imageFile, ...extraImages].filter(Boolean);
+    const useComposer = allImages.length >= 2;
+    if (useComposer) {
+      const body = new FormData();
+      if (outgoingText) body.append('text', outgoingText);
+      body.append('language', userLang);
+      if (activeSessionId) body.append('session_id', activeSessionId);
+      allImages.forEach((f) => body.append('images', f, f.name || 'upload.jpg'));
+
+      const previews = allImages.map((f) => URL.createObjectURL(f));
+      const optimistic = {
+        id: `tmp-${Date.now()}`,
+        role: 'user',
+        transcript: outgoingText || t('stylist.composeOutfitOptimistic'),
+        imagePreviews: previews,
+      };
+      setMessages((m) => [...m, optimistic]);
+      setText('');
+      setImageFile(null);
+      setExtraImages([]);
+      setBusy(true);
+      try {
+        const res = await api.composeOutfit(body);
+        const canvas = res?.canvas;
+        const newId = `a-${Date.now()}`;
+        setMessages((m) => [
+          ...m,
+          {
+            id: newId,
+            role: 'assistant',
+            transcript: canvas?.summary || t('stylist.composeOutfitDone'),
+            outfit_canvas: canvas,
+          },
+        ]);
+        if (res?.session_id) setActiveSessionId(res.session_id);
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || t('stylist.composeOutfitFailed'));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const body = new FormData();
     if (outgoingText) body.append('text', outgoingText);
     if (voiceBlob) body.append('voice_audio', voiceBlob, 'voice.webm');
@@ -480,8 +533,25 @@ export default function Stylist() {
                       className="rounded-lg mb-2 max-h-48 object-cover"
                     />
                   )}
+                  {m.imagePreviews && m.imagePreviews.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2" data-testid="stylist-msg-image-grid">
+                      {m.imagePreviews.map((src, i) => (
+                        <img
+                          key={i}
+                          src={src}
+                          alt=""
+                          className="h-20 w-20 rounded-lg object-cover border border-border"
+                        />
+                      ))}
+                    </div>
+                  )}
                   {m.transcript && (
                     <p className="text-sm whitespace-pre-wrap">{m.transcript}</p>
+                  )}
+                  {m.role === 'assistant' && m.outfit_canvas && (
+                    <div className="mt-3">
+                      <OutfitCanvasMessage canvas={m.outfit_canvas} />
+                    </div>
                   )}
                   {m.role === 'assistant' && m.payload && (
                     <div className="mt-3 space-y-3">
@@ -635,6 +705,39 @@ export default function Stylist() {
               </button>
             </div>
           )}
+          {/* Phase R: extra image chips for multi-image outfit composer */}
+          {extraImages.map((f, idx) => (
+            <div
+              key={`extra-${idx}-${f.name}`}
+              className="flex items-center gap-2 rounded-full border border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/5 px-2 py-1 text-xs"
+              data-testid={`stylist-extra-image-${idx}`}
+            >
+              <img
+                src={URL.createObjectURL(f)}
+                alt=""
+                className="h-6 w-6 rounded object-cover"
+              />
+              <span className="truncate max-w-[120px]">{f.name}</span>
+              <button
+                onClick={() =>
+                  setExtraImages((prev) => prev.filter((_, i) => i !== idx))
+                }
+                aria-label={t('stylist.removeImage')}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          {(imageFile || extraImages.length > 0) && (imageFile ? 1 : 0) + extraImages.length >= 2 && (
+            <Badge
+              variant="outline"
+              className="border-[hsl(var(--accent))]/60 text-[hsl(var(--accent))]"
+              data-testid="stylist-compose-mode-badge"
+            >
+              <Sparkles className="h-3 w-3 me-1" />
+              {t('stylist.composeOutfitMode')}
+            </Badge>
+          )}
           <div className="ms-auto">
             <button
               type="button"
@@ -681,8 +784,27 @@ export default function Stylist() {
             <input
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
-              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+              onChange={(e) => {
+                // Phase R: support N attachments. First slot still uses
+                // imageFile so the single-image /stylist path is unchanged
+                // for backwards compatibility; subsequent files spill into
+                // extraImages, which triggers the composer route once
+                // total >= 2.
+                const incoming = Array.from(e.target.files || []);
+                if (!incoming.length) return;
+                if (!imageFile) {
+                  setImageFile(incoming[0]);
+                  if (incoming.length > 1) {
+                    setExtraImages((prev) => [...prev, ...incoming.slice(1)].slice(0, 7));
+                  }
+                } else {
+                  setExtraImages((prev) => [...prev, ...incoming].slice(0, 7));
+                }
+                // Reset so re-selecting the same files re-fires onChange
+                e.target.value = '';
+              }}
             />
             <span className="inline-flex items-center justify-center h-11 w-11 rounded-xl border border-border bg-card hover:bg-secondary">
               <ImgIcon className="h-5 w-5" />
@@ -713,7 +835,7 @@ export default function Stylist() {
           )}
           <Button
             onClick={() => sendTurn({})}
-            disabled={busy || (!text.trim() && !imageFile)}
+            disabled={busy || (!text.trim() && !imageFile && extraImages.length === 0)}
             className="h-11 rounded-xl"
             data-testid="stylist-composer-send-button"
           >
