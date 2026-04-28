@@ -474,21 +474,55 @@ async def list_items(
     items = await repos.find_many(
         db.closet_items, query, sort=[("created_at", -1)], limit=limit, skip=skip
     )
-    # Strip heavy blobs from the list response — the closet card only
-    # needs ``image_url``; the full analysis/reconstruction/embedding
-    # payloads are fetched on-demand via ``GET /closet/{id}``.
-    # Without this the /closet list response balloons to multi-MB once
-    # items have base64 crop thumbnails + reconstruction payloads.
+
+    # --- thumbnail backfill + heavy-field strip ---
+    # The raw docs carry *_image_url fields that are full-resolution
+    # base64 data URLs (~0.8-1.5 MB each). Returning them verbatim makes
+    # the list response balloon to 20-60 MB for a modest closet. We:
+    #   1. Lazy-generate a ~15 KB thumbnail_data_url on first read and
+    #      persist it back to Mongo so subsequent calls skip the work.
+    #   2. Strip the heavy fields from the wire response. The detail
+    #      endpoint GET /closet/{id} still returns them in full.
+    from app.services import thumbnails as _thumbs
+
+    pairs = await _thumbs.backfill_thumbnails(items)
+    if pairs:
+        import asyncio as _asyncio
+        await _asyncio.gather(
+            *[
+                db.closet_items.update_one(
+                    {"id": _id}, {"$set": {"thumbnail_data_url": _t}}
+                )
+                for (_id, _t) in pairs
+            ]
+        )
+
+    _HEAVY_FIELDS = (
+        "clip_embedding",
+        "crop_base64",
+        "crop_mime",
+        "variants",
+        "reconstruction_metadata",
+        "retail_metadata",
+        "dpp_data",
+    )
     for it in items:
-        it.pop("clip_embedding", None)
-        it.pop("crop_base64", None)
-        it.pop("crop_mime", None)
+        for k in _HEAVY_FIELDS:
+            it.pop(k, None)
         recon = it.get("reconstruction")
         if isinstance(recon, dict):
             recon.pop("image_b64", None)
         raw = it.get("raw")
         if isinstance(raw, dict):
             raw.pop("preview", None)
+        # Strip heavy *_image_url fields ONLY when a thumbnail was
+        # successfully produced. If the thumbnail pipeline failed for
+        # this item, keep one image URL so the grid still has something
+        # to show (the user would otherwise see an empty card).
+        if isinstance(it.get("thumbnail_data_url"), str):
+            it.pop("original_image_url", None)
+            it.pop("segmented_image_url", None)
+            it.pop("reconstructed_image_url", None)
     total = await repos.count(db.closet_items, query)
     return {"items": items, "total": total, "limit": limit, "skip": skip}
 
@@ -949,7 +983,10 @@ async def clean_item_background(
                 "reconstructed_image_url": data_url,
                 "reconstruction_metadata": meta,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            },
+            # Invalidate the cached thumbnail so /closet list regenerates
+            # it from the fresh reconstructed image on the next read.
+            "$unset": {"thumbnail_data_url": ""},
         },
     )
     item = await repos.find_one(db.closet_items, {"id": item_id}) or item
@@ -1054,7 +1091,10 @@ async def set_item_photo(
                 "set_item_photo: CLIP re-embed failed (%s)", repr(exc)[:120]
             )
 
-    await db.closet_items.update_one({"id": item_id}, {"$set": update_doc})
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {"$set": update_doc, "$unset": {"thumbnail_data_url": ""}},
+    )
     item = await repos.find_one(db.closet_items, {"id": item_id}) or item
     return {
         "item": item,
@@ -1155,7 +1195,10 @@ async def repair_item_image(
         "reconstruction_metadata": meta,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.closet_items.update_one({"id": item_id}, {"$set": update_doc})
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {"$set": update_doc, "$unset": {"thumbnail_data_url": ""}},
+    )
     item = await repos.find_one(db.closet_items, {"id": item_id}) or item
     return {"item": item, "reconstruction": out, "applied": True}
 

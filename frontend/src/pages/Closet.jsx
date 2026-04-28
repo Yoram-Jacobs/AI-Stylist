@@ -28,12 +28,38 @@ import { toast } from 'sonner';
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
 const SOURCES = ['all', 'Private', 'Shared', 'Retail'];
 
+// --- Module-level cache (stale-while-revalidate) -----------------------
+// Navigating away from /closet and back used to re-fetch the entire
+// response (25+ MB once items have reconstructed images). With this
+// cache the grid paints instantly from the last known snapshot and a
+// background refresh replaces it when the server responds.
+const CLOSET_CACHE = {
+  // cache key -> { items, total, ts }
+  entries: new Map(),
+  key(filters) {
+    return `${filters.category}|${filters.source}|${filters.search || ''}`;
+  },
+  get(filters) { return this.entries.get(this.key(filters)); },
+  set(filters, items, total) {
+    this.entries.set(this.key(filters), { items, total, ts: Date.now() });
+  },
+  patch(filters, updater) {
+    const e = this.entries.get(this.key(filters));
+    if (e) e.items = updater(e.items);
+  },
+  invalidate() { this.entries.clear(); },
+};
+
 export default function Closet() {
   const { t } = useTranslation();
-  const [items, setItems] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ category: 'all', source: 'all', search: '' });
+  const initialFilters = { category: 'all', source: 'all', search: '' };
+  const initialCached = CLOSET_CACHE.get(initialFilters);
+  const [items, setItems] = useState(initialCached?.items || []);
+  const [total, setTotal] = useState(initialCached?.total || 0);
+  // Only show the big loading skeleton when we have no cached snapshot;
+  // otherwise paint the cached grid immediately and revalidate silently.
+  const [loading, setLoading] = useState(!initialCached);
+  const [filters, setFilters] = useState(initialFilters);
   // Search mode: 'keyword' uses Mongo text search, 'meaning' calls FashionCLIP.
   const [searchMode, setSearchMode] = useState('keyword');
   const [semanticActive, setSemanticActive] = useState(false); // true while the current list is semantic results
@@ -49,7 +75,9 @@ export default function Closet() {
   const [completionAnchors, setCompletionAnchors] = useState([]);
 
   const fetchItems = useCallback(async () => {
-    setLoading(true);
+    // Only show the skeleton when we have no cached data to paint.
+    const cached = CLOSET_CACHE.get(filters);
+    if (!cached) setLoading(true);
     setSemanticActive(false);
     try {
       const params = {};
@@ -57,12 +85,15 @@ export default function Closet() {
       if (filters.source !== 'all') params.source = filters.source;
       if (filters.search) params.search = filters.search;
       const res = await api.listCloset(params);
-      setItems(res.items || []);
-      setTotal(res.total || 0);
+      const nextItems = res.items || [];
+      const nextTotal = res.total || 0;
+      setItems(nextItems);
+      setTotal(nextTotal);
+      CLOSET_CACHE.set(filters, nextItems, nextTotal);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to load closet');
     } finally { setLoading(false); }
-  }, [filters.category, filters.source, filters.search]);
+  }, [filters]);
 
   const fetchSemantic = useCallback(async (text) => {
     setLoading(true);
@@ -142,6 +173,7 @@ export default function Closet() {
       ids.filter((_, idx) => results[idx].status === 'fulfilled')
     );
     setItems((prev) => prev.filter((it) => !okIds.has(it.id)));
+    CLOSET_CACHE.patch(filters, (arr) => arr.filter((it) => !okIds.has(it.id)));
     setSelected(new Set());
     setSelectMode(false);
     // Reconcile total in the background.
@@ -527,10 +559,12 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
       }`}
     >
       <AspectRatio ratio={3 / 4} className="bg-secondary relative">
-        {(item.reconstructed_image_url || item.segmented_image_url || item.original_image_url) ? (
+        {(item.thumbnail_data_url || item.reconstructed_image_url || item.segmented_image_url || item.original_image_url) ? (
           <img
-            src={item.reconstructed_image_url || item.segmented_image_url || item.original_image_url}
+            src={item.thumbnail_data_url || item.reconstructed_image_url || item.segmented_image_url || item.original_image_url}
             alt={item.title}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover"
           />
         ) : item.dpp_data ? (
