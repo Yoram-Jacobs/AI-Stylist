@@ -112,13 +112,21 @@ class GeminiStylistService:
         cultural_rules: list[dict[str, Any]] | None = None,
         user_profile: dict[str, Any] | None = None,
         closet_summary: list[dict[str, Any]] | None = None,
+        user_preferences_block: str | None = None,
     ) -> dict[str, Any]:
+        # Phase S: prepend the rendered user-preference block (sex, age,
+        # body, region, modesty, style aesthetics, avoid list...) directly
+        # to the system message so EVERY recommendation respects them.
+        # Falls through gracefully when no preferences are available.
+        sys_msg = SYSTEM_PROMPT + _language_directive(
+            (user_profile or {}).get("preferred_language")
+        )
+        if user_preferences_block:
+            sys_msg = sys_msg + "\n\n" + user_preferences_block.strip() + "\n"
         chat = LlmChat(
             api_key=self.api_key,
             session_id=session_id,
-            system_message=SYSTEM_PROMPT + _language_directive(
-                (user_profile or {}).get("preferred_language")
-            ),
+            system_message=sys_msg,
         ).with_model(self.provider, self.model)
 
         context_block = {

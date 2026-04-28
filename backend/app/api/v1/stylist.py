@@ -89,6 +89,7 @@ async def stylist_endpoint(
     occasion: str | None = Form(default=None),
     skip_tts: bool = Form(default=False),
     session_id: str | None = Form(default=None),
+    widen_search: bool = Form(default=False),
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     if not text and not voice_audio:
@@ -179,6 +180,11 @@ async def stylist_endpoint(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Title generation failed for %s: %s", session["id"], exc)
 
+    # Phase S — render user preferences once (cheap, ~1ms) so we can
+    # both inject them into the LLM prompt AND echo the applied keys.
+    from app.services.user_preferences import render_user_preferences
+    prefs_block, applied_prefs = render_user_preferences(user_profile)
+
     try:
         advice = await get_styling_advice(
             session_id=session["id"],
@@ -198,6 +204,7 @@ async def stylist_endpoint(
             cultural_rules=None,
             user_profile=user_profile,
             closet_summary=closet,
+            user_preferences_block=prefs_block,
             synthesize_tts=not skip_tts,
         )
     except ValueError as exc:
@@ -206,8 +213,40 @@ async def stylist_endpoint(
         logger.exception("Stylist misconfiguration")
         raise HTTPException(503, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        # Phase S: never 500 the chat — degrade gracefully so the user
+        # gets a soft apology instead of a hard error. Especially
+        # important when the user asks about something not in the closet.
         logger.exception("Stylist pipeline failed")
-        raise HTTPException(500, f"Stylist pipeline error: {exc}") from exc
+        advice = {
+            "reasoning_summary": (
+                "Sorry — I had trouble putting that recommendation together. "
+                "Try rephrasing, or attach a photo so I can see what you're working with."
+            ),
+            "outfit_recommendations": [],
+            "shopping_suggestions": [],
+            "do_dont": [],
+            "latency_ms": {},
+            "_soft_error": str(exc)[:200],
+        }
+
+    # Phase S — horizon expansion: marketplace + fashion-scout + Nano Banana
+    # visualisation, all soft-failing so this branch can't 500.
+    try:
+        from app.services.stylist_widen import widen_stylist_response
+        enrichment = await widen_stylist_response(
+            user=user,
+            user_text=text or "",
+            advice=advice,
+            closet_summary={"items": closet} if closet else None,
+            user_requested_widen=widen_search,
+        )
+        advice["marketplace_suggestions"] = enrichment.get("marketplace_suggestions", [])
+        advice["fashion_scout_picks"] = enrichment.get("fashion_scout_picks", [])
+        advice["generated_examples"] = enrichment.get("generated_examples", [])
+        advice["widened_for"] = enrichment.get("widened_for", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("widen-stylist soft-failed: %s", repr(exc)[:200])
+    advice["applied_preferences"] = applied_prefs
 
     await append_message(
         session_id=session["id"],
@@ -225,6 +264,12 @@ async def stylist_endpoint(
                 "segmented_image_url",
                 "infilled_image_url",
                 "spoken_reply",
+                # Phase S enrichment
+                "marketplace_suggestions",
+                "fashion_scout_picks",
+                "generated_examples",
+                "widened_for",
+                "applied_preferences",
             )
         },
         latency_ms=advice.get("latency_ms") or {},
@@ -320,6 +365,10 @@ async def compose_outfit_endpoint(
     if avoid:
         constraints["avoid"] = [s.strip() for s in avoid.split(",") if s.strip()]
 
+    # Phase S — render preferences once for the composer too.
+    from app.services.user_preferences import render_user_preferences
+    prefs_block, applied_prefs = render_user_preferences(user)
+
     try:
         canvas = await outfit_composer.compose_outfit(
             user=user,
@@ -327,7 +376,10 @@ async def compose_outfit_endpoint(
             image_bytes_list=image_bytes_list,
             language=language,
             constraints=constraints,
+            user_preferences_block=prefs_block,
         )
+        # Echo applied preferences for transparency in the canvas UI.
+        canvas["applied_preferences"] = applied_prefs
     except Exception as exc:  # noqa: BLE001
         # Never 500 the composer — return a clear empty canvas + reason.
         logger.exception("compose-outfit failed: %s", exc)

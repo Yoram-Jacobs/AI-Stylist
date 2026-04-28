@@ -583,6 +583,97 @@ export default function Stylist() {
                             : ''}
                         </div>
                       )}
+                      {/* Phase S — horizon expansion enrichment */}
+                      {m.payload.generated_examples?.length > 0 && (
+                        <div className="space-y-1" data-testid="stylist-generated-examples">
+                          <div className="caps-label text-muted-foreground">
+                            {t('stylist.examplesLabel')}
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            {m.payload.generated_examples.map((ex, k) => (
+                              <figure key={`gen-${m.id}-${k}`} className="w-32">
+                                <img
+                                  src={ex.image_data_url}
+                                  alt={ex.caption || ex.category}
+                                  loading="lazy"
+                                  className="w-full aspect-square rounded-lg border border-border object-cover"
+                                />
+                                <figcaption className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
+                                  {ex.caption || ex.category}
+                                </figcaption>
+                              </figure>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {m.payload.marketplace_suggestions?.length > 0 && (
+                        <div className="space-y-1" data-testid="stylist-marketplace-strip">
+                          <div className="caps-label text-muted-foreground flex items-center gap-1">
+                            <ShoppingBag className="h-3 w-3" />
+                            {t('stylist.marketplaceLabel')}
+                          </div>
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {m.payload.marketplace_suggestions.map((s) => (
+                              <Link
+                                key={`mkt-${m.id}-${s.listing_id}`}
+                                to={`/marketplace/${s.listing_id}`}
+                                className="block min-w-[120px] w-[120px] rounded-lg border border-border bg-card hover:border-[hsl(var(--accent))]/60"
+                              >
+                                {s.image_url && (
+                                  <img src={s.image_url} alt="" className="w-full aspect-square rounded-t-lg object-cover" />
+                                )}
+                                <div className="p-1.5">
+                                  <div className="text-[11px] line-clamp-2 leading-tight">{s.title}</div>
+                                  {s.price_cents != null && (
+                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                      {s.currency === 'USD' ? '$' : s.currency === 'ILS' ? '₪' : ''}{(s.price_cents/100).toFixed(0)}
+                                    </div>
+                                  )}
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {m.payload.fashion_scout_picks?.length > 0 && (
+                        <div className="space-y-1" data-testid="stylist-scout-strip">
+                          <div className="caps-label text-muted-foreground flex items-center gap-1">
+                            <TrendingUp className="h-3 w-3" />
+                            {t('stylist.trendsLabel')}
+                          </div>
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {m.payload.fashion_scout_picks.map((tp) => (
+                              <a
+                                key={`tp-${m.id}-${tp.id}`}
+                                href={tp.source_url || '#'}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block min-w-[140px] w-[140px] rounded-lg border border-border bg-card hover:border-[hsl(var(--accent))]/60"
+                              >
+                                {tp.image_url && (
+                                  <img src={tp.image_url} alt="" className="w-full aspect-square rounded-t-lg object-cover" />
+                                )}
+                                <div className="p-1.5">
+                                  <div className="text-[11px] line-clamp-2 leading-tight font-medium">{tp.title}</div>
+                                  {tp.source_name && (
+                                    <div className="text-[10px] text-muted-foreground mt-0.5 truncate">{tp.source_name}</div>
+                                  )}
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {m.payload.applied_preferences?.length > 0 && (
+                        <details className="text-[11px] text-muted-foreground">
+                          <summary className="cursor-pointer hover:text-foreground">
+                            {t('stylist.preferencesApplied', { count: m.payload.applied_preferences.length })}
+                          </summary>
+                          <div className="ps-2 pt-1 leading-relaxed">
+                            {m.payload.applied_preferences.join(' · ')}
+                          </div>
+                        </details>
+                      )}
                       {m.audioUrl ? (
                         <WaveformAudioPlayer src={m.audioUrl} />
                       ) : ttsSupportedRef.current && m.spokenText ? (

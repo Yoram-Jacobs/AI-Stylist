@@ -1,46 +1,34 @@
 [
   {
-    "content": "R.1.a — Add schemas: CandidateGarment, OutfitCanvas, MarketplaceSuggestion, ProfessionalSuggestion (app/models/schemas.py)",
-    "status": "completed"
+    "content": "S.1 — Build app/services/user_preferences.py: extract sex/age/body/cultural/style fields → prompt-friendly text block",
+    "status": "in_progress"
   },
   {
-    "content": "R.1.b — Create app/services/outfit_composer.py: per-image analysis → dedup → score → compose → gap-detect",
-    "status": "completed"
+    "content": "S.2 — Extend marketplace_search.suggest_for_query() (text-driven, not just gap-driven)",
+    "status": "pending"
   },
   {
-    "content": "R.1.c — Create app/services/marketplace_search.py: query listings by category/budget/tags, ranked",
-    "status": "completed"
+    "content": "S.3 — Build app/services/stylist_widen.py: orchestrator for marketplace + fashion scout + Nano Banana visualization",
+    "status": "pending"
   },
   {
-    "content": "R.1.d — Create app/services/professional_matcher.py: heuristic keyword → specialty → /professionals query",
-    "status": "completed"
+    "content": "S.4 — Wire user_preferences + widen into /api/v1/stylist endpoint, harden against 500s",
+    "status": "pending"
   },
   {
-    "content": "R.1.e — Add POST /api/v1/stylist/compose-outfit (multipart) wiring all of the above + persist as StylistMessage",
-    "status": "completed"
+    "content": "S.5 — Same wiring for /api/v1/stylist/compose-outfit (per choice 3b)",
+    "status": "pending"
   },
   {
-    "content": "R.2.a — Stylist.jsx: attachment button (multi-select), image-chip preview, send-with-images calls compose-outfit",
-    "status": "completed"
+    "content": "S.6 — Extend StylistAdvice schema with marketplace_suggestions + fashion_scout_picks + generated_examples + applied_preferences",
+    "status": "pending"
   },
   {
-    "content": "R.2.b — New OutfitCanvas.jsx component (head-to-toe slots, rejected panel, marketplace strip, pro card)",
-    "status": "completed"
+    "content": "S.7 — Frontend: render new fields in Stylist.jsx + add 'Search wider' toggle pill",
+    "status": "pending"
   },
   {
-    "content": "R.2.c — New /stylist/compose route (deferred — in-chat composer covers MVP per choice 1c)",
-    "status": "cancelled"
-  },
-  {
-    "content": "R.3 — Backend smoke-test compose-outfit with fixture images (✓ — 8/9 testing-agent tests passed)",
-    "status": "completed"
-  },
-  {
-    "content": "R.3 — Frontend lint + production build (✓ — yarn build OK, ESLint clean)",
-    "status": "completed"
-  },
-  {
-    "content": "R.3 — End-to-end live screenshot test (✓)",
-    "status": "completed"
+    "content": "S.8 — Lint, restart, smoke-test the regression-fix path (ask for shoes when none in closet)",
+    "status": "pending"
   }
 ]

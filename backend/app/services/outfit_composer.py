@@ -63,6 +63,7 @@ async def compose_outfit(
     image_bytes_list: list[bytes],
     language: str = "en",
     constraints: dict[str, Any] | None = None,
+    user_preferences_block: str | None = None,
 ) -> dict[str, Any]:
     """Run the full composer pipeline and return a serialised
     ``OutfitCanvas`` dict ready to ship to the frontend / persist.
@@ -92,6 +93,7 @@ async def compose_outfit(
         candidates=candidates,
         constraints=constraints,
         language=language,
+        user_preferences_block=user_preferences_block,
     )
     timings["compose_ms"] = int((time.perf_counter() - t2) * 1000)
 
@@ -273,6 +275,7 @@ async def _compose_with_llm(
     candidates: list[dict[str, Any]],
     constraints: dict[str, Any],
     language: str,
+    user_preferences_block: str | None = None,
 ) -> dict[str, Any]:
     """Ask the Stylist LLM to assign candidates to outfit slots.
 
@@ -345,6 +348,7 @@ async def _compose_with_llm(
             session_id=f"compose-{uuid.uuid4().hex[:8]}",
             user_text=instruction,
             image_base64=None,
+            user_preferences_block=user_preferences_block,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Composer LLM call failed: %s — falling back", repr(exc)[:160])

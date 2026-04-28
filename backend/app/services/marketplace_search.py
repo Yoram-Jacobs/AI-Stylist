@@ -228,6 +228,33 @@ def _why_phrase(lst: dict[str, Any], role: str) -> str:
 
 
 # ─── stubs (architecture-only, no surface yet) ─────────────
+async def suggest_for_query(
+    *,
+    user: dict[str, Any],
+    query: str,
+    categories: list[str] | None = None,
+    constraints: dict[str, Any] | None = None,
+    per_category: int = 3,
+) -> list[dict[str, Any]]:
+    """Text-driven marketplace search (Phase S — Stylist horizon expansion).
+
+    Used by ``stylist_widen`` when the Stylist response references a
+    category the user does not own. Wraps ``suggest_for_gaps`` with a
+    convenience signature so callers don't have to fabricate a fake
+    gaps list.
+    """
+    if not categories:
+        return []
+    gaps = [{"role": cat} for cat in categories]
+    return await suggest_for_gaps(
+        user=user,
+        gaps=gaps,
+        brief=query,
+        constraints=constraints or {},
+        per_gap=per_category,
+    )
+
+
 async def _search_google_places(  # noqa: ARG001
     *, location: str | None, role: str,
 ) -> list[dict[str, Any]]:
