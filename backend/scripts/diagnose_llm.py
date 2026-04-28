@@ -13,7 +13,6 @@ Outputs the health of every link in the chain:
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import sys
 import traceback
@@ -79,14 +78,15 @@ async def check_stylist() -> None:
 
 
 # ─── 3) The Eyes vision smoke test ──────────────────────────────
-_TINY_JPEG = bytes.fromhex(
-    "ffd8ffe000104a46494600010100000100010000ffdb004300080606"
-    "07060508070709090808080a0c140d0c0b0b0c1912130f141d1a1f1e"
-    "1d1a1c1c20242e2722272e2727272e2e272c2727272e272c272c272c"
-    "272c272c272c272c272c272c272c272c2ffc0000b08000100010101"
-    "1100ffc4001f0000010501010101010101000000000000000001020"
-    "304050607080a0bffda00080101000000003ffbd0ffd9"
-)
+def _make_tiny_jpeg() -> bytes:
+    """Generate a 32x32 white JPEG at call time — avoids hex-literal typos."""
+    import io
+    from PIL import Image
+
+    img = Image.new("RGB", (32, 32), (245, 245, 245))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=70)
+    return buf.getvalue()
 
 
 async def check_eyes() -> None:
@@ -97,14 +97,16 @@ async def check_eyes() -> None:
         print(f"  IMPORT FAIL: {type(e).__name__}: {e}")
         return
     if garment_vision_service is None:
-        print("  service is None"); return
+        print("  service is None")
+        return
     print(
         f"  model={garment_vision_service.model} "
         f"provider={garment_vision_service.provider} "
         f"detect_model={garment_vision_service.detect_model}"
     )
+    tiny = _make_tiny_jpeg()
     try:
-        out = await garment_vision_service.analyze(_TINY_JPEG)
+        out = await garment_vision_service.analyze(tiny)
         print(
             f"  OK — title={out.get('title')!r} "
             f"category={out.get('category')!r} "
@@ -121,7 +123,8 @@ def check_local_vision() -> None:
     try:
         from app.config import settings
     except Exception as e:  # noqa: BLE001
-        print(f"  config import FAIL: {e}"); return
+        print(f"  config import FAIL: {e}")
+        return
     print(f"  USE_LOCAL_CLOTHING_PARSER = {settings.USE_LOCAL_CLOTHING_PARSER}")
     print(f"  USE_CLOTHING_PARSER       = {settings.USE_CLOTHING_PARSER}")
     print(f"  AUTO_MATTE_CROPS          = {settings.AUTO_MATTE_CROPS}")
