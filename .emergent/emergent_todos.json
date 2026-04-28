@@ -1,34 +1,42 @@
 [
   {
-    "content": "S.1 — Build app/services/user_preferences.py: extract sex/age/body/cultural/style fields → prompt-friendly text block",
-    "status": "in_progress"
+    "content": "Backend: add ADMIN_EMAILS config + apply_admin_role helper",
+    "status": "completed"
   },
   {
-    "content": "S.2 — Extend marketplace_search.suggest_for_query() (text-driven, not just gap-driven)",
-    "status": "pending"
+    "content": "Backend: refactor calendar_service to support custom scopes + custom callback path for sign-in flow",
+    "status": "completed"
   },
   {
-    "content": "S.3 — Build app/services/stylist_widen.py: orchestrator for marketplace + fashion scout + Nano Banana visualization",
-    "status": "pending"
+    "content": "Backend: add /auth/google/login/start (unauth) + /auth/google/login/callback endpoints with find-or-create user, optional calendar scope, JWT issuance",
+    "status": "completed"
   },
   {
-    "content": "S.4 — Wire user_preferences + widen into /api/v1/stylist endpoint, harden against 500s",
-    "status": "pending"
+    "content": "Backend: apply ADMIN_EMAILS check in register/login/google-login + create grant_admin.py CLI",
+    "status": "completed"
   },
   {
-    "content": "S.5 — Same wiring for /api/v1/stylist/compose-outfit (per choice 3b)",
-    "status": "pending"
+    "content": "Frontend: add getGoogleLoginUrl helper in lib/api.js",
+    "status": "completed"
   },
   {
-    "content": "S.6 — Extend StylistAdvice schema with marketplace_suggestions + fashion_scout_picks + generated_examples + applied_preferences",
-    "status": "pending"
+    "content": "Frontend: add 'Continue with Google' button + 'Also connect my calendar' checkbox to Login.jsx",
+    "status": "completed"
   },
   {
-    "content": "S.7 — Frontend: render new fields in Stylist.jsx + add 'Search wider' toggle pill",
-    "status": "pending"
+    "content": "Frontend: add 'Continue with Google' button to Register.jsx",
+    "status": "completed"
   },
   {
-    "content": "S.8 — Lint, restart, smoke-test the regression-fix path (ask for shoes when none in closet)",
-    "status": "pending"
+    "content": "Frontend: create /auth/callback route (AuthCallback.jsx) that reads hash fragment, persists token, redirects",
+    "status": "completed"
+  },
+  {
+    "content": "i18n: add new auth keys to en.json and he.json",
+    "status": "completed"
+  },
+  {
+    "content": "Smoke test: backend endpoints + frontend flow with screenshot tool",
+    "status": "completed"
   }
 ]

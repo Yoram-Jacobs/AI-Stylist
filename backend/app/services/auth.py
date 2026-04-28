@@ -90,3 +90,22 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict[str, Any
     if "admin" not in (user.get("roles") or []):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Admin role required")
     return user
+
+
+def apply_admin_role(roles: list[str] | None, email: str | None) -> list[str]:
+    """Return a roles list with ``admin`` added/removed based on the
+    ``ADMIN_EMAILS`` allow-list. Idempotent and safe to call on every
+    register / login / Google sign-in.
+
+    * If ``email`` is in ``settings.admin_emails_set`` → ensures ``admin``.
+    * Otherwise → preserves the user's other roles untouched. We deliberately
+      DO NOT auto-demote here: explicit demotion goes through
+      ``scripts/grant_admin.py --revoke`` so a typo in ``.env`` cannot wipe
+      out an existing admin.
+    """
+    base = list(roles or ["user"])
+    if "user" not in base:
+        base.append("user")
+    if email and email.lower() in settings.admin_emails_set and "admin" not in base:
+        base.append("admin")
+    return base

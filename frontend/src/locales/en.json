@@ -73,7 +73,14 @@
     "register": "Create account",
     "registerFailed": "Registration failed",
     "alreadyHaveAccount": "Already have an account?",
-    "signInLink": "Sign in"
+    "signInLink": "Sign in",
+    "continueWithGoogle": "Continue with Google",
+    "alsoConnectCalendar": "Also connect my calendar",
+    "signedInWithGoogle": "Signed in with Google",
+    "calendarPersistWarning": "Signed in, but we couldn't connect your calendar. You can retry from Profile.",
+    "finishingSignIn": "Finishing sign-in…",
+    "finishingSignInSub": "We're checking your Google account and bringing you in.",
+    "backToLogin": "Back to login"
   },
   "home": {
     "todayLabel": "Today",

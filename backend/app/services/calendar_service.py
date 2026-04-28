@@ -44,6 +44,12 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
+# Lean scope set used by the new "Sign in with Google" flow when the user
+# does NOT tick the "Also connect my calendar" checkbox. Keeping calendar
+# off this set makes the consent screen friendlier and avoids surprising
+# users with calendar access on a plain login.
+LOGIN_SCOPES = ["openid", "email", "profile"]
+
 
 def _public_base_url(request: Any) -> str | None:
     """Return the public origin the browser sees (scheme + host).
@@ -93,18 +99,30 @@ class CalendarService:
         The redirect URI is computed per-request (or env-overridden)."""
         return bool(self.client_id and self.client_secret)
 
-    def resolve_redirect_uri(self, request: Any = None) -> str | None:
+    def resolve_redirect_uri(
+        self, request: Any = None, callback_path: str | None = None
+    ) -> str | None:
         """Return the OAuth redirect URI. Prefers the explicit env override
         (stable across restarts — best for keeping a single entry in the
         Google Cloud console), otherwise falls back to the incoming
         request's public-facing origin + the callback path.
+
+        ``callback_path`` lets callers pick which backend route Google
+        redirects to (calendar-connect vs sign-in-login). When ``None`` we
+        keep the original calendar-connect path for backwards compatibility.
+        Note: the env override (``GOOGLE_OAUTH_REDIRECT_URI``) only applies
+        when ``callback_path`` is not provided — sign-in-login uses a
+        different backend route, so it always derives from the request host.
         """
-        if self.redirect_uri:
+        if callback_path is None and self.redirect_uri:
             return self.redirect_uri
         if request is None:
             return None
         base = _public_base_url(request)
-        return f"{base}/api/v1/auth/google/callback" if base else None
+        if not base:
+            return None
+        path = callback_path or "/api/v1/auth/google/callback"
+        return f"{base}{path}"
 
     def resolve_post_login_redirect(self, request: Any = None) -> str:
         """Absolute URL where the browser is sent after a successful OAuth
@@ -120,8 +138,14 @@ class CalendarService:
         return "/me"
 
     # -------------------- OAuth URL --------------------
-    def build_authorization_url(self, state: str, request: Any = None) -> str:
-        redirect_uri = self.resolve_redirect_uri(request)
+    def build_authorization_url(
+        self,
+        state: str,
+        request: Any = None,
+        scopes: list[str] | None = None,
+        callback_path: str | None = None,
+    ) -> str:
+        redirect_uri = self.resolve_redirect_uri(request, callback_path=callback_path)
         if not redirect_uri:
             raise RuntimeError(
                 "Google OAuth redirect URI is not configured "
@@ -131,7 +155,7 @@ class CalendarService:
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": " ".join(SCOPES),
+            "scope": " ".join(scopes or SCOPES),
             "access_type": "offline",
             "prompt": "consent",
             "include_granted_scopes": "true",
@@ -143,7 +167,7 @@ class CalendarService:
 
     # -------------------- token exchange --------------------
     async def exchange_code(
-        self, code: str, request: Any = None
+        self, code: str, request: Any = None, callback_path: str | None = None
     ) -> dict[str, Any]:
         """Swap an auth code for access+refresh tokens. Raises on failure.
 
@@ -152,7 +176,9 @@ class CalendarService:
         from the current request's host) so the handshake succeeds on
         preview, staging, prod, and any custom domain.
         """
-        redirect_uri = self.resolve_redirect_uri(request)
+        redirect_uri = self.resolve_redirect_uri(
+            request, callback_path=callback_path
+        )
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 GOOGLE_TOKEN_URL,

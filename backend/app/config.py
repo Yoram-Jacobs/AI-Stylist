@@ -305,19 +305,36 @@ class Settings:
         )
 
     # --- Google OAuth (Phase 4) ---
-    GOOGLE_OAUTH_CLIENT_ID: str | None = os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or None
+    GOOGLE_OAUTH_CLIENT_ID: str | None = (
+        (os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or "").strip() or None
+    )
     GOOGLE_OAUTH_CLIENT_SECRET: str | None = (
-        os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or None
+        (os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or "").strip() or None
     )
     GOOGLE_OAUTH_REDIRECT_URI: str | None = (
-        os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or None
+        (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip() or None
     )
     GOOGLE_OAUTH_POST_LOGIN_REDIRECT: str | None = (
-        os.environ.get("GOOGLE_OAUTH_POST_LOGIN_REDIRECT") or None
+        (os.environ.get("GOOGLE_OAUTH_POST_LOGIN_REDIRECT") or "").strip() or None
     )
 
     # --- Dev toggles ---
     ALLOW_DEV_BYPASS: bool = os.environ.get("ALLOW_DEV_BYPASS", "true").lower() == "true"
+
+    # --- Admin allow-list (Phase T-Auth) ---
+    # Comma-separated list of emails that should auto-receive the ``admin``
+    # role on register / login / Google sign-in. Re-checked on every login,
+    # so adding/removing an email + restarting the backend promotes/demotes
+    # without DB surgery. The CLI fallback is ``backend/scripts/grant_admin.py``.
+    ADMIN_EMAILS: str = os.environ.get("ADMIN_EMAILS", "")
+
+    @property
+    def admin_emails_set(self) -> set[str]:
+        return {
+            e.strip().lower()
+            for e in (self.ADMIN_EMAILS or "").split(",")
+            if e.strip()
+        }
 
     # --- Trend-Scout scheduler ---
     TREND_SCOUT_ENABLED: bool = (

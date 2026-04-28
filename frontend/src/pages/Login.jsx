@@ -5,9 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -16,6 +18,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [withCalendar, setWithCalendar] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -67,6 +70,33 @@ export default function Login() {
           <CardContent className="p-6 md:p-8">
             <h1 className="font-display text-3xl md:text-4xl leading-[1.02] mb-2">{t('auth.welcomeBack')}</h1>
             <p className="text-sm text-muted-foreground mb-6">{t('auth.signInSub')}</p>
+
+            <div className="space-y-3 mb-6" data-testid="google-signin-block">
+              <GoogleAuthButton
+                withCalendar={withCalendar}
+                next="/home"
+                label={t('auth.continueWithGoogle')}
+                testId="login-google-button"
+              />
+              <label
+                className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
+                data-testid="login-with-calendar-row"
+              >
+                <Checkbox
+                  checked={withCalendar}
+                  onCheckedChange={(v) => setWithCalendar(Boolean(v))}
+                  data-testid="login-with-calendar-checkbox"
+                />
+                <span>{t('auth.alsoConnectCalendar')}</span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3 mb-6">
+              <div className="h-px bg-border flex-1" />
+              <div className="caps-label text-muted-foreground">{t('common.or')}</div>
+              <div className="h-px bg-border flex-1" />
+            </div>
+
             <form onSubmit={submit} className="space-y-4" data-testid="login-form">
               <div>
                 <Label htmlFor="email">{t('auth.email')}</Label>
@@ -85,14 +115,8 @@ export default function Login() {
               </Button>
             </form>
 
-            <div className="flex items-center gap-3 my-6">
-              <div className="h-px bg-border flex-1" />
-              <div className="caps-label text-muted-foreground">{t('common.or')}</div>
-              <div className="h-px bg-border flex-1" />
-            </div>
-
-            <Button type="button" variant="secondary" onClick={dev} disabled={busy}
-              className="w-full rounded-xl" data-testid="login-dev-bypass-button">
+            <Button type="button" variant="ghost" onClick={dev} disabled={busy}
+              className="w-full rounded-xl mt-4 text-muted-foreground hover:text-foreground" data-testid="login-dev-bypass-button">
               <Sparkles className="h-4 w-4 me-2" /> {t('auth.continueAsDev')}
             </Button>
 

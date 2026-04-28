@@ -13,6 +13,7 @@ from app.db.database import get_db
 from app.models.schemas import User
 from app.services import repos
 from app.services.auth import (
+    apply_admin_role,
     create_access_token,
     get_current_user,
     hash_password,
@@ -63,6 +64,9 @@ async def register(payload: RegisterIn) -> TokenOut:
         preferred_voice_id=payload.preferred_voice_id,
     )
     doc = user.model_dump()
+    # Apply admin allow-list at registration time so the very first sign-up
+    # of an allow-listed email already has admin powers.
+    doc["roles"] = apply_admin_role(doc.get("roles"), user.email)
     await repos.insert(db.users, doc)
     logger.info("user registered email=%s id=%s", user.email, user.id)
     token = create_access_token(user.id, {"email": user.email})
@@ -77,6 +81,20 @@ async def login(payload: LoginIn) -> TokenOut:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     if not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
+    # Re-apply admin allow-list on every login so promotions via .env are
+    # picked up immediately without a DB migration.
+    new_roles = apply_admin_role(user.get("roles"), user.get("email"))
+    if set(new_roles) != set(user.get("roles") or []):
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$set": {
+                    "roles": new_roles,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        user["roles"] = new_roles
     token = create_access_token(user["id"], {"email": user["email"]})
     return TokenOut(access_token=token, user=_public_user(user))
 
