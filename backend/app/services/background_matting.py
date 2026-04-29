@@ -97,9 +97,17 @@ def _rembg_remove(image_bytes: bytes) -> bytes | None:
 
     try:
         sess = _get_session()
-        # 1) Decode original at full resolution.
+        # 1) Decode original at full resolution. ImageOps.exif_transpose
+        #    auto-rotates the image based on EXIF orientation tags so
+        #    DSLR/phone portrait shots come through right-side-up. Without
+        #    this, rembg sees the rotated content while the user sees the
+        #    correctly-oriented result, producing a cutout that doesn't
+        #    align with the visible garment.
         try:
-            original = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            from PIL import ImageOps
+
+            original = Image.open(io.BytesIO(image_bytes))
+            original = ImageOps.exif_transpose(original).convert("RGB")
         except Exception:  # noqa: BLE001
             # Not a decodable image — let rembg attempt anyway.
             out = remove(image_bytes, session=sess)

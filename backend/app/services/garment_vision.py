@@ -901,22 +901,49 @@ class GarmentVisionService:
             # already-cropped product photos deserve.
             async def _whole_image_matte() -> bytes | None:
                 if not settings.AUTO_MATTE_CROPS:
+                    logger.info("already-cropped matte: AUTO_MATTE_CROPS=False, skipping")
                     return None
                 try:
                     from app.services import background_matting
+                    import time as _t
 
-                    return await background_matting.matte_crop(image_bytes)
-                except Exception as exc:  # noqa: BLE001
+                    t0 = _t.time()
                     logger.info(
-                        "already-cropped matte failed: %s — keeping original",
-                        repr(exc)[:120],
+                        "already-cropped matte: starting rembg on %d-byte image",
+                        len(image_bytes),
+                    )
+                    result = await background_matting.matte_crop(image_bytes)
+                    dt = _t.time() - t0
+                    if result:
+                        logger.info(
+                            "already-cropped matte: SUCCESS in %.1fs (output %d bytes)",
+                            dt,
+                            len(result),
+                        )
+                    else:
+                        logger.warning(
+                            "already-cropped matte: rembg returned None after %.1fs "
+                            "(input %d bytes) — keeping original",
+                            dt,
+                            len(image_bytes),
+                        )
+                    return result
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "already-cropped matte: rembg raised %s — keeping original",
+                        repr(exc)[:200],
                     )
                     return None
 
-            single, matted = await asyncio.gather(
-                self.analyze(image_bytes, language=language),
-                _whole_image_matte(),
-            )
+            # Serialise rembg → Gemini instead of running them in
+            # parallel via asyncio.gather. Concurrent execution on
+            # memory-constrained boxes (3 GB containers) can cause
+            # silent OOM kills of rembg's onnxruntime session that
+            # show up in the closet as "background not removed". The
+            # latency cost is small (~17 s rembg + ~5 s Gemini) and
+            # correctness > a few seconds.
+            matted = await _whole_image_matte()
+            single = await self.analyze(image_bytes, language=language)
             if matted:
                 crop_b64 = base64.b64encode(matted).decode("ascii")
                 crop_mime = "image/png"
