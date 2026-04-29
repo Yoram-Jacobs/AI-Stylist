@@ -175,6 +175,68 @@ def _mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     return int(ys.min()), int(xs.min()), int(ys.max()), int(xs.max())
 
 
+def _postprocess_mask(mask: np.ndarray) -> np.ndarray:
+    """Clean up a noisy SegFormer binary mask into a clean garment cutout.
+
+    Raw SegFormer output is per-pixel argmax with no spatial regularisation,
+    which produces three artefacts that show up as "colour stains" when the
+    mask is used as an alpha channel:
+
+    1. **Holes inside the garment** — shadows / dark folds get misclassified
+       as background, leaving see-through pockets in the middle of a shirt.
+    2. **Jagged stair-step edges** — neighbouring pixels flip class along
+       boundaries, giving a noisy outline.
+    3. **Floating specks** — far-from-garment pixels misclassified as the
+       same class, scattered around the image.
+
+    Fix:
+      * morphological **closing** (dilate→erode) smooths edges and bridges
+        thin gaps where the mask broke around belts, straps, etc.
+      * `binary_fill_holes` fills any enclosed background blob inside the
+        garment — eliminating the see-through "stains".
+      * keep only the **largest connected component** so floating specks
+        don't drag random crops of the user's couch into the cutout.
+
+    Kernel size scales with image dimensions so it works equally well on
+    a 600 px portrait and a 4000 px DSLR shot.
+    """
+    from scipy import ndimage
+
+    if mask.dtype != np.bool_ and mask.max() > 1:
+        # Allow callers to pass uint8 0/1 OR 0/255 — both are common.
+        binary = mask > 0
+    else:
+        binary = mask.astype(bool)
+    if not binary.any():
+        return mask.astype(np.uint8)
+
+    H, W = binary.shape
+    # Kernel size: ~0.4% of the shorter edge, clamped to a sensible range.
+    # On a 1024 px image this is ~4 px; on 4000 px ~16 px. Small enough
+    # that we don't dissolve thin straps, large enough to smooth noise.
+    k = max(3, min(15, int(round(min(H, W) * 0.004)) | 1))  # force odd
+
+    # 1) Closing: dilate then erode → smooths edges, bridges hairline gaps.
+    structure = np.ones((k, k), dtype=bool)
+    closed = ndimage.binary_closing(binary, structure=structure, iterations=1)
+
+    # 2) Fill enclosed holes (shadows misclassified as background).
+    filled = ndimage.binary_fill_holes(closed)
+    if filled is None:  # type: ignore[truthy-bool]
+        filled = closed
+
+    # 3) Keep only the largest connected component. Drops floating specks
+    #    far from the main garment which would otherwise pollute the
+    #    cutout with random scenery.
+    labeled, n = ndimage.label(filled)
+    if n > 1:
+        sizes = ndimage.sum(filled, labeled, range(1, n + 1))
+        biggest = int(np.argmax(sizes)) + 1
+        filled = labeled == biggest
+
+    return filled.astype(np.uint8)
+
+
 async def _call_self_hosted(
     image_bytes: bytes, endpoint_url: str, img_size: tuple[int, int]
 ) -> list[dict[str, Any]] | None:
@@ -352,6 +414,12 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
             "mask": combined,
         }
 
+    # 2b) Clean up every merged mask: fill shadow-holes, smooth jagged
+    #     edges, drop floating specks. Without this step the alpha
+    #     channel on cropped PNGs looks like swiss cheese.
+    for item in by_label.values():
+        item["mask"] = _postprocess_mask(item["mask"])
+
     # 3) Finalise: compute bboxes from merged masks, emit canonical dict.
     out: list[dict[str, Any]] = []
     for item in by_label.values():
@@ -436,9 +504,25 @@ def crop_with_mask(
     else:
         m_resized = (mask * 255).astype(np.uint8)
     mask_crop = m_resized[y1:y2, x1:x2]
+
+    # Feather the alpha edge so the cutout doesn't look stair-stepped.
+    # A 1.2 px gaussian blur softens binary edges into a clean anti-
+    # aliased boundary without dissolving thin straps. Skip when Pillow
+    # is not available with the filter (extremely rare).
+    try:
+        from PIL import ImageFilter
+
+        alpha_im = Image.fromarray(mask_crop, mode="L").filter(
+            ImageFilter.GaussianBlur(radius=1.2)
+        )
+        # Re-clip to 0/255 range — the blur leaves us in 0..255 already.
+        feathered = np.array(alpha_im)
+    except Exception:  # noqa: BLE001
+        feathered = mask_crop
+
     # Combine existing alpha with semantic mask (min = union-of-opaque).
     alpha = np.array(cropped.split()[-1])
-    new_alpha = np.minimum(alpha, mask_crop).astype(np.uint8)
+    new_alpha = np.minimum(alpha, feathered).astype(np.uint8)
     cropped.putalpha(Image.fromarray(new_alpha, mode="L"))
     buf = io.BytesIO()
     cropped.save(buf, format="PNG", optimize=True)
