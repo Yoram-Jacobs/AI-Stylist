@@ -8,11 +8,23 @@
     "status": "completed"
   },
   {
-    "content": "Issue #3: clarify with user about Emergent deployment strategy (ML stack incompatible with Emergent pod)",
-    "status": "in_progress"
+    "content": "Lint, restart, smoke-test on a synthetic graphic-T scenario",
+    "status": "completed"
   },
   {
-    "content": "Lint, restart, smoke-test on a synthetic graphic-T scenario",
+    "content": "Issue #3a: Strip heavy ML deps (torch/transformers/rembg/cuda/scipy/onnxruntime/...) from requirements.txt -> requirements-ml.txt",
+    "status": "completed"
+  },
+  {
+    "content": "Issue #3b: Update deploy/Dockerfile.backend (Hetzner) to install both requirements files",
+    "status": "completed"
+  },
+  {
+    "content": "Issue #3c: Update CORS to include the Emergent host origin",
+    "status": "completed"
+  },
+  {
+    "content": "Issue #3d: Verify Emergent host: dev preview should still build/run after this change",
     "status": "completed"
   }
 ]

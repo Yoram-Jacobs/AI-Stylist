@@ -1,0 +1,40 @@
+# DressApp — Heavy ML dependencies (Hetzner / dev only)
+#
+# This file is intentionally NOT installed by the lightweight Emergent
+# deployment (`ai-stylist-api.emergent.host`), whose 250 m CPU / 1 Gi RAM
+# pod cannot host the local SegFormer + rembg pipeline.
+#
+# Where this file IS installed:
+#   * Hetzner production (`deploy/Dockerfile.backend` does
+#     `pip install -r requirements.txt -r requirements-ml.txt`).
+#   * Emergent dev preview (this container — has more headroom than the
+#     deploy pod and pre-installs torch/transformers/rembg from
+#     `requirements.txt` historically; see notes in CLAUDE.md / plan.md).
+#
+# Where it is NOT installed:
+#   * Emergent deploy pod — code paths that need torch/rembg detect the
+#     missing module at runtime and fall back to the HF Inference API
+#     (clothing_parser.py) or skip cleanly (background_matting.py).
+#     See `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` flags.
+#
+# CPU-only torch is pre-installed from
+# https://download.pytorch.org/whl/cpu by the Hetzner Dockerfile so we
+# don't pull the ~2 GB CUDA wheel from PyPI; pinning here keeps the
+# version contract explicit.
+
+# Local SegFormer pipeline (clothing_parser.py)
+torch==2.5.1
+torchvision==0.20.1
+transformers==5.5.4
+tokenizers==0.22.2
+safetensors==0.5.2
+accelerate==1.13.0
+peft==0.19.1
+einops==0.8.2
+
+# Mask post-processing (clothing_parser._postprocess_mask)
+scipy==1.17.1
+
+# Local background matting (background_matting.py)
+rembg==2.0.60
+onnxruntime==1.19.2

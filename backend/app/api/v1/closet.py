@@ -494,6 +494,23 @@ async def analyze_version() -> dict[str, Any]:
     # the batch-upload OOM fix landed on the VPS.
     markers["analyze_serial_lock"] = "_ANALYZE_LOCK" in globals()
 
+    # Expose which ML path is live so the user can tell at a glance
+    # whether dressapp.co is running the full-fat local stack or the
+    # Emergent host is running the HF/Gemini fallback path.
+    markers["use_local_clothing_parser"] = bool(
+        getattr(settings, "USE_LOCAL_CLOTHING_PARSER", False)
+    )
+    markers["auto_matte_crops"] = bool(
+        getattr(settings, "AUTO_MATTE_CROPS", False)
+    )
+    try:
+        from app.config import _HAS_LOCAL_ML, _HAS_REMBG  # type: ignore
+
+        markers["torch_installed"] = bool(_HAS_LOCAL_ML)
+        markers["rembg_installed"] = bool(_HAS_REMBG)
+    except Exception:  # noqa: BLE001
+        pass
+
     # --- NEW: live rembg health probe ---
     # Generates two test images (256x256 sanity + 2000x2000 real-world
     # scale) and runs the FULL matte_crop pipeline on each. The 2K test
