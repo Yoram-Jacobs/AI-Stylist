@@ -352,8 +352,14 @@ async def analyze_item_image(
                 "Garment analyzer is temporarily unavailable. Please try again.",
             ) from exc
         items_out: list[dict[str, Any]] = []
+        dropped_unidentifiable = 0
+        from app.services.garment_vision import _is_unidentifiable
+
         for det in detections:
             analysis = _safe_analysis(dict(det.get("analysis") or {}))
+            if _is_unidentifiable(analysis):
+                dropped_unidentifiable += 1
+                continue
             items_out.append(
                 {
                     "label": det.get("label"),
@@ -363,6 +369,20 @@ async def analyze_item_image(
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
                 }
+            )
+        if dropped_unidentifiable:
+            logger.info(
+                "/analyze: dropped %d unidentifiable item(s)",
+                dropped_unidentifiable,
+            )
+        # If everything was rejected, surface a clean 422 so the
+        # frontend can show "couldn't recognise any garment in this
+        # photo" instead of saving an empty card.
+        if not items_out:
+            raise HTTPException(
+                422,
+                "We couldn't identify any garment in this photo. "
+                "Please try a clearer, well-lit shot.",
             )
         # Mirror the first item at the top level so older callers keep working.
         first = items_out[0]["analysis"] if items_out else _safe_analysis({})
@@ -377,6 +397,14 @@ async def analyze_item_image(
             503, "Garment analyzer is temporarily unavailable. Please try again."
         ) from exc
     analysis = _safe_analysis(parsed)
+    from app.services.garment_vision import _is_unidentifiable
+
+    if _is_unidentifiable(analysis):
+        raise HTTPException(
+            422,
+            "We couldn't identify any garment in this photo. "
+            "Please try a clearer, well-lit shot.",
+        )
     crop_b64 = base64.b64encode(raw).decode("ascii")
     return {
         "items": [

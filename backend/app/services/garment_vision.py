@@ -361,6 +361,48 @@ def _nms_detections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept
 
 
+def _is_unidentifiable(analysis: dict[str, Any] | None) -> bool:
+    """Return True when the LLM analysis indicates it couldn't make sense
+    of the crop \u2014 used to drop noise crops from the closet rather
+    than save useless "Unidentifiable Garment" cards.
+
+    Triggers on three signals (any of them is enough):
+
+    1. Title contains a give-up phrase ("unidentifiable", "obscured",
+       "unknown", "cannot identify", "not visible").
+    2. Caption contains a give-up phrase or starts with the LLM's
+       boilerplate refusal pattern ("the item in this photo is not...").
+    3. Both ``item_type`` *and* ``sub_category`` are empty/missing \u2014
+       a sign the LLM gave up on classifying the garment.
+    """
+    if not analysis:
+        return True
+    GIVE_UP_PHRASES = (
+        "unidentifiable",
+        "obscured",
+        "cannot identify",
+        "can't identify",
+        "not clearly visible",
+        "not identifiable",
+        "unable to identify",
+        "no garment",
+        "no clothing",
+        "unknown garment",
+        "unknown item",
+    )
+    title = (analysis.get("title") or "").lower()
+    caption = (analysis.get("caption") or "").lower()
+    if any(p in title for p in GIVE_UP_PHRASES):
+        return True
+    if any(p in caption for p in GIVE_UP_PHRASES):
+        return True
+    item_type = (analysis.get("item_type") or "").strip()
+    sub_category = (analysis.get("sub_category") or "").strip()
+    if not item_type and not sub_category:
+        return True
+    return False
+
+
 def _looks_already_cropped(detections: list[dict[str, Any]]) -> bool:
     """Return True when the photo is already a tight single-item shot.
 
@@ -1120,6 +1162,15 @@ class GarmentVisionService:
 
         results = await asyncio.gather(*[_one(d, b, m) for d, b, m in crops])
         items = [r for r in results if r]
+        # Drop crops the LLM couldn't identify \u2014 they save as useless
+        # "Unidentifiable Garment" cards in the closet otherwise.
+        before_drop = len(items)
+        items = [r for r in items if not _is_unidentifiable(r.get("analysis"))]
+        if len(items) < before_drop:
+            logger.info(
+                "analyze_outfit: dropped %d unidentifiable item(s)",
+                before_drop - len(items),
+            )
         # If every parallel call failed, fall back once.
         if not items:
             single = await self.analyze(image_bytes)
