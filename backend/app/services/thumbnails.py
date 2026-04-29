@@ -57,24 +57,56 @@ def _decode_data_url(data_url: str) -> bytes | None:
         return None
 
 
+def _has_meaningful_alpha(img: Image.Image) -> bool:
+    """Return True when the image has any non-fully-opaque pixels.
+
+    A garment cutout from rembg/SegFormer is RGBA with most pixels
+    transparent and the garment opaque. A photo accidentally opened as
+    RGBA might also be RGBA but with all alpha == 255 (no actual
+    transparency). We only want to keep PNG output for the former.
+    """
+    if img.mode not in ("RGBA", "LA"):
+        return False
+    try:
+        alpha = img.split()[-1]
+        # ``getextrema()`` returns ``(min, max)`` for an L-mode band.
+        lo, hi = alpha.getextrema()
+        return lo < 255  # any pixel that isn't fully opaque
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _downsize_bytes(raw: bytes) -> bytes | None:
-    """Decode → shrink → re-encode as JPEG. Returns ``None`` on any error."""
+    """Decode → shrink → re-encode. Returns ``None`` on any error.
+
+    PNGs with real transparency (rembg cutouts, SegFormer-masked PNGs)
+    are kept as PNG so the closet grid renders them on the page
+    background instead of mashing them onto an opaque colour. Fully-
+    opaque inputs become JPEG to keep payload tiny.
+    """
     try:
         img = Image.open(io.BytesIO(raw))
+        # Flatten palette images so we can inspect their alpha properly.
+        if img.mode == "P":
+            img = img.convert("RGBA")
     except Exception as exc:  # noqa: BLE001
         logger.info("thumbnail decode failed: %s", repr(exc)[:120])
         return None
     try:
-        # Flatten alpha onto a neutral background so JPEG doesn't crash.
-        if img.mode in ("RGBA", "LA", "P"):
-            background = Image.new("RGB", img.size, (245, 245, 245))
-            if img.mode == "P":
+        keep_alpha = _has_meaningful_alpha(img)
+        if keep_alpha:
+            # Resize the RGBA image directly — Pillow handles alpha
+            # downsampling correctly with LANCZOS.
+            if img.mode != "RGBA":
                 img = img.convert("RGBA")
-            background.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
-            img = background
-        elif img.mode != "RGB":
+            img.thumbnail(MAX_THUMB_SIZE, Image.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            return buf.getvalue()
+        # No alpha to preserve — JPEG keeps the closet payload small.
+        if img.mode != "RGB":
             img = img.convert("RGB")
-        img.thumbnail(MAX_THUMB_SIZE)
+        img.thumbnail(MAX_THUMB_SIZE, Image.LANCZOS)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=THUMB_QUALITY, optimize=True)
         return buf.getvalue()
@@ -84,14 +116,21 @@ def _downsize_bytes(raw: bytes) -> bytes | None:
 
 
 def make_thumb_from_data_url(data_url: str) -> str | None:
-    """Synchronous core — data URL in, data URL out (or ``None`` on failure)."""
+    """Synchronous core — data URL in, data URL out (or ``None`` on failure).
+
+    Returns a ``data:image/png;base64,...`` URL when the source has
+    real transparency, otherwise ``data:image/jpeg;base64,...``.
+    """
     raw = _decode_data_url(data_url)
     if not raw:
         return None
     small = _downsize_bytes(raw)
     if not small:
         return None
-    return "data:image/jpeg;base64," + base64.b64encode(small).decode("ascii")
+    # Sniff the encoded format (first byte of PNG vs JPEG marker).
+    is_png = small[:8] == b"\x89PNG\r\n\x1a\n"
+    mime = "image/png" if is_png else "image/jpeg"
+    return f"data:{mime};base64," + base64.b64encode(small).decode("ascii")
 
 
 def pick_source_data_url(item: dict[str, Any]) -> str | None:
@@ -120,11 +159,23 @@ async def ensure_thumbnail(item: dict[str, Any]) -> str | None:
 
     Returns ``None`` when no source image is available, in which case
     the frontend falls back to its placeholder.
+
+    Stale-thumbnail invalidation: if the cached thumbnail is JPEG but
+    the source image is a transparent PNG (a rembg/SegFormer cutout),
+    we regenerate it. This handles items that were saved before the
+    "preserve transparency" fix shipped — without that, those closet
+    cards would forever show the garment composited onto grey.
     """
     existing = item.get("thumbnail_data_url")
-    if isinstance(existing, str) and existing.startswith("data:image"):
-        return existing
     source = pick_source_data_url(item)
+    if isinstance(existing, str) and existing.startswith("data:image"):
+        # Detect stale thumbs: source is PNG (likely transparent) but
+        # the cached thumb is JPEG → regenerate to recover transparency.
+        source_is_png = isinstance(source, str) and source.startswith("data:image/png")
+        thumb_is_jpeg = existing.startswith("data:image/jpeg")
+        if not (source_is_png and thumb_is_jpeg):
+            return existing
+        logger.info("regenerating stale thumbnail (source PNG → cached thumb was JPEG)")
     if not source:
         return None
     return await asyncio.to_thread(make_thumb_from_data_url, source)
@@ -144,15 +195,16 @@ async def backfill_thumbnails(
     sem = asyncio.Semaphore(concurrency)
 
     async def _one(it: dict[str, Any]) -> tuple[str, str] | None:
-        if isinstance(it.get("thumbnail_data_url"), str) and it["thumbnail_data_url"].startswith("data:image"):
-            it["thumbnail_data_url"] = it["thumbnail_data_url"]
-            return None
+        # Reuse ensure_thumbnail's freshness logic so stale JPEGs over
+        # transparent PNG sources get regenerated automatically.
         async with sem:
             thumb = await ensure_thumbnail(it)
-        if thumb:
-            it["thumbnail_data_url"] = thumb
-            return (it.get("id", ""), thumb) if it.get("id") else None
-        return None
+        if not thumb:
+            return None
+        if thumb == it.get("thumbnail_data_url"):
+            return None  # unchanged
+        it["thumbnail_data_url"] = thumb
+        return (it.get("id", ""), thumb) if it.get("id") else None
 
     results = await asyncio.gather(*[_one(it) for it in items], return_exceptions=True)
     pairs: list[tuple[str, str]] = []
