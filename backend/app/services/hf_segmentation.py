@@ -81,9 +81,16 @@ class HFSegmentationService:
         try:
             return await asyncio.to_thread(self._run_segformer, raw)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
+            # Demote 402 (HF Router started charging in 2025) to debug —
+            # the local SegFormer parser in clothing_parser.py is the
+            # primary path now, so this is an expected fallback miss
+            # rather than an alert-worthy failure.
+            err_repr = repr(exc)
+            is_paywall = "402" in err_repr or "Payment Required" in err_repr
+            log = logger.debug if is_paywall else logger.warning
+            log(
                 "HF clothing segmenter failed (%s); returning original image",
-                repr(exc)[:180],
+                err_repr[:180],
             )
             return {
                 "image_b64": base64.b64encode(raw).decode("ascii"),
