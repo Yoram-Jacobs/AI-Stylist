@@ -527,3 +527,121 @@ def crop_with_mask(
     buf = io.BytesIO()
     cropped.save(buf, format="PNG", optimize=True)
     return buf.getvalue(), (x1, y1, x2, y2)
+
+
+def bbox_to_pixels(
+    image_bytes: bytes,
+    bbox_norm: list[int] | tuple[int, ...],
+    *,
+    padding_pct: float = 0.04,
+) -> tuple[int, int, int, int] | None:
+    """Translate a 0..1000 bbox into pixel coords for the given image,
+    applying the same padding the crop pipeline uses. Returns
+    ``(x1, y1, x2, y2)`` or ``None`` if the bbox is degenerate.
+
+    Useful when callers want a JPEG bbox crop AND a matching slice of a
+    full-resolution mask (no second image decode needed).
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+    except Exception:  # noqa: BLE001
+        return None
+    W, H = img.size
+    try:
+        ymin, xmin, ymax, xmax = [int(v) for v in bbox_norm]
+    except Exception:  # noqa: BLE001
+        return None
+    if not (0 <= xmin < xmax <= 1000 and 0 <= ymin < ymax <= 1000):
+        return None
+    x1 = max(0, int(xmin / 1000.0 * W - W * padding_pct))
+    y1 = max(0, int(ymin / 1000.0 * H - H * padding_pct))
+    x2 = min(W, int(xmax / 1000.0 * W + W * padding_pct))
+    y2 = min(H, int(ymax / 1000.0 * H + H * padding_pct))
+    if x2 - x1 <= 4 or y2 - y1 <= 4:
+        return None
+    return x1, y1, x2, y2
+
+
+def slice_mask_to_bbox(
+    mask: np.ndarray, image_size: tuple[int, int], box_xyxy: tuple[int, int, int, int]
+) -> np.ndarray | None:
+    """Return the portion of ``mask`` covering the pixel-coord ``box_xyxy``.
+
+    * ``mask`` is a full-resolution binary uint8 (0/1) array.
+    * ``image_size`` is ``(W, H)`` — the original image's dimensions.
+    * ``box_xyxy`` is ``(x1, y1, x2, y2)`` in pixel coords (already padded).
+
+    Returns a uint8 binary mask sized ``(y2-y1, x2-x1)`` aligned to the
+    bbox crop, or ``None`` on shape mismatch.
+    """
+    W, H = image_size
+    x1, y1, x2, y2 = box_xyxy
+    if mask.shape != (H, W):
+        # Resize to full resolution first, nearest-neighbour to preserve
+        # binary semantics.
+        try:
+            mask = np.array(
+                Image.fromarray((mask * 255).astype(np.uint8), mode="L").resize(
+                    (W, H), Image.NEAREST
+                )
+            )
+            mask = (mask > 127).astype(np.uint8)
+        except Exception:  # noqa: BLE001
+            return None
+    return mask[y1:y2, x1:x2].astype(np.uint8)
+
+
+def apply_alpha_intersection(
+    matted_png_bytes: bytes,
+    seg_mask_bbox: np.ndarray,
+) -> bytes | None:
+    """Refine a rembg-matted PNG by AND-ing its alpha with a SegFormer mask.
+
+    Why: rembg gives crisp, accurate edges around the foreground but treats
+    the entire foreground as one object. On a multi-garment outfit photo
+    rembg might preserve both shirt + pants in a single crop. The
+    SegFormer mask says which pixels belong specifically to the targeted
+    garment class, so intersecting the two yields a clean cutout of just
+    the targeted item.
+
+    Returns refined PNG bytes, or ``None`` on failure (caller should keep
+    the rembg-only output).
+    """
+    try:
+        im = Image.open(io.BytesIO(matted_png_bytes)).convert("RGBA")
+    except Exception:  # noqa: BLE001
+        return None
+    arr = np.array(im)
+    Hc, Wc = arr.shape[:2]
+    # Resize the mask to match the matted PNG (rembg sometimes pads/resizes).
+    if seg_mask_bbox.shape != (Hc, Wc):
+        try:
+            mask_resized = np.array(
+                Image.fromarray(
+                    (seg_mask_bbox * 255).astype(np.uint8), mode="L"
+                ).resize((Wc, Hc), Image.NEAREST)
+            )
+        except Exception:  # noqa: BLE001
+            return None
+    else:
+        mask_resized = (seg_mask_bbox * 255).astype(np.uint8)
+    # Soften the binary mask edge a touch so the intersection inherits
+    # rembg's anti-aliasing rather than re-introducing stair-step pixels.
+    try:
+        from PIL import ImageFilter
+
+        mask_im = Image.fromarray(mask_resized, mode="L").filter(
+            ImageFilter.GaussianBlur(radius=2.0)
+        )
+        soft_mask = np.array(mask_im)
+    except Exception:  # noqa: BLE001
+        soft_mask = mask_resized
+    # New alpha = min(rembg_alpha, soft_segformer_mask). Anywhere SegFormer
+    # said "not this garment" we wipe out, even if rembg thought it was
+    # foreground.
+    new_alpha = np.minimum(arr[:, :, 3], soft_mask).astype(np.uint8)
+    arr[:, :, 3] = new_alpha
+    out = Image.fromarray(arr, mode="RGBA")
+    buf = io.BytesIO()
+    out.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
