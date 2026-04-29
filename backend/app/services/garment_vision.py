@@ -364,7 +364,7 @@ def _nms_detections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _looks_already_cropped(detections: list[dict[str, Any]]) -> bool:
     """Return True when the photo is already a tight single-item shot.
 
-    Two signals trigger this:
+    Three signals trigger this:
 
     1. **Single large detection** \u2014 exactly one bbox remains after NMS
        and it covers at least ``_SINGLE_ITEM_AREA_FRAC`` of the frame.
@@ -373,8 +373,15 @@ def _looks_already_cropped(detections: list[dict[str, Any]]) -> bool:
        ``_SUBPART_UNION_FRAC`` of the frame, which is the tell-tale
        pattern of the model hallucinating a collar/sleeve/hem as
        separate items on an already-cropped garment photo.
+    3. **Heavily-overlapping detections** \u2014 multiple detections
+       overlap so much that ``sum(individual_areas) > 1.4 * union_area``.
+       This catches the SegFormer corner case where a single garment
+       with a complex / novelty pattern gets labeled as both
+       ``Upper-clothes`` and ``Dress`` (or shirt + jacket, etc.) on
+       the same pixels. Without this we treat the photo as multi-item
+       and shred it into nonsensical fragments.
 
-    In either case we skip the server-side cropping step and analyse
+    In all cases we skip the server-side cropping step and analyse
     the image as a single item so we never shred an already-clean
     product shot.
     """
@@ -386,25 +393,47 @@ def _looks_already_cropped(detections: list[dict[str, Any]]) -> bool:
         y1, x1, y2, x2 = bbox
         return max(0, (x2 - x1)) * max(0, (y2 - y1))
 
-    # Signal 1: one dominant detection.
+    areas = [_area(d["bbox"]) for d in detections]
+    largest_area = max(areas) if areas else 0
+
+    # Signal 0 (NEW, takes precedence): any single detection that already
+    # covers >= the single-item threshold means the photo is dominated by
+    # one garment. Other small detections are SegFormer label-confusion
+    # fragments (e.g. labelling part of a patterned t-shirt as "Dress" and
+    # another part as "Upper-clothes"). Treat as single-item so we feed
+    # the WHOLE photo through rembg + Gemini once instead of shredding it
+    # into nonsensical sub-crops.
+    if largest_area >= frame_area * _SINGLE_ITEM_AREA_FRAC:
+        return True
+
+    # Signal 1: one dominant detection (only triggers when nothing crossed
+    # the threshold above — kept for the ``len == 1`` corner cases).
     if len(detections) == 1:
-        if _area(detections[0]["bbox"]) >= frame_area * _SINGLE_ITEM_AREA_FRAC:
+        if largest_area >= frame_area * _SINGLE_ITEM_AREA_FRAC:
             return True
         # A single tiny detection on a clean-looking frame also hints at
         # an over-zealous sub-part crop.
-        if _area(detections[0]["bbox"]) <= frame_area * 0.25:
+        if largest_area <= frame_area * 0.25:
             return True
         return False
 
-    # Signal 2: several detections, all clustered inside a small area.
-    kinds = {(d.get("kind") or "garment").lower() for d in detections}
-    if len(kinds) > 1:
-        return False
+    # Signal 3: heavily-overlapping detections imply one garment with
+    # conflicting class labels.
+    sum_areas = sum(areas)
     ymins = [d["bbox"][0] for d in detections]
     xmins = [d["bbox"][1] for d in detections]
     ymaxs = [d["bbox"][2] for d in detections]
     xmaxs = [d["bbox"][3] for d in detections]
-    union = (max(ymaxs) - min(ymins)) * (max(xmaxs) - min(xmins))
+    union = max(1, (max(ymaxs) - min(ymins)) * (max(xmaxs) - min(xmins)))
+    overlap_ratio = sum_areas / float(union)
+    if overlap_ratio >= 1.4:
+        return True
+
+    # Signal 2: several detections of the same kind, all clustered inside
+    # a small area (collar / sleeve / hem hallucinations).
+    kinds = {(d.get("kind") or "garment").lower() for d in detections}
+    if len(kinds) > 1:
+        return False
     return union <= frame_area * _SUBPART_UNION_FRAC
 
 
@@ -824,22 +853,60 @@ class GarmentVisionService:
                 "(detections=%d); skipping crop pipeline",
                 len(detections),
             )
-            single = await self.analyze(image_bytes, language=language)
-            crop_b64 = base64.b64encode(image_bytes).decode("ascii")
+            # Run rembg on the whole image *and* analyse it as a single
+            # garment in parallel — gives the user a clean cutout (no
+            # background) instead of the raw upload, which is what
+            # already-cropped product photos deserve.
+            async def _whole_image_matte() -> bytes | None:
+                if not settings.AUTO_MATTE_CROPS:
+                    return None
+                try:
+                    from app.services import background_matting
+
+                    return await background_matting.matte_crop(image_bytes)
+                except Exception as exc:  # noqa: BLE001
+                    logger.info(
+                        "already-cropped matte failed: %s — keeping original",
+                        repr(exc)[:120],
+                    )
+                    return None
+
+            single, matted = await asyncio.gather(
+                self.analyze(image_bytes, language=language),
+                _whole_image_matte(),
+            )
+            if matted:
+                crop_b64 = base64.b64encode(matted).decode("ascii")
+                crop_mime = "image/png"
+            else:
+                crop_b64 = base64.b64encode(image_bytes).decode("ascii")
+                crop_mime = "image/jpeg"
+            # Pick the LLM's classification first (most reliable on novelty
+            # patterns / unusual fabrics). Fall back to the dominant
+            # SegFormer detection if the analysis didn't yield a label.
+            best_det = None
+            if detections:
+                best_det = max(
+                    detections,
+                    key=lambda d: (
+                        max(0, d["bbox"][2] - d["bbox"][0])
+                        * max(0, d["bbox"][3] - d["bbox"][1])
+                    ),
+                )
             label = (
-                (detections[0].get("label") if detections else None)
-                or single.get("item_type")
+                single.get("item_type")
                 or single.get("sub_category")
+                or (best_det.get("label") if best_det else None)
                 or "garment"
             )
-            kind = (detections[0].get("kind") if detections else None) or "garment"
+            kind = (best_det.get("kind") if best_det else None) or "garment"
             return [
                 {
                     "label": label,
                     "kind": kind,
                     "bbox": [0, 0, 1000, 1000],
                     "crop_base64": crop_b64,
-                    "crop_mime": "image/jpeg",
+                    "crop_mime": crop_mime,
                     "analysis": single,
                 }
             ]
@@ -892,38 +959,64 @@ class GarmentVisionService:
             from app.services import clothing_parser
 
             out: list[tuple[dict[str, Any], bytes, str]] = []
+            # Open once to read image size for mask slicing.
+            try:
+                from PIL import Image as _PILImage
+                import io as _io
+
+                _img = _PILImage.open(_io.BytesIO(image_bytes))
+                img_size = _img.size  # (W, H)
+            except Exception:  # noqa: BLE001
+                img_size = None
+
             for det in useful:
+                # Always produce a JPEG bbox crop. The fine-grained alpha
+                # comes from rembg in the matting step (it's purpose-built
+                # for figure-ground separation and produces noticeably
+                # cleaner silhouettes than SegFormer's per-pixel argmax).
+                # The SegFormer mask, when available, is sliced to the
+                # bbox and stashed on the detection so the matting step
+                # can intersect it with rembg's alpha — that filters out
+                # adjacent garments while preserving rembg's smooth edges.
+                box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
+                if not box_px:
+                    continue
+                result = _crop_to_bbox(image_bytes, det["bbox"])
+                if not result:
+                    continue
+                crop_bytes, _xy = result
                 mask = det.get("mask")
-                if mask is not None:
-                    result = clothing_parser.crop_with_mask(
-                        image_bytes, det["bbox"], mask
+                if mask is not None and img_size is not None:
+                    mask_bbox = clothing_parser.slice_mask_to_bbox(
+                        mask, img_size, box_px
                     )
-                    if not result:
-                        continue
-                    crop_bytes, _xy = result
-                    out.append((det, crop_bytes, "image/png"))
-                else:
-                    result = _crop_to_bbox(image_bytes, det["bbox"])
-                    if not result:
-                        continue
-                    crop_bytes, _xy = result
-                    out.append((det, crop_bytes, "image/jpeg"))
+                    if mask_bbox is not None:
+                        # Stash for the matting step. Drop the full-res
+                        # mask to free memory now that we have the slice
+                        # we actually need.
+                        det["_mask_bbox"] = mask_bbox
+                        det["mask"] = None
+                out.append((det, crop_bytes, "image/jpeg"))
             return out
 
         raw_crops = await asyncio.to_thread(_bbox_crop_all)
 
         if settings.AUTO_MATTE_CROPS and raw_crops:
-            # Pipe each JPEG crop through rembg (PNG crops already have
-            # a semantic cutout). Serialise to avoid concurrent sessions
-            # on a single onnxruntime instance; each call is ~1-2 s on
-            # CPU with u2netp, so 4 items ~= 8 s — acceptable.
+            # Pipe each JPEG crop through rembg to get a clean alpha
+            # (rembg's u2netp is purpose-built for figure-ground
+            # separation; its silhouette quality on garment crops is
+            # noticeably better than SegFormer's per-pixel argmax).
+            # When a SegFormer per-class mask is available we then
+            # intersect rembg's alpha with that mask — gives us
+            # rembg-smooth edges *and* SegFormer-precise garment
+            # selection (filters out e.g. pants visible underneath a
+            # dress). Serialised because each rembg call holds the
+            # onnxruntime session.
             from app.services import background_matting
+            from app.services import clothing_parser as _cp
 
             matted_crops: list[tuple[dict[str, Any], bytes, str]] = []
             for det, cbytes, mime in raw_crops:
-                if mime == "image/png":
-                    matted_crops.append((det, cbytes, mime))
-                    continue
                 try:
                     matted = await background_matting.matte_crop(cbytes)
                 except Exception as exc:  # noqa: BLE001
@@ -933,10 +1026,26 @@ class GarmentVisionService:
                         repr(exc)[:120],
                     )
                     matted = None
-                if matted:
-                    matted_crops.append((det, matted, "image/png"))
-                else:
+                if not matted:
                     matted_crops.append((det, cbytes, mime))
+                    continue
+                seg_mask_bbox = det.get("_mask_bbox")
+                if seg_mask_bbox is not None:
+                    try:
+                        refined = _cp.apply_alpha_intersection(
+                            matted, seg_mask_bbox
+                        )
+                        if refined:
+                            matted = refined
+                    except Exception as exc:  # noqa: BLE001
+                        logger.info(
+                            "alpha intersection skipped for %s: %s",
+                            det.get("label"),
+                            repr(exc)[:120],
+                        )
+                # Free the bulky bbox-mask now that we've consumed it.
+                det.pop("_mask_bbox", None)
+                matted_crops.append((det, matted, "image/png"))
             crops = matted_crops
         else:
             crops = raw_crops
