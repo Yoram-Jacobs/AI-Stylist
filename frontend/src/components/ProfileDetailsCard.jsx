@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Camera, Image as ImgIcon, Save, Trash2, Loader2, Sparkles } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -176,6 +177,7 @@ function Field({ label, children, htmlFor }) {
 export function ProfileDetailsCard() {
   const { t } = useTranslation();
   const { user, updateUserLocal } = useAuth();
+  const nav = useNavigate();
 
   const initial = useMemo(
     () => ({
@@ -291,6 +293,10 @@ export function ProfileDetailsCard() {
       const updated = await api.patchMe(payload);
       updateUserLocal?.(updated);
       toast.success(t('profile.savedProfile'));
+      // Per UX spec: after saving Settings/Profile details, take the
+      // user back to Home. The auth context has already been updated
+      // via `updateUserLocal`, so Home will reflect the new values.
+      nav('/home');
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('profile.saveFailed'));
     } finally {

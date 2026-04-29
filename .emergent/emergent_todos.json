@@ -1,22 +1,22 @@
 [
   {
-    "content": "Backend: add find_potential_duplicates() helper that queries Mongo for items matching item_type + sub_category + dominant color (+ brand if both present)",
+    "content": "Add closet item image preview to CreateListing.jsx and redirect to /market after save",
     "status": "completed"
   },
   {
-    "content": "Backend: include potential_duplicate field in /closet/analyze response items",
+    "content": "Add navigate('/closet') after saving in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Frontend: detect potential_duplicate in analyzeCard and show confirmation modal",
+    "content": "Replace shimmer with proper Progress bar for clean-background in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Frontend: add i18n keys + Modal UI with 'Already in closet' message + Cancel/Add anyway buttons",
+    "content": "Add navigate('/home') after saving in ProfileDetailsCard.jsx",
     "status": "completed"
   },
   {
-    "content": "Smoke-test the full flow on dev",
+    "content": "Lint frontend and verify visually with screenshots",
     "status": "completed"
   }
 ]

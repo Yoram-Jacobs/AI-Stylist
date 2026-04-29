@@ -152,7 +152,10 @@ export default function CreateListing() {
       }
       const listing = await api.createListing(body);
       toast.success(t('createListing.created'));
-      nav(`/market/${listing.id}`);
+      // Per UX spec: after publishing, take the user back to the
+      // marketplace landing so they see their listing in the feed
+      // rather than a deep-linked detail page.
+      nav('/market');
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('createListing.createFailed'));
     } finally { setBusy(false); }
@@ -179,6 +182,53 @@ export default function CreateListing() {
                     {closet.map((c) => <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {/* Visual confirmation of the linked closet item.
+                    Uses the cached thumbnail (the heavy image_urls are
+                    stripped from the closet payload by the backend, so
+                    this is the only preview source we have). */}
+                {(() => {
+                  const linkedItem = closet.find((c) => c.id === form.closet_item_id);
+                  if (!linkedItem) return null;
+                  const thumb =
+                    linkedItem.thumbnail_data_url ||
+                    linkedItem.segmented_image_url ||
+                    linkedItem.original_image_url;
+                  return (
+                    <div
+                      className="mt-3 flex items-center gap-3 rounded-xl border border-border p-2"
+                      data-testid="listing-linked-item-preview"
+                    >
+                      <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
+                        {thumb ? (
+                          <img
+                            src={thumb}
+                            alt={linkedItem.title || 'Closet item'}
+                            className="h-full w-full object-cover"
+                            data-testid="listing-linked-item-thumb"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">
+                            {t('createListing.linkNone')}
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className="truncate text-sm font-medium"
+                          data-testid="listing-linked-item-title"
+                        >
+                          {linkedItem.title || linkedItem.name || '—'}
+                        </div>
+                        {linkedItem.category && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {linkedItem.category}
+                            {linkedItem.size ? ` · ${linkedItem.size}` : ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

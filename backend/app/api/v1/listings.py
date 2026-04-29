@@ -86,6 +86,26 @@ async def create_listing(
         platform_fee_percent=fees.platform_fee_percent,
         estimated_seller_net_cents=fees.seller_net_cents,
     )
+
+    # Derive listing images from the linked closet item when the client
+    # didn't already pass them. The closet *list* endpoint deliberately
+    # strips `original_image_url` / `segmented_image_url` to keep the
+    # grid payload small (~200KB instead of ~25MB), so a frontend that
+    # sources `body.images` from the closet list always sees them as
+    # `undefined`. Doing the lookup server-side avoids forcing the
+    # frontend to make an extra full-detail GET before posting.
+    images = list(payload.images or [])
+    if not images and closet_item:
+        for fld in (
+            "segmented_image_url",
+            "reconstructed_image_url",
+            "original_image_url",
+        ):
+            url = closet_item.get(fld)
+            if isinstance(url, str) and url:
+                images.append(url)
+                break
+
     listing = Listing(
         closet_item_id=payload.closet_item_id,
         seller_id=user["id"],
@@ -96,7 +116,7 @@ async def create_listing(
         category=payload.category,
         size=payload.size,
         condition=payload.condition,
-        images=payload.images,
+        images=images,
         location=payload.location,
         ships_to=payload.ships_to,
         financial_metadata=financial,

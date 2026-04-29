@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post-production stabilisation + Stylist Power-Up + Google Sign-in)**
+# DressApp — Development Plan (Core-first) **UPDATED (post-production stabilisation + Stylist Power-Up + Google Sign-in + UX Polish)**
 
 ## 1) Objectives
 
@@ -28,6 +28,23 @@
 - ✅ **Stylist Phase R + Phase S implementation complete (deployment pending)**:
   - Phase R: multi-image upload + outfit compose pipeline + rich `OutfitCanvas`.
   - Phase S: stylist can “search wider” (Marketplace/Fashion Scout) using user profile preferences.
+
+### ✅ UX Polish (post-listing/auth fixes) — **SHIPPED IN CODE — DEPLOYMENT PENDING**
+Small high-impact UX fixes to eliminate “did it save?” ambiguity and missing visual feedback.
+- ✅ **Create Listing**
+  - Show thumbnail preview for the linked closet item (uses `thumbnail_data_url`, since heavy URLs are stripped from closet payload).
+  - Post-publish redirect: **/market** (instead of deep-linked listing detail).
+- ✅ **Item Detail (Edit item)**
+  - Post-save redirect: **/closet**.
+  - “Clean background” action now shows a real **shadcn Progress** bar:
+    - animated, asymptotic ramp to **92%**, snap to **100%** on completion.
+- ✅ **Settings / Profile**
+  - Post-save redirect: **/home**.
+
+**Status notes**
+- Frontend lint clean; esbuild bundle green.
+- No backend changes required for this polish (listing image hydration was previously fixed server-side).
+- Deployment still required on Hetzner VPS (manual `git pull` + `docker compose up -d --build`).
 
 ### 🎯 Current product direction — **Stylist Power-Up (Outfit Composer) + Widened Search**
 Make the Stylist uniquely valuable by enabling:
@@ -273,13 +290,22 @@ Implement an unauthenticated Google OAuth flow to create/login users, optionally
 ## 3) Next Actions (immediate)
 
 ### P0 (now)
-1. **Phase T-Auth — Google Sign-in / Log in with Google**
+1. **Deploy “UX Polish” changes to VPS**
+   - On VPS: `git pull` (resolve any broken git state if present) + rebuild: `docker compose up -d --build`
+   - Verify in real browser:
+     - Create Listing shows linked-item thumbnail preview
+     - Create Listing publish redirects to **/market**
+     - Item Detail save redirects to **/closet**
+     - Item Detail “Clean background” shows Progress bar and completes cleanly
+     - Profile save redirects to **/home**
+
+2. **Phase T-Auth — Google Sign-in / Log in with Google**
    - Backend endpoints + state JWT + admin allow-list
    - Frontend buttons + callback route
    - Consolidate Google token fields (`google_oauth` vs `google_calendar_tokens`) to avoid silent-fail confusion
    - End-to-end test on VPS with real Google account
 
-2. **Deploy Phase R + Phase S to VPS**
+3. **Deploy Phase R + Phase S to VPS**
    - Push to GitHub
    - On VPS: pull + rebuild (`docker compose up -d --build`)
    - Verify:
@@ -287,13 +313,13 @@ Implement an unauthenticated Google OAuth flow to create/login users, optionally
      - “Search wider” toggle returns responses (even if empty marketplace)
 
 ### P1
-3. **Calendar sync deep-dive (silent fail)**
+4. **Calendar sync deep-dive (silent fail)**
    - After Phase T-Auth ships, debug with a real Google identity
    - Validate token persistence, scopes, refresh behavior, and Calendar API calls
 
 ### P2 (blocked)
-4. Phase 6/N: merge and host fine-tuned Gemma 4 E2B (The Eyes).
-5. Phase O: Gemma 4 E4B Stylist brain swap.
+5. Phase 6/N: merge and host fine-tuned Gemma 4 E2B (The Eyes).
+6. Phase O: Gemma 4 E4B Stylist brain swap.
 
 ---
 
@@ -307,6 +333,16 @@ Implement an unauthenticated Google OAuth flow to create/login users, optionally
 )
 - ✅ Stylist endpoint returns 200 consistently (no `repos.find_one(sort=...)` crash)
 - ✅ Frontend bundle has valid `REACT_APP_BACKEND_URL` and makes API calls without protocol errors
+
+### UX Polish (post-listing/auth fixes)
+- Create Listing:
+  - linked closet item has a visible thumbnail preview
+  - publish redirects to **/market**
+- Item Detail:
+  - saving redirects to **/closet**
+  - “Clean background” shows a real progress bar (does not appear frozen during long matting)
+- Profile:
+  - saving redirects to **/home**
 
 ### Phase R + S — Stylist Power-Up + Widen Search
 - Multi-image upload supported in chat and dedicated compose page.
