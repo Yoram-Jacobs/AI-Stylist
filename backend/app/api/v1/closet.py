@@ -1243,6 +1243,27 @@ async def clean_item_background(
     if not item:
         raise HTTPException(404, "Item not found")
 
+    # Lightweight-deploy short-circuit. The Emergent host pod (250 m
+    # CPU / 1 Gi RAM) can't run rembg inside the 60 s gateway window —
+    # the model download + 2 K-image inference exceeds the budget and
+    # Cloudflare returns a 520 to the browser. When the deploy explicitly
+    # opted into lightweight mode (``USE_CLOTHING_PARSER=false`` /
+    # ``LIGHTWEIGHT_DEPLOY=true``), reply immediately with a clear,
+    # actionable message instead of hanging the request. The frontend
+    # already handles the ``applied:false`` shape (shows a toast and
+    # leaves the original crop intact).
+    if not settings.AUTO_MATTE_CROPS:
+        return {
+            "item": item,
+            "applied": False,
+            "detail": (
+                "Background matting isn't available on this deployment. "
+                "Use the Hetzner production host (dressapp.co) for clean cutouts, "
+                "or set AUTO_MATTE_CROPS=true / USE_CLOTHING_PARSER=true on this host."
+            ),
+            "reason": "lightweight_deploy_no_matting",
+        }
+
     crop_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not isinstance(crop_url, str) or not crop_url.startswith("data:"):
         raise HTTPException(
