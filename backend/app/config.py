@@ -297,16 +297,22 @@ class Settings:
     # clean cutouts instead of bbox rectangles with background bleeding.
     # Default tracks ``rembg`` availability — true on Hetzner where rembg
     # is installed, false on the lightweight Emergent pod which uses the
-    # HF Inference API matting path or skips matting entirely. Force
-    # to false via ``LIGHTWEIGHT_DEPLOY=true`` when rembg happens to be
-    # installed but the pod can't actually run it inside the gateway
-    # timeout window.
+    # HF Inference API matting path or skips matting entirely. Force off
+    # via either:
+    #   * ``LIGHTWEIGHT_DEPLOY=true``   (preferred, single-flag mode)
+    #   * ``USE_CLOTHING_PARSER=false`` (uses the existing pre-defined
+    #     Emergent secrets slot — handy when the dashboard's "Custom
+    #     keys" UI is locked to a fixed schema and you can't add a
+    #     brand-new env var. If you don't want the local clothing parser
+    #     you almost certainly don't want local rembg either, since
+    #     they share the same RAM/CPU envelope).
     AUTO_MATTE_CROPS: bool = (
         not _LIGHTWEIGHT_DEPLOY
         and os.environ.get(
             "AUTO_MATTE_CROPS", "true" if _HAS_REMBG else "false"
         ).lower()
         == "true"
+        and os.environ.get("USE_CLOTHING_PARSER", "true").lower() == "true"
     )
     # Largest edge we'll feed into rembg. u2netp resizes internally to
     # 320x320 anyway, so values above ~1500 just balloon memory without
@@ -319,15 +325,19 @@ class Settings:
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which
     # falls back to the Gemini multi-item detector — see
-    # `garment_vision._gemini_detect`). Force to false via
-    # ``LIGHTWEIGHT_DEPLOY=true`` to skip even when the wheels are
-    # installed (e.g. cached Emergent build).
+    # `garment_vision._gemini_detect`). Force off via either:
+    #   * ``LIGHTWEIGHT_DEPLOY=true``   (preferred new flag)
+    #   * ``USE_CLOTHING_PARSER=false`` (existing pre-defined secrets
+    #     slot — outer gate that already controls whether the parser
+    #     runs at all; honoured here so the Emergent dashboard can
+    #     toggle the lightweight mode without needing a brand-new key).
     USE_LOCAL_CLOTHING_PARSER: bool = (
         not _LIGHTWEIGHT_DEPLOY
         and os.environ.get(
             "USE_LOCAL_CLOTHING_PARSER", "true" if _HAS_LOCAL_ML else "false"
         ).lower()
         == "true"
+        and os.environ.get("USE_CLOTHING_PARSER", "true").lower() == "true"
     )
     # Use the new clothing parser first in /closet/analyze (falls back to
     # legacy detector if it fails or returns nothing useful).
