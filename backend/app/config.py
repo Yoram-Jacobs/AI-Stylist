@@ -263,7 +263,7 @@ class Settings:
     # improving quality. The output alpha mask is upscaled back onto the
     # full-resolution RGB so input photos keep their sharpness.
     BACKGROUND_MATTING_MAX_EDGE: int = int(
-        os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1500")
+        os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1024")
     )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Enabled by default now that we've switched to
