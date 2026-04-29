@@ -1,22 +1,30 @@
 [
   {
-    "content": "Add closet item image preview to CreateListing.jsx and redirect to /market after save",
+    "content": "Extract WeightedList from AddItem.jsx into a shared component (/components/WeightedList.jsx)",
     "status": "completed"
   },
   {
-    "content": "Add navigate('/closet') after saving in ItemDetail.jsx",
+    "content": "Wire colors[] and fabric_materials[] into ItemDetail.jsx form (toFormState + EDITABLE_FIELDS + UI)",
     "status": "completed"
   },
   {
-    "content": "Replace shimmer with proper Progress bar for clean-background in ItemDetail.jsx",
+    "content": "Backend: add POST /api/v1/closet/{id}/reanalyze endpoint",
     "status": "completed"
   },
   {
-    "content": "Add navigate('/home') after saving in ProfileDetailsCard.jsx",
+    "content": "Frontend: add api.reanalyzeItem helper + 'Analyze' button in ItemDetail with progress UX",
     "status": "completed"
   },
   {
-    "content": "Lint frontend and verify visually with screenshots",
+    "content": "Change Replace Photo flow in ItemDetail to autoSegment:false (raw save only)",
+    "status": "completed"
+  },
+  {
+    "content": "Add i18n strings (en + he) for new UI",
+    "status": "completed"
+  },
+  {
+    "content": "Lint, restart backend, smoke-test reanalyze endpoint",
     "status": "completed"
   }
 ]

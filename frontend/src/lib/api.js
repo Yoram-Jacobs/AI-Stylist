@@ -156,6 +156,14 @@ export const api = {
   // Clean background (Phase V Fix 2 — non-generative matting)
   cleanItemBackground: (itemId) =>
     client.post(`/closet/${itemId}/clean-background`).then((r) => r.data),
+  // Re-run The Eyes on the item's stored image and patch the analysis
+  // fields back onto the doc. Used by the "Analyze" action on the
+  // edit page after a photo replace, or to recover from a bad first
+  // analysis without re-uploading the image.
+  reanalyzeItem: (itemId) =>
+    client
+      .post(`/closet/${itemId}/reanalyze`, null, { timeout: 90000 })
+      .then((r) => r.data),
   // Phase V6 — EU Digital Product Passport (DPP) import via QR scan
   importDpp: (qrPayload) =>
     client

@@ -1361,6 +1361,135 @@ async def set_item_photo(
 
 
 
+@router.post("/{item_id}/reanalyze")
+async def reanalyze_item(
+    item_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Re-run **The Eyes** on an existing item's stored image and patch
+    the analysis-derived fields back onto the document.
+
+    Use-cases:
+    * User uploaded a poor photo, replaced it with a better one (with
+      ``auto_segment=False`` so the analysis didn't run automatically),
+      and now wants the form auto-filled from the new photo.
+    * A previous analysis returned junk (regression / model glitch)
+      and the user wants a fresh attempt.
+
+    The endpoint preserves user-managed fields (size, price, currency,
+    marketplace_intent, notes, cultural_tags, purchase history, ...)
+    and only overwrites the fields that The Eyes actually populates
+    (title, taxonomy, colours/materials, condition, tags, …).
+    """
+    if garment_vision_service is None:
+        raise HTTPException(503, "Garment analyzer not configured")
+
+    db = get_db()
+    item = await repos.find_one(
+        db.closet_items, {"id": item_id, "user_id": user["id"]}
+    )
+    if not item:
+        raise HTTPException(404, "Item not found")
+
+    # Prefer the matted/segmented crop because that's what's visible to
+    # the user in the closet — analysing the same pixels they're
+    # looking at avoids surprises ("why did The Eyes call my shirt a
+    # dress?"). Fall back to the original upload otherwise.
+    image_url: str | None = (
+        item.get("segmented_image_url")
+        or item.get("reconstructed_image_url")
+        or item.get("original_image_url")
+    )
+    if not image_url or not image_url.startswith("data:"):
+        raise HTTPException(
+            400,
+            "Item has no stored image to re-analyse. "
+            "Replace the photo first.",
+        )
+    try:
+        b64_part = image_url.split(",", 1)[1]
+        raw = base64.b64decode(b64_part, validate=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Invalid stored image: {exc}") from exc
+    if not raw:
+        raise HTTPException(400, "Stored image is empty")
+
+    user_lang = (user or {}).get("preferred_language") or "en"
+    try:
+        async with _ANALYZE_LOCK:
+            parsed = await garment_vision_service.analyze(raw, language=user_lang)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Re-analyse failed: %r", exc)
+        raise HTTPException(
+            503,
+            "Garment analyzer is temporarily unavailable. Please try again.",
+        ) from exc
+
+    analysis = _safe_analysis(parsed)
+    from app.services.garment_vision import _is_unidentifiable
+
+    if _is_unidentifiable(analysis):
+        raise HTTPException(
+            422,
+            "We couldn't identify a garment in the stored photo. "
+            "Try replacing it with a clearer, well-lit shot.",
+        )
+
+    # Only overwrite fields The Eyes actually owns. User-managed fields
+    # (size, price, currency, intent, notes, purchase history, …) are
+    # preserved verbatim so re-analysing doesn't quietly wipe data the
+    # user spent time entering.
+    OVERWRITE_KEYS = (
+        "title",
+        "name",
+        "caption",
+        "category",
+        "sub_category",
+        "item_type",
+        "brand",
+        "gender",
+        "dress_code",
+        "season",
+        "tradition",
+        "colors",
+        "fabric_materials",
+        "pattern",
+        "state",
+        "condition",
+        "quality",
+        "repair_advice",
+        "tags",
+    )
+    update_doc: dict[str, Any] = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    for key in OVERWRITE_KEYS:
+        if key in analysis:
+            update_doc[key] = analysis[key]
+
+    # Mirror the dominant colour / material into the legacy single-string
+    # fields too — older parts of the UI (and downstream Stylist
+    # prompts) still read `color` / `material` as scalars.
+    colors_list = analysis.get("colors") or []
+    if colors_list and isinstance(colors_list, list):
+        first_colour = colors_list[0]
+        if isinstance(first_colour, dict) and first_colour.get("name"):
+            update_doc["color"] = first_colour["name"]
+    materials_list = analysis.get("fabric_materials") or []
+    if materials_list and isinstance(materials_list, list):
+        first_material = materials_list[0]
+        if isinstance(first_material, dict) and first_material.get("name"):
+            update_doc["material"] = first_material["name"]
+
+    await db.closet_items.update_one(
+        {"id": item_id, "user_id": user["id"]},
+        {"$set": update_doc},
+    )
+    item = await repos.find_one(db.closet_items, {"id": item_id}) or item
+    return {"item": item, "analysis": analysis}
+
+
+
 @router.post("/{item_id}/repair")
 async def repair_item_image(
     item_id: str,
