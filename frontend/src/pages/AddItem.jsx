@@ -15,6 +15,9 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { DppScanner } from '@/components/DppScanner';
@@ -78,7 +81,7 @@ const blankFields = () => ({
   gender: '', dress_code: '', season: [], tradition: '',
   colors: [], fabric_materials: [], pattern: '',
   state: '', condition: '', quality: '',
-  size: '', price_cents: '',
+  size: '', price_cents: '', price_input: '',
   marketplace_intent: 'own',
   repair_advice: '',
   tags: [],
@@ -215,11 +218,24 @@ export default function AddItem() {
 
   // ------------------------------------------------------------------
   // Background batch upload (>5 photos): analyze + auto-save each one
-  // with whatever the analyzer returns, with bounded concurrency. The
-  // user gets a single progress card, then lands on /closet to clean up.
+  // with whatever the analyzer returns. We process **strictly
+  // sequentially** because the analyze pipeline (SegFormer + rembg +
+  // Gemini) is RAM-heavy: running multiple in parallel on a small
+  // production VPS reliably OOMs the second/third call. With one at a
+  // time, items 2..N actually get analysed instead of silently
+  // falling through to the "save raw image" branch.
   // ------------------------------------------------------------------
   const handleBatchBackground = async (files) => {
-    setBgBatch({ total: files.length, processed: 0, saved: 0, failed: 0 });
+    setBgBatch({
+      total: files.length,
+      processed: 0,
+      saved: 0,
+      failed: 0,
+      // Items where the analyze call failed and we had to save the
+      // raw photo with blank fields. Surfaced in the final toast so
+      // the user knows which ones need cleanup in /closet.
+      analyzeFailed: 0,
+    });
     toast.success(
       t('addItem.bgUpload.started', {
         count: files.length,
@@ -227,12 +243,29 @@ export default function AddItem() {
       })
     );
 
-    const CONCURRENCY = 3;
     const queue = [...files];
+
+    // Try analysis with a single retry on failure. The first failure
+    // is usually a transient timeout / cold-start; a 1.2s pause and a
+    // second attempt clears most of those without piling more work
+    // onto an already-stressed backend.
+    const analyzeWithRetry = async (b64) => {
+      try {
+        return await api.analyzeItemImage({ image_base64: b64 });
+      } catch (firstErr) {
+        await new Promise((r) => setTimeout(r, 1200));
+        try {
+          return await api.analyzeItemImage({ image_base64: b64 });
+        } catch (_secondErr) {
+          throw firstErr;
+        }
+      }
+    };
 
     const processOne = async (file) => {
       let createdHere = 0;
       let failedHere = 0;
+      let analyzeFailedHere = 0;
       let b64 = null;
       try {
         b64 = await fileToBase64(file);
@@ -244,14 +277,17 @@ export default function AddItem() {
 
       // Try analysis; on failure, fall back to saving the raw image
       // with blank fields so the user still gets the item in /closet.
+      // Track the analyze-failure count separately so the final toast
+      // can tell the user "X items need fields filled in".
       let analysisItems = null;
       try {
-        const resp = await api.analyzeItemImage({ image_base64: b64 });
+        const resp = await analyzeWithRetry(b64);
         analysisItems =
           Array.isArray(resp?.items) && resp.items.length > 0
             ? resp.items
             : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
       } catch (_) {
+        analyzeFailedHere += 1;
         analysisItems = [
           { analysis: {}, crop_base64: b64, crop_mime: file.type || 'image/jpeg' },
         ];
@@ -280,29 +316,47 @@ export default function AddItem() {
               processed: b.processed + 1,
               saved: b.saved + createdHere,
               failed: b.failed + failedHere,
+              analyzeFailed: (b.analyzeFailed || 0) + analyzeFailedHere,
             }
           : null
       );
     };
 
-    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      while (queue.length) {
-        const next = queue.shift();
-        if (next) await processOne(next);
+    // Sequential worker — process one file at a time. The earlier
+    // CONCURRENCY=3 implementation tried to run 3 analyse calls in
+    // parallel and got bitten by VPS RAM limits on production: the
+    // first item completed, items 2..N OOM'd inside rembg, fell into
+    // the catch above, and got saved as raw photos with empty fields.
+    while (queue.length) {
+      const next = queue.shift();
+      if (next) {
+        // eslint-disable-next-line no-await-in-loop
+        await processOne(next);
       }
-    });
-    await Promise.all(workers);
+    }
 
     // Read final counts from state via functional update so we don't
     // race with React batching.
     setBgBatch((b) => {
       const saved = b?.saved ?? 0;
       const failed = b?.failed ?? 0;
-      if (saved && !failed) {
+      const analyzeFailed = b?.analyzeFailed ?? 0;
+      if (saved && !failed && !analyzeFailed) {
         toast.success(
           t('addItem.bgUpload.done', {
             count: saved,
             defaultValue: `Saved ${saved} items. Edit any misfits in your closet.`,
+          })
+        );
+      } else if (saved && analyzeFailed && !failed) {
+        // All items saved, but some skipped analysis — tell the user
+        // which need attention so they're not surprised by blank
+        // cards in the closet.
+        toast.message(
+          t('addItem.bgUpload.partialAnalyze', {
+            saved,
+            analyzeFailed,
+            defaultValue: `Saved ${saved} items · ${analyzeFailed} need fields filled in (analysis failed).`,
           })
         );
       } else if (saved && failed) {
@@ -358,8 +412,24 @@ export default function AddItem() {
       }
 
       if (items.length === 1) {
-        // Single-item photo — keep the original preview, just hydrate fields.
+        // Single-item photo — replace the original upload with the
+        // analyzer's matted crop so the saved image is the clean PNG
+        // cutout (background already removed by rembg server-side).
+        // Without this swap the closet would persist the raw JPEG and
+        // the user would have to click "Clean background" manually
+        // every time, even though the backend already produced the
+        // cutout. Reconstruction (Nano Banana) takes priority when
+        // validated; otherwise the rembg-matted crop is used.
         const it = items[0];
+        const mime = it.crop_mime || 'image/jpeg';
+        const rec = it.reconstruction;
+        const recValidated = !!(rec && rec.validated && rec.image_b64);
+        const cropDataUrl = it.crop_base64
+          ? `data:${mime};base64,${it.crop_base64}`
+          : null;
+        const previewUrl = recValidated
+          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+          : cropDataUrl;
         setCards((prev) =>
           prev.map((c) =>
             c.id === card.id
@@ -369,6 +439,30 @@ export default function AddItem() {
                   progress: 100,
                   fields: hydrate(it.analysis || {}),
                   label: it.label || null,
+                  potentialDuplicate: it.potential_duplicate || null,
+                  // Keep the original card.base64 untouched only if the
+                  // analyzer didn't return a usable crop (legacy fallback).
+                  ...(cropDataUrl
+                    ? {
+                        mime,
+                        previewUrl,
+                        base64: it.crop_base64,
+                        originalCropUrl: cropDataUrl,
+                        reconstructedUrl: recValidated
+                          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+                          : null,
+                        reconstructedB64: recValidated ? rec.image_b64 : null,
+                        reconstructionMeta: recValidated
+                          ? {
+                              reasons: rec.reasons || [],
+                              prompt: rec.prompt,
+                              model: rec.model,
+                              mime_type: rec.mime_type,
+                            }
+                          : null,
+                        useReconstructed: recValidated,
+                      }
+                    : {}),
                 }
               : c
           )
@@ -411,6 +505,7 @@ export default function AddItem() {
           fields: hydrate(it.analysis || {}),
           error: null,
           label: it.label || null,
+          potentialDuplicate: it.potential_duplicate || null,
         };
       });
       if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
@@ -545,6 +640,28 @@ export default function AddItem() {
         className="sr-only"
         data-testid="add-item-camera-input"
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
+      />
+
+      {/* Duplicate-detection modal. We pop one card at a time — the
+          first card with an unconfirmed potentialDuplicate becomes the
+          active question. "Cancel" discards that card; "Add anyway"
+          stamps it as confirmed and moves on. */}
+      <DuplicateConfirmDialog
+        cards={cards}
+        onCancel={(cardId) => {
+          setCards((prev) => {
+            const removed = prev.find((c) => c.id === cardId);
+            if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+            return prev.filter((c) => c.id !== cardId);
+          });
+        }}
+        onConfirm={(cardId) => {
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === cardId ? { ...c, duplicateConfirmed: true } : c
+            )
+          );
+        }}
       />
 
       {bgBatch ? (
@@ -934,14 +1051,36 @@ function IntentSelector({ fields, onChange, disabled }) {
           <div>
             <Label className="caps-label text-muted-foreground">{t('addItem.price')} (USD)</Label>
             <Input
-              type="number"
+              type="text"
               inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={fields.price_cents ? (Number(fields.price_cents) / 100).toFixed(2) : ''}
+              autoComplete="off"
+              // Use a separate string draft so the user's literal typing
+              // is preserved verbatim. Writing back ``price_cents`` and
+              // reformatting on every keystroke (the previous
+              // implementation) caused "12" → "0.12" mid-typing because
+              // the value rerendered before the user finished. We keep
+              // ``price_cents`` updated alongside so the save path and
+              // fee preview keep working unchanged.
+              value={
+                fields.price_input ??
+                (fields.price_cents
+                  ? (Number(fields.price_cents) / 100).toFixed(2)
+                  : '')
+              }
               onChange={(e) => {
-                const v = e.target.value.trim();
-                onChange({ price_cents: v ? Math.round(parseFloat(v) * 100) : '' });
+                const raw = e.target.value;
+                // Permit only digits + a single decimal separator. This
+                // is friendlier than ``type="number"`` (which rejects
+                // intermediate "12." states) but still blocks letters.
+                if (raw && !/^\d*([.,]\d{0,2})?$/.test(raw)) return;
+                const normalised = raw.replace(',', '.');
+                onChange({
+                  price_input: raw,
+                  price_cents:
+                    normalised && !isNaN(parseFloat(normalised))
+                      ? Math.round(parseFloat(normalised) * 100)
+                      : '',
+                });
               }}
               placeholder="0.00"
               disabled={disabled}
@@ -1230,4 +1369,122 @@ function buildCreatePayload(card) {
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
+}
+
+
+/* -------------------- DuplicateConfirmDialog -------------------- */
+/**
+ * Surfaces a confirm dialog the moment ``analyze`` returns a card whose
+ * matched garment already exists in the user's closet. Pops one card at
+ * a time — the first card in the list with an unconfirmed
+ * ``potentialDuplicate`` becomes the active question. This avoids a
+ * stack of overlays when the user uploads a batch of dupes.
+ *
+ * Pure UI — all state lives on the cards array passed in. Parent owns
+ * the cancel/confirm handlers (which mutate ``cards`` to either remove
+ * the offending entry or stamp it ``duplicateConfirmed: true``).
+ */
+function DuplicateConfirmDialog({ cards, onCancel, onConfirm }) {
+  const { t } = useTranslation();
+  const active = cards.find(
+    (c) => c.potentialDuplicate && !c.duplicateConfirmed
+  );
+  const open = !!active;
+  const dup = active?.potentialDuplicate;
+  const newTitle =
+    active?.fields?.title ||
+    active?.fields?.name ||
+    active?.fields?.item_type ||
+    t('addItem.duplicate.thisItem', { defaultValue: 'this item' });
+  const existingTitle =
+    dup?.title ||
+    dup?.name ||
+    dup?.item_type ||
+    t('addItem.duplicate.thisItem', { defaultValue: 'this item' });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        // Treat a backdrop-click / ESC the same as Cancel — discard the
+        // upload to keep behaviour predictable.
+        if (!o && active) onCancel(active.id);
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-md rounded-[calc(var(--radius)+4px)]"
+        data-testid="duplicate-confirm-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 font-display text-xl">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            {t('addItem.duplicate.title', {
+              defaultValue: 'Already in your closet',
+            })}
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-relaxed">
+            {t('addItem.duplicate.body', {
+              defaultValue:
+                'It looks like “{{existing}}” is already in your closet. Do you want to add this new “{{incoming}}” as a duplicate?',
+              existing: existingTitle,
+              incoming: newTitle,
+            })}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Side-by-side preview helps the user confirm visually that
+            it's actually the same garment vs a similar-looking one. */}
+        <div className="flex items-center gap-3 my-2">
+          {dup?.thumbnail_data_url ? (
+            <div className="flex-1 flex flex-col items-center gap-1">
+              <img
+                src={dup.thumbnail_data_url}
+                alt={existingTitle}
+                className="h-28 w-28 object-contain rounded-lg border border-border bg-secondary/30"
+                data-testid="duplicate-existing-thumb"
+              />
+              <span className="caps-label text-muted-foreground">
+                {t('addItem.duplicate.existing', { defaultValue: 'Existing' })}
+              </span>
+            </div>
+          ) : null}
+          {active?.previewUrl ? (
+            <div className="flex-1 flex flex-col items-center gap-1">
+              <img
+                src={active.previewUrl}
+                alt={newTitle}
+                className="h-28 w-28 object-contain rounded-lg border border-border bg-secondary/30"
+                data-testid="duplicate-incoming-thumb"
+              />
+              <span className="caps-label text-muted-foreground">
+                {t('addItem.duplicate.incoming', { defaultValue: 'New upload' })}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => active && onCancel(active.id)}
+            data-testid="duplicate-cancel-button"
+          >
+            <X className="h-4 w-4 me-2" />
+            {t('addItem.duplicate.cancel', { defaultValue: 'Discard upload' })}
+          </Button>
+          <Button
+            type="button"
+            className="rounded-xl"
+            onClick={() => active && onConfirm(active.id)}
+            data-testid="duplicate-confirm-button"
+          >
+            <Plus className="h-4 w-4 me-2" />
+            {t('addItem.duplicate.confirm', { defaultValue: 'Add anyway' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

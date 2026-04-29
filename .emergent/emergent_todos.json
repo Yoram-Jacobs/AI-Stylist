@@ -1,42 +1,22 @@
 [
   {
-    "content": "Backend: add ADMIN_EMAILS config + apply_admin_role helper",
+    "content": "Add closet item image preview to CreateListing.jsx and redirect to /market after save",
     "status": "completed"
   },
   {
-    "content": "Backend: refactor calendar_service to support custom scopes + custom callback path for sign-in flow",
+    "content": "Add navigate('/closet') after saving in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Backend: add /auth/google/login/start (unauth) + /auth/google/login/callback endpoints with find-or-create user, optional calendar scope, JWT issuance",
+    "content": "Replace shimmer with proper Progress bar for clean-background in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Backend: apply ADMIN_EMAILS check in register/login/google-login + create grant_admin.py CLI",
+    "content": "Add navigate('/home') after saving in ProfileDetailsCard.jsx",
     "status": "completed"
   },
   {
-    "content": "Frontend: add getGoogleLoginUrl helper in lib/api.js",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: add 'Continue with Google' button + 'Also connect my calendar' checkbox to Login.jsx",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: add 'Continue with Google' button to Register.jsx",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: create /auth/callback route (AuthCallback.jsx) that reads hash fragment, persists token, redirects",
-    "status": "completed"
-  },
-  {
-    "content": "i18n: add new auth keys to en.json and he.json",
-    "status": "completed"
-  },
-  {
-    "content": "Smoke test: backend endpoints + frontend flow with screenshot tool",
+    "content": "Lint frontend and verify visually with screenshots",
     "status": "completed"
   }
 ]

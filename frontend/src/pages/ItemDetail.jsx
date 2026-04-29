@@ -42,6 +42,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -359,6 +360,11 @@ export default function ItemDetail() {
   // Repair state
   const [repairHint, setRepairHint] = useState('');
   const [repairing, setRepairing] = useState(false);
+  // Clean-background progress %, simulated client-side because the
+  // backend matting endpoint is a single non-streaming POST. We tick
+  // the bar towards ~92% over ~14s (roughly the p95 duration of the
+  // SegFormer + rembg pipeline) and snap to 100% on completion.
+  const [repairProgress, setRepairProgress] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [dictationInterim, setDictationInterim] = useState('');
   const [showingOriginal, setShowingOriginal] = useState(false);
@@ -438,6 +444,10 @@ export default function ItemDetail() {
       setItem(updated);
       setForm(toFormState(updated));
       toast.success(t('itemDetail.detailsSaved'));
+      // Per UX spec: after a successful edit, take the user back
+      // to the closet so they immediately see the updated item in
+      // its grid context (rather than staying on the detail page).
+      nav('/closet');
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.saveFailed'));
     } finally {
@@ -455,6 +465,17 @@ export default function ItemDetail() {
     if (repairing) return;
     setRepairing(true);
     setShowingOriginal(false);
+    setRepairProgress(4);
+    // Asymptotic ramp: each tick closes ~7% of the remaining gap to 92%,
+    // so the bar feels lively at the start and decelerates as it nears
+    // the cap — never reaching 100% until the API actually returns.
+    const ticker = setInterval(() => {
+      setRepairProgress((p) => {
+        if (p >= 92) return 92;
+        const next = p + Math.max(1, Math.round((92 - p) * 0.07));
+        return Math.min(92, next);
+      });
+    }, 350);
     try {
       const res = await api.cleanItemBackground(id);
       if (res.applied) {
@@ -468,7 +489,14 @@ export default function ItemDetail() {
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.cleanBackground.error'));
     } finally {
-      setRepairing(false);
+      clearInterval(ticker);
+      setRepairProgress(100);
+      // Brief delay so the user sees the bar hit 100% before it
+      // collapses — feels more "complete" than yanking it instantly.
+      setTimeout(() => {
+        setRepairing(false);
+        setRepairProgress(0);
+      }, 350);
     }
   };
   const startDictation = () => {
@@ -744,10 +772,22 @@ export default function ItemDetail() {
               </Button>
               {repairing && (
                 <div className="space-y-2" data-testid="item-clean-bg-progress">
-                  <div className="h-2 rounded shimmer w-full" />
-                  <p className="text-[11px] text-muted-foreground italic">
-                    {t('itemDetail.cleanBackground.progressHint')}
-                  </p>
+                  <Progress
+                    value={repairProgress}
+                    className="h-2 w-full"
+                    data-testid="item-clean-bg-progress-bar"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground italic">
+                      {t('itemDetail.cleanBackground.progressHint')}
+                    </p>
+                    <span
+                      className="text-[11px] tabular-nums text-muted-foreground"
+                      data-testid="item-clean-bg-progress-pct"
+                    >
+                      {Math.round(repairProgress)}%
+                    </span>
+                  </div>
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground/80 italic">

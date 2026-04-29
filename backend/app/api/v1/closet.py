@@ -6,6 +6,7 @@ Hugging Face SAM segmentation in the background; failures are swallowed
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -43,6 +44,16 @@ from app.services.hf_segmentation import hf_segmentation_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
+
+# Process-wide guard around the heavy analyze pipeline (SegFormer +
+# rembg + Gemini). On RAM-constrained production VPSs (e.g. 3 GB
+# Hetzner box) running two of these in parallel reliably OOMs the
+# second one inside rembg's onnxruntime session — symptom: the second
+# upload silently "lands as-is" with blank fields. Serialising at the
+# endpoint layer makes the API safe regardless of how many tabs /
+# parallel clients hit it. Sub-crops within a single call still run
+# concurrently via the inner Semaphore in `analyze_outfit`.
+_ANALYZE_LOCK = asyncio.Semaphore(1)
 
 
 class CreateItemIn(BaseModel):
@@ -344,7 +355,8 @@ async def analyze_item_image(
     user_lang = (user or {}).get("preferred_language") or "en"
     if payload.multi:
         try:
-            detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+            async with _ANALYZE_LOCK:
+                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Outfit analysis failed: %r", exc)
             raise HTTPException(
@@ -354,12 +366,22 @@ async def analyze_item_image(
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
+        from app.services.duplicate_detection import find_potential_duplicate
 
         for det in detections:
             analysis = _safe_analysis(dict(det.get("analysis") or {}))
             if _is_unidentifiable(analysis):
                 dropped_unidentifiable += 1
                 continue
+            # Hint to the frontend if this analysed garment looks like
+            # something the user already owns. The frontend uses this
+            # to show a "Already in closet — add anyway?" modal before
+            # the user lands on the editable card.
+            try:
+                duplicate = await find_potential_duplicate(user["id"], analysis)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("duplicate detection failed: %r", exc)
+                duplicate = None
             items_out.append(
                 {
                     "label": det.get("label"),
@@ -368,6 +390,7 @@ async def analyze_item_image(
                     "crop_base64": det.get("crop_base64"),
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
+                    "potential_duplicate": duplicate,
                 }
             )
         if dropped_unidentifiable:
@@ -390,7 +413,8 @@ async def analyze_item_image(
 
     # Legacy single-item path (kept for any internal caller that sets multi=False).
     try:
-        parsed = await garment_vision_service.analyze(raw, language=user_lang)
+        async with _ANALYZE_LOCK:
+            parsed = await garment_vision_service.analyze(raw, language=user_lang)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Garment analysis failed: %r", exc)
         raise HTTPException(
@@ -406,6 +430,14 @@ async def analyze_item_image(
             "Please try a clearer, well-lit shot.",
         )
     crop_b64 = base64.b64encode(raw).decode("ascii")
+    # Same duplicate hint as the multi-item path.
+    from app.services.duplicate_detection import find_potential_duplicate
+
+    try:
+        potential_duplicate = await find_potential_duplicate(user["id"], analysis)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("duplicate detection failed: %r", exc)
+        potential_duplicate = None
     return {
         "items": [
             {
@@ -415,6 +447,7 @@ async def analyze_item_image(
                 "crop_base64": crop_b64,
                 "crop_mime": "image/jpeg",
                 "analysis": analysis,
+                "potential_duplicate": potential_duplicate,
             }
         ],
         "count": 1,
@@ -449,6 +482,11 @@ async def analyze_version() -> dict[str, Any]:
         markers["already_cropped_heuristic_v2"] = bool(_lac(synthetic))
     except Exception as exc:  # noqa: BLE001
         markers["heuristic_error"] = repr(exc)
+
+    # Sanity marker: the analyze endpoint serialises heavy ML work
+    # behind a process-wide semaphore. Confirms a deploy that includes
+    # the batch-upload OOM fix landed on the VPS.
+    markers["analyze_serial_lock"] = "_ANALYZE_LOCK" in globals()
 
     # --- NEW: live rembg health probe ---
     # Generates two test images (256x256 sanity + 2000x2000 real-world
