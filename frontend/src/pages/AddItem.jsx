@@ -358,8 +358,24 @@ export default function AddItem() {
       }
 
       if (items.length === 1) {
-        // Single-item photo — keep the original preview, just hydrate fields.
+        // Single-item photo — replace the original upload with the
+        // analyzer's matted crop so the saved image is the clean PNG
+        // cutout (background already removed by rembg server-side).
+        // Without this swap the closet would persist the raw JPEG and
+        // the user would have to click "Clean background" manually
+        // every time, even though the backend already produced the
+        // cutout. Reconstruction (Nano Banana) takes priority when
+        // validated; otherwise the rembg-matted crop is used.
         const it = items[0];
+        const mime = it.crop_mime || 'image/jpeg';
+        const rec = it.reconstruction;
+        const recValidated = !!(rec && rec.validated && rec.image_b64);
+        const cropDataUrl = it.crop_base64
+          ? `data:${mime};base64,${it.crop_base64}`
+          : null;
+        const previewUrl = recValidated
+          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+          : cropDataUrl;
         setCards((prev) =>
           prev.map((c) =>
             c.id === card.id
@@ -369,6 +385,29 @@ export default function AddItem() {
                   progress: 100,
                   fields: hydrate(it.analysis || {}),
                   label: it.label || null,
+                  // Keep the original card.base64 untouched only if the
+                  // analyzer didn't return a usable crop (legacy fallback).
+                  ...(cropDataUrl
+                    ? {
+                        mime,
+                        previewUrl,
+                        base64: it.crop_base64,
+                        originalCropUrl: cropDataUrl,
+                        reconstructedUrl: recValidated
+                          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+                          : null,
+                        reconstructedB64: recValidated ? rec.image_b64 : null,
+                        reconstructionMeta: recValidated
+                          ? {
+                              reasons: rec.reasons || [],
+                              prompt: rec.prompt,
+                              model: rec.model,
+                              mime_type: rec.mime_type,
+                            }
+                          : null,
+                        useReconstructed: recValidated,
+                      }
+                    : {}),
                 }
               : c
           )
