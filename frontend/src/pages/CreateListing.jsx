@@ -30,6 +30,10 @@ export default function CreateListing() {
     size: '',
     condition: 'like_new',
     list_price_cents: 2500,
+    // Raw user-typed string. Kept in sync with list_price_cents so the
+    // input preserves what the user actually typed (e.g. "12.5") instead
+    // of reformatting on every keystroke.
+    list_price_input: '25',
   });
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -157,10 +161,25 @@ export default function CreateListing() {
               </div>
               <div>
                 <Label>{t('createListing.priceUsd')}</Label>
-                <Input type="number" min={0} step={1}
-                  value={(form.list_price_cents / 100).toString()}
-                  onChange={(e) => setForm({ ...form, list_price_cents: Math.max(0, Math.round(Number(e.target.value) * 100) || 0) })}
-                  className="rounded-xl" data-testid="listing-price-input" />
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={form.list_price_input}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw && !/^\d*([.,]\d{0,2})?$/.test(raw)) return;
+                    const normalised = raw.replace(',', '.');
+                    const cents =
+                      normalised && !isNaN(parseFloat(normalised))
+                        ? Math.max(0, Math.round(parseFloat(normalised) * 100))
+                        : 0;
+                    setForm({ ...form, list_price_input: raw, list_price_cents: cents });
+                  }}
+                  placeholder="0.00"
+                  className="rounded-xl"
+                  data-testid="listing-price-input"
+                />
               </div>
               <Button type="submit" disabled={busy || !form.title} className="w-full rounded-xl" data-testid="listing-publish-button">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t('createListing.publish')}

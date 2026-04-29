@@ -81,7 +81,7 @@ const blankFields = () => ({
   gender: '', dress_code: '', season: [], tradition: '',
   colors: [], fabric_materials: [], pattern: '',
   state: '', condition: '', quality: '',
-  size: '', price_cents: '',
+  size: '', price_cents: '', price_input: '',
   marketplace_intent: 'own',
   repair_advice: '',
   tags: [],
@@ -1000,14 +1000,36 @@ function IntentSelector({ fields, onChange, disabled }) {
           <div>
             <Label className="caps-label text-muted-foreground">{t('addItem.price')} (USD)</Label>
             <Input
-              type="number"
+              type="text"
               inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={fields.price_cents ? (Number(fields.price_cents) / 100).toFixed(2) : ''}
+              autoComplete="off"
+              // Use a separate string draft so the user's literal typing
+              // is preserved verbatim. Writing back ``price_cents`` and
+              // reformatting on every keystroke (the previous
+              // implementation) caused "12" → "0.12" mid-typing because
+              // the value rerendered before the user finished. We keep
+              // ``price_cents`` updated alongside so the save path and
+              // fee preview keep working unchanged.
+              value={
+                fields.price_input ??
+                (fields.price_cents
+                  ? (Number(fields.price_cents) / 100).toFixed(2)
+                  : '')
+              }
               onChange={(e) => {
-                const v = e.target.value.trim();
-                onChange({ price_cents: v ? Math.round(parseFloat(v) * 100) : '' });
+                const raw = e.target.value;
+                // Permit only digits + a single decimal separator. This
+                // is friendlier than ``type="number"`` (which rejects
+                // intermediate "12." states) but still blocks letters.
+                if (raw && !/^\d*([.,]\d{0,2})?$/.test(raw)) return;
+                const normalised = raw.replace(',', '.');
+                onChange({
+                  price_input: raw,
+                  price_cents:
+                    normalised && !isNaN(parseFloat(normalised))
+                      ? Math.round(parseFloat(normalised) * 100)
+                      : '',
+                });
               }}
               placeholder="0.00"
               disabled={disabled}

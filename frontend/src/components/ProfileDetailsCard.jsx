@@ -892,56 +892,89 @@ export function ProfileDetailsCard() {
 }
 
 /**
+/**
+ * Numeric measurement field. Defined OUTSIDE its parent so React keeps
+ * the same component identity across renders — without this, a new
+ * function reference would be created on every parent render, React
+ * would unmount/remount the input, and the user could only ever type
+ * one character before losing focus.
+ *
+ * Stores the raw string the user typed so partial / decimal-in-progress
+ * values like "17" or "1.6" are preserved verbatim. Number coercion
+ * happens at save-time on the parent, never on each keystroke.
+ */
+const MeasurementNumField = ({ field, label, value, onChange, testId }) => (
+  <Field label={label}>
+    <Input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      value={value ?? ''}
+      onChange={(e) => onChange(field, e.target.value)}
+      className="rounded-xl"
+      data-testid={testId}
+    />
+  </Field>
+);
+
+const MeasurementTextField = ({ field, label, value, onChange, testId }) => (
+  <Field label={label}>
+    <Input
+      autoComplete="off"
+      value={value ?? ''}
+      onChange={(e) => onChange(field, e.target.value)}
+      className="rounded-xl"
+      data-testid={testId}
+    />
+  </Field>
+);
+
+/**
  * Dedicated grid: swaps labelled units, adds female-only rows conditionally.
  */
 function MeasurementsGrid({ form, onChange, wUnit, lUnit, isFemale }) {
   const { t } = useTranslation();
-  const len = (raw) => (raw ? `${raw} ${lUnit}` : '');
-
-  const Num = ({ field, label, unit = 'len' }) => (
-    <Field label={`${label} (${unit === 'wt' ? wUnit : lUnit})`}>
-      <Input
-        type="text"
-        inputMode="decimal"
-        value={form.body_measurements[field] ?? ''}
-        onChange={(e) => onChange(field, e.target.value)}
-        className="rounded-xl"
-        data-testid={`profile-measurement-${field}`}
-      />
-    </Field>
+  // Tiny helpers so the JSX below stays declarative.
+  const num = (field, label, unit = 'len') => (
+    <MeasurementNumField
+      key={field}
+      field={field}
+      label={`${label} (${unit === 'wt' ? wUnit : lUnit})`}
+      value={form.body_measurements[field]}
+      onChange={onChange}
+      testId={`profile-measurement-${field}`}
+    />
   );
-  const Txt = ({ field, label }) => (
-    <Field label={label}>
-      <Input
-        value={form.body_measurements[field] ?? ''}
-        onChange={(e) => onChange(field, e.target.value)}
-        className="rounded-xl"
-        data-testid={`profile-measurement-${field}`}
-      />
-    </Field>
+  const txt = (field, label) => (
+    <MeasurementTextField
+      key={field}
+      field={field}
+      label={label}
+      value={form.body_measurements[field]}
+      onChange={onChange}
+      testId={`profile-measurement-${field}`}
+    />
   );
-  // eslint-disable-next-line no-unused-vars
-  const _ = len; // keep helper around for future per-unit display formatting
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-      <Num field="height" label={t('profile.measurements.height')} />
-      <Num field="weight" label={t('profile.measurements.weight')} unit="wt" />
-      <Txt field="shirt_size" label={t('profile.measurements.shirtSize')} />
-      <Num field="shoulders" label={t('profile.measurements.shoulders')} />
-      <Num field="arm_length" label={t('profile.measurements.armLength')} />
-      <Num field="chest" label={t('profile.measurements.chest')} />
-      <Num field="waist" label={t('profile.measurements.waist')} />
-      <Num field="hip" label={t('profile.measurements.hip')} />
-      <Num field="sleeve" label={t('profile.measurements.sleeve')} />
-      <Txt field="pants_size" label={t('profile.measurements.pantsSize')} />
-      <Num field="inseam" label={t('profile.measurements.inseam')} />
-      <Num field="outseam" label={t('profile.measurements.outseam')} />
-      <Txt field="shoe_size" label={t('profile.measurements.shoeSize')} />
-      <Num field="foot_length" label={t('profile.measurements.footLength')} />
+      {num('height', t('profile.measurements.height'))}
+      {num('weight', t('profile.measurements.weight'), 'wt')}
+      {txt('shirt_size', t('profile.measurements.shirtSize'))}
+      {num('shoulders', t('profile.measurements.shoulders'))}
+      {num('arm_length', t('profile.measurements.armLength'))}
+      {num('chest', t('profile.measurements.chest'))}
+      {num('waist', t('profile.measurements.waist'))}
+      {num('hip', t('profile.measurements.hip'))}
+      {num('sleeve', t('profile.measurements.sleeve'))}
+      {txt('pants_size', t('profile.measurements.pantsSize'))}
+      {num('inseam', t('profile.measurements.inseam'))}
+      {num('outseam', t('profile.measurements.outseam'))}
+      {txt('shoe_size', t('profile.measurements.shoeSize'))}
+      {num('foot_length', t('profile.measurements.footLength'))}
       {isFemale && (
         <>
-          <Txt field="bra_size" label={t('profile.measurements.braSize')} />
-          <Txt field="dress_size" label={t('profile.measurements.dressSize')} />
+          {txt('bra_size', t('profile.measurements.braSize'))}
+          {txt('dress_size', t('profile.measurements.dressSize'))}
         </>
       )}
     </div>
