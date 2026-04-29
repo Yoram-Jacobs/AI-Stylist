@@ -394,6 +394,40 @@ async def analyze_item_image(
     }
 
 
+@router.get("/analyze/version", include_in_schema=False)
+async def analyze_version() -> dict[str, Any]:
+    """Public, unauth code-version probe. Returns only feature-presence
+    booleans — no secrets, no LLM calls, no DB hits. Use this to verify
+    a deploy actually replaced the running container.
+    """
+    markers: dict[str, bool | str] = {}
+    try:
+        from app.services import clothing_parser as _cp
+
+        markers["_postprocess_mask"] = hasattr(_cp, "_postprocess_mask")
+        markers["bbox_to_pixels"] = hasattr(_cp, "bbox_to_pixels")
+        markers["apply_alpha_intersection"] = hasattr(
+            _cp, "apply_alpha_intersection"
+        )
+    except Exception as exc:  # noqa: BLE001
+        markers["clothing_parser_error"] = repr(exc)
+    try:
+        from app.services.garment_vision import _looks_already_cropped as _lac
+
+        # Synthetic test mirroring the user's t-shirt failure case:
+        # one large "Dress" detection (52% area) + one small mislabel.
+        # Old heuristic returns False → multi-item path → bad crops.
+        # New heuristic returns True → single-item path → clean cutout.
+        synthetic = [
+            {"label": "Upper-clothes", "kind": "top", "bbox": [134, 49, 410, 441]},
+            {"label": "Dress", "kind": "dress", "bbox": [120, 190, 833, 928]},
+        ]
+        markers["already_cropped_heuristic_v2"] = bool(_lac(synthetic))
+    except Exception as exc:  # noqa: BLE001
+        markers["heuristic_error"] = repr(exc)
+    return markers
+
+
 @router.get("/analyze/diag")
 async def analyze_diag(
     user: dict = Depends(get_current_user),  # noqa: ARG001 — auth-gate only
@@ -413,6 +447,37 @@ async def analyze_diag(
         "has_gemini_api_key": bool(settings.GEMINI_API_KEY),
         "has_emergent_llm_key": bool(settings.EMERGENT_LLM_KEY),
     }
+    # Code-version markers: presence of these symbols proves the latest
+    # cropping/postprocessing code is running in *this* container.
+    # If any of them are False, the running container is stale → rebuild.
+    code_markers: dict[str, bool] = {}
+    try:
+        from app.services import clothing_parser as _cp
+
+        code_markers["_postprocess_mask"] = hasattr(_cp, "_postprocess_mask")
+        code_markers["bbox_to_pixels"] = hasattr(_cp, "bbox_to_pixels")
+        code_markers["apply_alpha_intersection"] = hasattr(
+            _cp, "apply_alpha_intersection"
+        )
+    except Exception as exc:  # noqa: BLE001
+        code_markers["clothing_parser_import_error"] = repr(exc)
+    # Quick functional check: feed _looks_already_cropped a synthetic
+    # 2-detection set that mimics the t-shirt photo case (one large
+    # "Dress" detection, one small "Upper-clothes"). If the function
+    # returns True the new heuristic is live; if False, the running
+    # container has the old code that splits patterned t-shirts.
+    try:
+        from app.services.garment_vision import _looks_already_cropped as _lac
+
+        synthetic = [
+            {"label": "Upper-clothes", "kind": "top", "bbox": [134, 49, 410, 441]},
+            {"label": "Dress", "kind": "dress", "bbox": [120, 190, 833, 928]},
+        ]
+        code_markers["already_cropped_heuristic_v2"] = bool(_lac(synthetic))
+    except Exception as exc:  # noqa: BLE001
+        code_markers["already_cropped_check_error"] = repr(exc)
+    out["code_markers"] = code_markers
+
     if garment_vision_service is None:
         out["status"] = "service_not_initialised"
         return out
