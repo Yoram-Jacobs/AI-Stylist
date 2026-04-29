@@ -354,12 +354,22 @@ async def analyze_item_image(
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
+        from app.services.duplicate_detection import find_potential_duplicate
 
         for det in detections:
             analysis = _safe_analysis(dict(det.get("analysis") or {}))
             if _is_unidentifiable(analysis):
                 dropped_unidentifiable += 1
                 continue
+            # Hint to the frontend if this analysed garment looks like
+            # something the user already owns. The frontend uses this
+            # to show a "Already in closet — add anyway?" modal before
+            # the user lands on the editable card.
+            try:
+                duplicate = await find_potential_duplicate(user["id"], analysis)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("duplicate detection failed: %r", exc)
+                duplicate = None
             items_out.append(
                 {
                     "label": det.get("label"),
@@ -368,6 +378,7 @@ async def analyze_item_image(
                     "crop_base64": det.get("crop_base64"),
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
+                    "potential_duplicate": duplicate,
                 }
             )
         if dropped_unidentifiable:
@@ -406,6 +417,14 @@ async def analyze_item_image(
             "Please try a clearer, well-lit shot.",
         )
     crop_b64 = base64.b64encode(raw).decode("ascii")
+    # Same duplicate hint as the multi-item path.
+    from app.services.duplicate_detection import find_potential_duplicate
+
+    try:
+        potential_duplicate = await find_potential_duplicate(user["id"], analysis)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("duplicate detection failed: %r", exc)
+        potential_duplicate = None
     return {
         "items": [
             {
@@ -415,6 +434,7 @@ async def analyze_item_image(
                 "crop_base64": crop_b64,
                 "crop_mime": "image/jpeg",
                 "analysis": analysis,
+                "potential_duplicate": potential_duplicate,
             }
         ],
         "count": 1,

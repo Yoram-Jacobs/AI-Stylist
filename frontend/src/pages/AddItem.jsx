@@ -15,6 +15,9 @@ import { Badge } from '@/components/ui/badge';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { DppScanner } from '@/components/DppScanner';
@@ -385,6 +388,7 @@ export default function AddItem() {
                   progress: 100,
                   fields: hydrate(it.analysis || {}),
                   label: it.label || null,
+                  potentialDuplicate: it.potential_duplicate || null,
                   // Keep the original card.base64 untouched only if the
                   // analyzer didn't return a usable crop (legacy fallback).
                   ...(cropDataUrl
@@ -450,6 +454,7 @@ export default function AddItem() {
           fields: hydrate(it.analysis || {}),
           error: null,
           label: it.label || null,
+          potentialDuplicate: it.potential_duplicate || null,
         };
       });
       if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
@@ -584,6 +589,28 @@ export default function AddItem() {
         className="sr-only"
         data-testid="add-item-camera-input"
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
+      />
+
+      {/* Duplicate-detection modal. We pop one card at a time — the
+          first card with an unconfirmed potentialDuplicate becomes the
+          active question. "Cancel" discards that card; "Add anyway"
+          stamps it as confirmed and moves on. */}
+      <DuplicateConfirmDialog
+        cards={cards}
+        onCancel={(cardId) => {
+          setCards((prev) => {
+            const removed = prev.find((c) => c.id === cardId);
+            if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+            return prev.filter((c) => c.id !== cardId);
+          });
+        }}
+        onConfirm={(cardId) => {
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === cardId ? { ...c, duplicateConfirmed: true } : c
+            )
+          );
+        }}
       />
 
       {bgBatch ? (
@@ -1269,4 +1296,122 @@ function buildCreatePayload(card) {
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));
+}
+
+
+/* -------------------- DuplicateConfirmDialog -------------------- */
+/**
+ * Surfaces a confirm dialog the moment ``analyze`` returns a card whose
+ * matched garment already exists in the user's closet. Pops one card at
+ * a time — the first card in the list with an unconfirmed
+ * ``potentialDuplicate`` becomes the active question. This avoids a
+ * stack of overlays when the user uploads a batch of dupes.
+ *
+ * Pure UI — all state lives on the cards array passed in. Parent owns
+ * the cancel/confirm handlers (which mutate ``cards`` to either remove
+ * the offending entry or stamp it ``duplicateConfirmed: true``).
+ */
+function DuplicateConfirmDialog({ cards, onCancel, onConfirm }) {
+  const { t } = useTranslation();
+  const active = cards.find(
+    (c) => c.potentialDuplicate && !c.duplicateConfirmed
+  );
+  const open = !!active;
+  const dup = active?.potentialDuplicate;
+  const newTitle =
+    active?.fields?.title ||
+    active?.fields?.name ||
+    active?.fields?.item_type ||
+    t('addItem.duplicate.thisItem', { defaultValue: 'this item' });
+  const existingTitle =
+    dup?.title ||
+    dup?.name ||
+    dup?.item_type ||
+    t('addItem.duplicate.thisItem', { defaultValue: 'this item' });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        // Treat a backdrop-click / ESC the same as Cancel — discard the
+        // upload to keep behaviour predictable.
+        if (!o && active) onCancel(active.id);
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-md rounded-[calc(var(--radius)+4px)]"
+        data-testid="duplicate-confirm-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 font-display text-xl">
+            <AlertTriangle className="h-5 w-5 text-amber-500" />
+            {t('addItem.duplicate.title', {
+              defaultValue: 'Already in your closet',
+            })}
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-relaxed">
+            {t('addItem.duplicate.body', {
+              defaultValue:
+                'It looks like “{{existing}}” is already in your closet. Do you want to add this new “{{incoming}}” as a duplicate?',
+              existing: existingTitle,
+              incoming: newTitle,
+            })}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Side-by-side preview helps the user confirm visually that
+            it's actually the same garment vs a similar-looking one. */}
+        <div className="flex items-center gap-3 my-2">
+          {dup?.thumbnail_data_url ? (
+            <div className="flex-1 flex flex-col items-center gap-1">
+              <img
+                src={dup.thumbnail_data_url}
+                alt={existingTitle}
+                className="h-28 w-28 object-contain rounded-lg border border-border bg-secondary/30"
+                data-testid="duplicate-existing-thumb"
+              />
+              <span className="caps-label text-muted-foreground">
+                {t('addItem.duplicate.existing', { defaultValue: 'Existing' })}
+              </span>
+            </div>
+          ) : null}
+          {active?.previewUrl ? (
+            <div className="flex-1 flex flex-col items-center gap-1">
+              <img
+                src={active.previewUrl}
+                alt={newTitle}
+                className="h-28 w-28 object-contain rounded-lg border border-border bg-secondary/30"
+                data-testid="duplicate-incoming-thumb"
+              />
+              <span className="caps-label text-muted-foreground">
+                {t('addItem.duplicate.incoming', { defaultValue: 'New upload' })}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => active && onCancel(active.id)}
+            data-testid="duplicate-cancel-button"
+          >
+            <X className="h-4 w-4 me-2" />
+            {t('addItem.duplicate.cancel', { defaultValue: 'Discard upload' })}
+          </Button>
+          <Button
+            type="button"
+            className="rounded-xl"
+            onClick={() => active && onConfirm(active.id)}
+            data-testid="duplicate-confirm-button"
+          >
+            <Plus className="h-4 w-4 me-2" />
+            {t('addItem.duplicate.confirm', { defaultValue: 'Add anyway' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

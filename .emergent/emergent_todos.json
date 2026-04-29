@@ -1,42 +1,22 @@
 [
   {
-    "content": "Backend: add ADMIN_EMAILS config + apply_admin_role helper",
+    "content": "Backend: add find_potential_duplicates() helper that queries Mongo for items matching item_type + sub_category + dominant color (+ brand if both present)",
     "status": "completed"
   },
   {
-    "content": "Backend: refactor calendar_service to support custom scopes + custom callback path for sign-in flow",
+    "content": "Backend: include potential_duplicate field in /closet/analyze response items",
     "status": "completed"
   },
   {
-    "content": "Backend: add /auth/google/login/start (unauth) + /auth/google/login/callback endpoints with find-or-create user, optional calendar scope, JWT issuance",
+    "content": "Frontend: detect potential_duplicate in analyzeCard and show confirmation modal",
     "status": "completed"
   },
   {
-    "content": "Backend: apply ADMIN_EMAILS check in register/login/google-login + create grant_admin.py CLI",
+    "content": "Frontend: add i18n keys + Modal UI with 'Already in closet' message + Cancel/Add anyway buttons",
     "status": "completed"
   },
   {
-    "content": "Frontend: add getGoogleLoginUrl helper in lib/api.js",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: add 'Continue with Google' button + 'Also connect my calendar' checkbox to Login.jsx",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: add 'Continue with Google' button to Register.jsx",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: create /auth/callback route (AuthCallback.jsx) that reads hash fragment, persists token, redirects",
-    "status": "completed"
-  },
-  {
-    "content": "i18n: add new auth keys to en.json and he.json",
-    "status": "completed"
-  },
-  {
-    "content": "Smoke test: backend endpoints + frontend flow with screenshot tool",
+    "content": "Smoke-test the full flow on dev",
     "status": "completed"
   }
 ]

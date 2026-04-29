@@ -138,6 +138,15 @@
     "scanning": "סורק",
     "scanningSub": "קורא בדים, צבעים ומבנה…",
     "analyzeFailed": "הניתוח נכשל",
+    "duplicate": {
+      "title": "כבר נמצא בארון שלך",
+      "body": "נראה שהפריט \"{{existing}}\" כבר קיים בארון שלך. להוסיף את \"{{incoming}}\" כהעתק נוסף?",
+      "existing": "קיים",
+      "incoming": "העלאה חדשה",
+      "cancel": "בטל העלאה",
+      "confirm": "הוסף בכל זאת",
+      "thisItem": "פריט זה"
+    },
     "saveAll": "שמור הכל",
     "savedAll": "כל הפריטים נשמרו",
     "savedCount_one": "פריט {{count}} נשמר בארון שלך",
