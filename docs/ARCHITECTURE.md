@@ -178,7 +178,8 @@ DressApp ships **a single backend codebase** that serves two production targets 
   - **Multi-item detection** → Gemini Nano Banana (`garment_vision._gemini_detect`).
   - **Single-item analysis** → Gemini 2.5 Pro multimodal.
   - **Background matting** → returns `None`; caller keeps the original crop.
-- Live deploy-mode probe: `GET /api/v1/closet/analyze/version` exposes `torch_installed`, `rembg_installed`, `use_local_clothing_parser`, `auto_matte_crops` so you can confirm at-a-glance which mode is live.
+- **Hard override**: set `LIGHTWEIGHT_DEPLOY=true` in Emergent's env dashboard if Emergent's build cache happens to still ship `torch` / `rembg` (in which case the auto-detect would otherwise leave the heavy paths enabled, and the pod would hang on every analyse call because rembg's 170 MB model download + 2K-image inference exceeds the 60 s gateway timeout).
+- Live deploy-mode probe: `GET /api/v1/closet/analyze/version` is **fast by default** (returns code-presence flags only, no live rembg cycle). Pass `?probe=1` for the heavy live matting probe. Exposes `torch_installed`, `rembg_installed`, `use_local_clothing_parser`, `auto_matte_crops`, `lightweight_deploy` so you can confirm at-a-glance which mode is live.
 
 ### 6.3 Backend concurrency guard (both deploys)
 

@@ -192,14 +192,18 @@ Emergent's auto-deploy pod is sized at 250 m CPU / 1 Gi RAM, which cannot host t
 - `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` default to `false`.
 - The analyse pipeline falls through to the **Gemini multi-item detector** (already implemented in `garment_vision._gemini_detect`), and matting cleanly returns `None` so the original crop is kept.
 
+> **If Emergent's build cache still ships `rembg` after `requirements.txt` removed it**, the auto-detect will keep the heavy paths enabled and the pod will start hanging on every analyse call (180 s rembg model download + 2 K image inference exceeds the gateway timeout). To force-disable both heavy paths regardless of installed wheels, set `LIGHTWEIGHT_DEPLOY=true` in Emergent's env dashboard. This single override pins `AUTO_MATTE_CROPS=false` and `USE_LOCAL_CLOTHING_PARSER=false` at boot.
+
 A health probe at `GET /api/v1/closet/analyze/version` exposes the active mode:
 
 ```jsonc
 // dressapp.co
-{ "torch_installed": true,  "use_local_clothing_parser": true,  "auto_matte_crops": true,  ... }
-// ai-stylist-api.emergent.host
-{ "torch_installed": false, "use_local_clothing_parser": false, "auto_matte_crops": false, ... }
+{ "torch_installed": true,  "use_local_clothing_parser": true,  "auto_matte_crops": true,  "lightweight_deploy": false, ... }
+// ai-stylist-api.emergent.host  (with LIGHTWEIGHT_DEPLOY=true)
+{ "torch_installed": false, "use_local_clothing_parser": false, "auto_matte_crops": false, "lightweight_deploy": true,  ... }
 ```
+
+The probe is **fast by default** (skips the live rembg matting cycle so it never times out behind a 60 s gateway). Pass `?probe=1` when you want the heavier health check.
 
 Both targets serve identical user-facing functionality — Add Item, Reanalyse, Clean Background, Stylist, Marketplace — the only difference is *where* the ML runs.
 

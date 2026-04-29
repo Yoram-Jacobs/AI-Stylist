@@ -456,12 +456,23 @@ async def analyze_item_image(
 
 
 @router.get("/analyze/version", include_in_schema=False)
-async def analyze_version() -> dict[str, Any]:
+async def analyze_version(probe: int = 0) -> dict[str, Any]:
     """Public, unauth code-version probe. Returns feature-presence
-    booleans + a live rembg health check. No secrets, no LLM calls,
-    no DB hits. Safe to expose.
+    booleans + deploy-mode flags. No secrets, no LLM calls, no DB hits.
+    Safe to expose.
+
+    By default this is a **fast static probe** — it never runs the
+    actual rembg matting cycle, only reports which code paths are
+    present. Pass ``?probe=1`` to additionally execute the heavy
+    rembg health probe (256 px + 2000 px matte cycles, up to ~3 min
+    on a cold pod that has to download the ~170 MB model). The
+    default-fast behaviour is required because:
+      * Emergent's CDN/gateway has a ~60 s response timeout, so a
+        heavy probe hangs the request for browsers and curl alike.
+      * The analyse endpoint serialises through `_ANALYZE_LOCK`, so a
+        long-running probe also blocks real user upload traffic.
     """
-    markers: dict[str, bool | str] = {}
+    markers: dict[str, Any] = {}
     try:
         from app.services import clothing_parser as _cp
 
@@ -504,24 +515,35 @@ async def analyze_version() -> dict[str, Any]:
         getattr(settings, "AUTO_MATTE_CROPS", False)
     )
     try:
-        from app.config import _HAS_LOCAL_ML, _HAS_REMBG  # type: ignore
+        from app.config import _HAS_LOCAL_ML, _HAS_REMBG, _LIGHTWEIGHT_DEPLOY  # type: ignore
 
         markers["torch_installed"] = bool(_HAS_LOCAL_ML)
         markers["rembg_installed"] = bool(_HAS_REMBG)
+        markers["lightweight_deploy"] = bool(_LIGHTWEIGHT_DEPLOY)
     except Exception:  # noqa: BLE001
         pass
 
-    # --- NEW: live rembg health probe ---
+    # --- Live rembg health probe (opt-in) ---
     # Generates two test images (256x256 sanity + 2000x2000 real-world
     # scale) and runs the FULL matte_crop pipeline on each. The 2K test
     # mirrors what your camera/phone uploads look like — if rembg silently
     # fails on full-resolution input (OOM, timeout, opacity rejection),
     # this is where we'll see it.
+    #
+    # Skipped by default because the heavy path can take 30-180 s on a
+    # cold pod (rembg model download + 2K-image inference) which exceeds
+    # Emergent's gateway timeout. Pass ``?probe=1`` when you want it.
     rembg_probe: dict[str, Any] = {
         "auto_matte_crops_enabled": bool(settings.AUTO_MATTE_CROPS),
         "rembg_model": settings.BACKGROUND_MATTING_REMBG_MODEL,
         "max_edge_setting": settings.BACKGROUND_MATTING_MAX_EDGE,
     }
+    if not probe:
+        rembg_probe["skipped"] = (
+            "default-fast mode; pass ?probe=1 to run the live matte cycle"
+        )
+        markers["rembg_probe"] = rembg_probe
+        return markers
     try:
         from PIL import Image, ImageDraw
         import io

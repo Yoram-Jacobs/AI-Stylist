@@ -38,6 +38,15 @@ _HAS_TRANSFORMERS = _module_installed("transformers")
 _HAS_REMBG = _module_installed("rembg")
 _HAS_LOCAL_ML = _HAS_TORCH and _HAS_TRANSFORMERS
 
+# One-shot override for tiny deploy pods (e.g. ``ai-stylist-api.emergent.host``,
+# 250 m CPU / 1 Gi RAM). When set, BOTH the local SegFormer parser and
+# rembg matting are disabled regardless of whether the python wheels
+# happen to be installed. Useful when the host CAN technically import
+# torch/rembg but doesn't have the RAM/CPU to actually run them inside
+# the request timeout — e.g. when Emergent's build cache still ships
+# rembg even after ``requirements.txt`` removed it.
+_LIGHTWEIGHT_DEPLOY = os.environ.get("LIGHTWEIGHT_DEPLOY", "").lower() == "true"
+
 
 class Settings:
     # --- infra ---
@@ -288,9 +297,13 @@ class Settings:
     # clean cutouts instead of bbox rectangles with background bleeding.
     # Default tracks ``rembg`` availability — true on Hetzner where rembg
     # is installed, false on the lightweight Emergent pod which uses the
-    # HF Inference API matting path or skips matting entirely.
+    # HF Inference API matting path or skips matting entirely. Force
+    # to false via ``LIGHTWEIGHT_DEPLOY=true`` when rembg happens to be
+    # installed but the pod can't actually run it inside the gateway
+    # timeout window.
     AUTO_MATTE_CROPS: bool = (
-        os.environ.get(
+        not _LIGHTWEIGHT_DEPLOY
+        and os.environ.get(
             "AUTO_MATTE_CROPS", "true" if _HAS_REMBG else "false"
         ).lower()
         == "true"
@@ -306,9 +319,12 @@ class Settings:
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which
     # falls back to the Gemini multi-item detector — see
-    # `garment_vision._gemini_detect`). Override via env if needed.
+    # `garment_vision._gemini_detect`). Force to false via
+    # ``LIGHTWEIGHT_DEPLOY=true`` to skip even when the wheels are
+    # installed (e.g. cached Emergent build).
     USE_LOCAL_CLOTHING_PARSER: bool = (
-        os.environ.get(
+        not _LIGHTWEIGHT_DEPLOY
+        and os.environ.get(
             "USE_LOCAL_CLOTHING_PARSER", "true" if _HAS_LOCAL_ML else "false"
         ).lower()
         == "true"
