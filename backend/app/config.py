@@ -258,6 +258,13 @@ class Settings:
     AUTO_MATTE_CROPS: bool = (
         os.environ.get("AUTO_MATTE_CROPS", "true").lower() == "true"
     )
+    # Largest edge we'll feed into rembg. u2netp resizes internally to
+    # 320x320 anyway, so values above ~1500 just balloon memory without
+    # improving quality. The output alpha mask is upscaled back onto the
+    # full-resolution RGB so input photos keep their sharpness.
+    BACKGROUND_MATTING_MAX_EDGE: int = int(
+        os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1500")
+    )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Enabled by default now that we've switched to
     # segformer_b2_clothes (~95 MB weights, ~1 GB peak RAM) which fits

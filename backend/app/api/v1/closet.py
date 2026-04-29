@@ -424,9 +424,9 @@ async def analyze_item_image(
 
 @router.get("/analyze/version", include_in_schema=False)
 async def analyze_version() -> dict[str, Any]:
-    """Public, unauth code-version probe. Returns only feature-presence
-    booleans — no secrets, no LLM calls, no DB hits. Use this to verify
-    a deploy actually replaced the running container.
+    """Public, unauth code-version probe. Returns feature-presence
+    booleans + a live rembg health check. No secrets, no LLM calls,
+    no DB hits. Safe to expose.
     """
     markers: dict[str, bool | str] = {}
     try:
@@ -442,10 +442,6 @@ async def analyze_version() -> dict[str, Any]:
     try:
         from app.services.garment_vision import _looks_already_cropped as _lac
 
-        # Synthetic test mirroring the user's t-shirt failure case:
-        # one large "Dress" detection (52% area) + one small mislabel.
-        # Old heuristic returns False → multi-item path → bad crops.
-        # New heuristic returns True → single-item path → clean cutout.
         synthetic = [
             {"label": "Upper-clothes", "kind": "top", "bbox": [134, 49, 410, 441]},
             {"label": "Dress", "kind": "dress", "bbox": [120, 190, 833, 928]},
@@ -453,6 +449,54 @@ async def analyze_version() -> dict[str, Any]:
         markers["already_cropped_heuristic_v2"] = bool(_lac(synthetic))
     except Exception as exc:  # noqa: BLE001
         markers["heuristic_error"] = repr(exc)
+
+    # --- NEW: live rembg health probe ---
+    # Generates a 256x256 test image with a coloured rectangle on a white
+    # background and runs the FULL matte_crop pipeline on it. This tells
+    # us in one curl whether rembg is actually producing alpha cutouts
+    # in the running container. If rembg fails silently (OOM, model load
+    # error, opacity-rejection), this is where we'll see it.
+    rembg_probe: dict[str, Any] = {
+        "auto_matte_crops_enabled": bool(settings.AUTO_MATTE_CROPS),
+        "rembg_model": settings.BACKGROUND_MATTING_REMBG_MODEL,
+    }
+    try:
+        from PIL import Image
+        import io
+        from app.services import background_matting
+
+        buf = io.BytesIO()
+        img = Image.new("RGB", (256, 256), (240, 240, 240))
+        # Draw a solid coloured rectangle in the middle — rembg should
+        # treat it as foreground and the whitish surround as background.
+        from PIL import ImageDraw
+
+        ImageDraw.Draw(img).rectangle([60, 60, 196, 196], fill=(40, 90, 200))
+        img.save(buf, format="JPEG", quality=85)
+        test_bytes = buf.getvalue()
+
+        import asyncio as _asyncio
+
+        result = await _asyncio.wait_for(
+            background_matting.matte_crop(test_bytes), timeout=45.0
+        )
+        if not result:
+            rembg_probe["ok"] = False
+            rembg_probe["reason"] = "matte_crop returned None"
+        else:
+            out_im = Image.open(io.BytesIO(result)).convert("RGBA")
+            import numpy as _np
+
+            alpha = _np.array(out_im)[:, :, 3]
+            opaque_ratio = float((alpha > 32).sum()) / float(max(1, alpha.size))
+            rembg_probe["ok"] = opaque_ratio > 0.05
+            rembg_probe["opaque_ratio"] = round(opaque_ratio, 3)
+            rembg_probe["png_bytes"] = len(result)
+            rembg_probe["dimensions"] = list(out_im.size)
+    except Exception as exc:  # noqa: BLE001
+        rembg_probe["ok"] = False
+        rembg_probe["error"] = repr(exc)[:300]
+    markers["rembg_probe"] = rembg_probe
     return markers
 
 

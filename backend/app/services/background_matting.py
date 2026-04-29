@@ -82,15 +82,75 @@ def _get_session() -> Any:
 
 
 def _rembg_remove(image_bytes: bytes) -> bytes | None:
-    """Blocking helper — call inside asyncio.to_thread."""
+    """Blocking helper — call inside asyncio.to_thread.
+
+    Pre-resize input to ``BACKGROUND_MATTING_MAX_EDGE`` px to keep rembg
+    inference bounded in time and memory. u2netp is trained on 320x320
+    inputs and rembg internally resizes anyway — running on a 4K original
+    image just balloons RAM (intermediate RGBA tensors at full res can
+    exceed the 3 GB container limit and cause silent OOM kills) without
+    helping quality. We resize INPUT only; the alpha mask comes back at
+    the resized resolution and we composite it back onto the original
+    full-resolution RGB so the output keeps its sharpness.
+    """
     from rembg import remove
 
     try:
         sess = _get_session()
-        out = remove(image_bytes, session=sess)
+        # 1) Decode original at full resolution.
+        try:
+            original = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        except Exception:  # noqa: BLE001
+            # Not a decodable image — let rembg attempt anyway.
+            out = remove(image_bytes, session=sess)
+            return out or None
+
+        # 2) Build a downscaled copy for rembg if needed.
+        max_edge = settings.BACKGROUND_MATTING_MAX_EDGE
+        ow, oh = original.size
+        long_edge = max(ow, oh)
+        if max_edge > 0 and long_edge > max_edge:
+            scale = max_edge / float(long_edge)
+            sw, sh = int(ow * scale), int(oh * scale)
+            small = original.resize((sw, sh), Image.LANCZOS)
+            buf = io.BytesIO()
+            small.save(buf, format="JPEG", quality=92)
+            inference_bytes = buf.getvalue()
+            logger.info(
+                "rembg: resized input %dx%d → %dx%d for inference",
+                ow, oh, sw, sh,
+            )
+        else:
+            inference_bytes = image_bytes
+
+        # 3) Run rembg — yields PNG with alpha at the inference resolution.
+        out = remove(inference_bytes, session=sess)
         if not out:
             return None
-        # Sanity: make sure we got a meaningful alpha mask, not empty.
+
+        # 4) Composite the alpha back onto the FULL-RES original so we
+        #    don't lose detail (especially on portrait shots where the
+        #    user wants to read tags / fabric texture).
+        try:
+            small_rgba = Image.open(io.BytesIO(out)).convert("RGBA")
+            alpha_small = small_rgba.split()[-1]
+            if alpha_small.size != original.size:
+                alpha_full = alpha_small.resize(original.size, Image.LANCZOS)
+            else:
+                alpha_full = alpha_small
+            full_rgba = original.convert("RGBA")
+            full_rgba.putalpha(alpha_full)
+            buf = io.BytesIO()
+            full_rgba.save(buf, format="PNG", optimize=True)
+            out = buf.getvalue()
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "rembg: alpha-upscale composite failed (%s); using small output",
+                repr(exc)[:120],
+            )
+            # Fall through with `out` as-is.
+
+        # 5) Sanity: make sure we got a meaningful alpha mask, not empty.
         try:
             im = Image.open(io.BytesIO(out)).convert("RGBA")
             a = np.array(im.split()[-1])
