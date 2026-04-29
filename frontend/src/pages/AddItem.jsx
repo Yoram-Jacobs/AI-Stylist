@@ -218,11 +218,24 @@ export default function AddItem() {
 
   // ------------------------------------------------------------------
   // Background batch upload (>5 photos): analyze + auto-save each one
-  // with whatever the analyzer returns, with bounded concurrency. The
-  // user gets a single progress card, then lands on /closet to clean up.
+  // with whatever the analyzer returns. We process **strictly
+  // sequentially** because the analyze pipeline (SegFormer + rembg +
+  // Gemini) is RAM-heavy: running multiple in parallel on a small
+  // production VPS reliably OOMs the second/third call. With one at a
+  // time, items 2..N actually get analysed instead of silently
+  // falling through to the "save raw image" branch.
   // ------------------------------------------------------------------
   const handleBatchBackground = async (files) => {
-    setBgBatch({ total: files.length, processed: 0, saved: 0, failed: 0 });
+    setBgBatch({
+      total: files.length,
+      processed: 0,
+      saved: 0,
+      failed: 0,
+      // Items where the analyze call failed and we had to save the
+      // raw photo with blank fields. Surfaced in the final toast so
+      // the user knows which ones need cleanup in /closet.
+      analyzeFailed: 0,
+    });
     toast.success(
       t('addItem.bgUpload.started', {
         count: files.length,
@@ -230,12 +243,29 @@ export default function AddItem() {
       })
     );
 
-    const CONCURRENCY = 3;
     const queue = [...files];
+
+    // Try analysis with a single retry on failure. The first failure
+    // is usually a transient timeout / cold-start; a 1.2s pause and a
+    // second attempt clears most of those without piling more work
+    // onto an already-stressed backend.
+    const analyzeWithRetry = async (b64) => {
+      try {
+        return await api.analyzeItemImage({ image_base64: b64 });
+      } catch (firstErr) {
+        await new Promise((r) => setTimeout(r, 1200));
+        try {
+          return await api.analyzeItemImage({ image_base64: b64 });
+        } catch (_secondErr) {
+          throw firstErr;
+        }
+      }
+    };
 
     const processOne = async (file) => {
       let createdHere = 0;
       let failedHere = 0;
+      let analyzeFailedHere = 0;
       let b64 = null;
       try {
         b64 = await fileToBase64(file);
@@ -247,14 +277,17 @@ export default function AddItem() {
 
       // Try analysis; on failure, fall back to saving the raw image
       // with blank fields so the user still gets the item in /closet.
+      // Track the analyze-failure count separately so the final toast
+      // can tell the user "X items need fields filled in".
       let analysisItems = null;
       try {
-        const resp = await api.analyzeItemImage({ image_base64: b64 });
+        const resp = await analyzeWithRetry(b64);
         analysisItems =
           Array.isArray(resp?.items) && resp.items.length > 0
             ? resp.items
             : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
       } catch (_) {
+        analyzeFailedHere += 1;
         analysisItems = [
           { analysis: {}, crop_base64: b64, crop_mime: file.type || 'image/jpeg' },
         ];
@@ -283,29 +316,47 @@ export default function AddItem() {
               processed: b.processed + 1,
               saved: b.saved + createdHere,
               failed: b.failed + failedHere,
+              analyzeFailed: (b.analyzeFailed || 0) + analyzeFailedHere,
             }
           : null
       );
     };
 
-    const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-      while (queue.length) {
-        const next = queue.shift();
-        if (next) await processOne(next);
+    // Sequential worker — process one file at a time. The earlier
+    // CONCURRENCY=3 implementation tried to run 3 analyse calls in
+    // parallel and got bitten by VPS RAM limits on production: the
+    // first item completed, items 2..N OOM'd inside rembg, fell into
+    // the catch above, and got saved as raw photos with empty fields.
+    while (queue.length) {
+      const next = queue.shift();
+      if (next) {
+        // eslint-disable-next-line no-await-in-loop
+        await processOne(next);
       }
-    });
-    await Promise.all(workers);
+    }
 
     // Read final counts from state via functional update so we don't
     // race with React batching.
     setBgBatch((b) => {
       const saved = b?.saved ?? 0;
       const failed = b?.failed ?? 0;
-      if (saved && !failed) {
+      const analyzeFailed = b?.analyzeFailed ?? 0;
+      if (saved && !failed && !analyzeFailed) {
         toast.success(
           t('addItem.bgUpload.done', {
             count: saved,
             defaultValue: `Saved ${saved} items. Edit any misfits in your closet.`,
+          })
+        );
+      } else if (saved && analyzeFailed && !failed) {
+        // All items saved, but some skipped analysis — tell the user
+        // which need attention so they're not surprised by blank
+        // cards in the closet.
+        toast.message(
+          t('addItem.bgUpload.partialAnalyze', {
+            saved,
+            analyzeFailed,
+            defaultValue: `Saved ${saved} items · ${analyzeFailed} need fields filled in (analysis failed).`,
           })
         );
       } else if (saved && failed) {
