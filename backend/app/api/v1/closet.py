@@ -470,6 +470,12 @@ async def analyze_version() -> dict[str, Any]:
         markers["apply_alpha_intersection"] = hasattr(
             _cp, "apply_alpha_intersection"
         )
+        # Confirms the over-cropping regression fix is live: graphic-print
+        # t-shirts no longer get split into N shredded "Upper-clothes"
+        # instances when their print breaks the SegFormer mask continuity.
+        markers["single_instance_classes_v1"] = hasattr(
+            _cp, "_SINGLE_INSTANCE_CLASSES"
+        )
     except Exception as exc:  # noqa: BLE001
         markers["clothing_parser_error"] = repr(exc)
     try:

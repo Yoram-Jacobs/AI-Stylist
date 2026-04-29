@@ -71,6 +71,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { isSTTSupported, createRecognition } from '@/lib/speech';
+import { deriveSizeFromPreferences } from '@/lib/size_preferences';
 
 /* -------------------- enum option lists (kept in-file to avoid a cross-page coupling) -------------------- */
 const CATEGORY_OPTIONS = [
@@ -141,8 +142,17 @@ const EDITABLE_FIELDS = [
   'notes',
 ];
 
-/** Pick the subset of fields we mutate + normalise to a stable shape. */
-function toFormState(item) {
+/** Pick the subset of fields we mutate + normalise to a stable shape.
+ *
+ * When ``user`` is provided and the item has no recorded size, the
+ * size field defaults to the user's saved preference for the
+ * relevant garment category (e.g. shirt_size for tops). This is
+ * applied symmetrically to both the displayed form state AND the
+ * `diffPatch` baseline so it never causes a spurious "dirty"
+ * indicator — the user has to actually change the size for it to
+ * be sent in a PATCH.
+ */
+function toFormState(item, user = null) {
   // The analyser writes `colors` / `fabric_materials` as `[{name, pct}]`
   // arrays. We surface them as-is so the WeightedList editor can render
   // the per-material percentages. The legacy single-string `color` /
@@ -158,6 +168,14 @@ function toFormState(item) {
         .filter((c) => c && (c.name || c.pct != null))
         .map((c) => ({ name: c.name || '', pct: c.pct ?? null }))
     : [];
+  const rawSize = item.size || '';
+  // Prefill missing size with the user's stored measurement for the
+  // garment category (Top → shirt_size, Bottom → pants_size, …). The
+  // prefill is treated as the canonical "saved" value here so the
+  // diffPatch baseline matches and the form doesn't immediately
+  // report itself as dirty.
+  const size =
+    rawSize || (user ? deriveSizeFromPreferences(user, item) : '');
   return {
     title: item.title || '',
     name: item.name || '',
@@ -170,7 +188,7 @@ function toFormState(item) {
     dress_code: item.dress_code || '',
     season: Array.isArray(item.season) ? item.season : [],
     tradition: item.tradition || '',
-    size: item.size || '',
+    size,
     color: item.color || '',
     colors: normalisedColors,
     material: item.material || '',
@@ -195,8 +213,8 @@ function toFormState(item) {
  *  were previously set are translated to ``null`` (clear the field).
  *  Multi-select arrays are sent as the full array whenever they differ.
  */
-function diffPatch(loaded, form) {
-  const baseline = toFormState(loaded);
+function diffPatch(loaded, form, user = null) {
+  const baseline = toFormState(loaded, user);
   const out = {};
   for (const key of EDITABLE_FIELDS) {
     const a = baseline[key];
@@ -434,7 +452,7 @@ export default function ItemDetail() {
         autoSegment: false,
       });
       setItem(res.item);
-      setForm(toFormState(res.item));
+      setForm(toFormState(res.item, user));
       toast.dismiss(loadingId);
       toast.success(t('itemDetail.photo.success'));
     } catch (err) {
@@ -456,7 +474,7 @@ export default function ItemDetail() {
     try {
       const data = await api.getItem(id);
       setItem(data);
-      setForm(toFormState(data));
+      setForm(toFormState(data, user));
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.notFound'));
       nav('/closet');
@@ -471,8 +489,8 @@ export default function ItemDetail() {
   }, []);
 
   const patch = useMemo(
-    () => (item && form ? diffPatch(item, form) : {}),
-    [item, form],
+    () => (item && form ? diffPatch(item, form, user) : {}),
+    [item, form, user],
   );
   const isDirty = Object.keys(patch).length > 0;
 
@@ -485,7 +503,7 @@ export default function ItemDetail() {
     try {
       const updated = await api.updateItem(id, patch);
       setItem(updated);
-      setForm(toFormState(updated));
+      setForm(toFormState(updated, user));
       toast.success(t('itemDetail.detailsSaved'));
       // Per UX spec: after a successful edit, take the user back
       // to the closet so they immediately see the updated item in
@@ -499,7 +517,7 @@ export default function ItemDetail() {
   };
   const onDiscard = () => {
     if (!item) return;
-    setForm(toFormState(item));
+    setForm(toFormState(item, user));
     toast.message(t('itemDetail.changesDiscarded'));
   };
 
@@ -524,7 +542,7 @@ export default function ItemDetail() {
     try {
       const res = await api.reanalyzeItem(id);
       setItem(res.item);
-      setForm(toFormState(res.item));
+      setForm(toFormState(res.item, user));
       toast.success(t('itemDetail.reanalyze.success'));
     } catch (err) {
       toast.error(
@@ -561,7 +579,7 @@ export default function ItemDetail() {
       if (res.applied) {
         toast.success(t('itemDetail.cleanBackground.success'));
         setItem(res.item);
-        setForm(toFormState(res.item));
+        setForm(toFormState(res.item, user));
         setRepairHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));

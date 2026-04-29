@@ -1,30 +1,18 @@
 [
   {
-    "content": "Extract WeightedList from AddItem.jsx into a shared component (/components/WeightedList.jsx)",
+    "content": "Fix over-cropping regression: don't split single-garment classes (Upper-clothes/Skirt/Pants/Dress) into multiple instances when graphic prints fragment the SegFormer mask",
     "status": "completed"
   },
   {
-    "content": "Wire colors[] and fabric_materials[] into ItemDetail.jsx form (toFormState + EDITABLE_FIELDS + UI)",
+    "content": "Issue #1: derive Item size from user.body_measurements based on category (AddItem + ItemDetail)",
     "status": "completed"
   },
   {
-    "content": "Backend: add POST /api/v1/closet/{id}/reanalyze endpoint",
-    "status": "completed"
+    "content": "Issue #3: clarify with user about Emergent deployment strategy (ML stack incompatible with Emergent pod)",
+    "status": "in_progress"
   },
   {
-    "content": "Frontend: add api.reanalyzeItem helper + 'Analyze' button in ItemDetail with progress UX",
-    "status": "completed"
-  },
-  {
-    "content": "Change Replace Photo flow in ItemDetail to autoSegment:false (raw save only)",
-    "status": "completed"
-  },
-  {
-    "content": "Add i18n strings (en + he) for new UI",
-    "status": "completed"
-  },
-  {
-    "content": "Lint, restart backend, smoke-test reanalyze endpoint",
+    "content": "Lint, restart, smoke-test on a synthetic graphic-T scenario",
     "status": "completed"
   }
 ]

@@ -22,6 +22,8 @@ import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
+import { useAuth } from '@/lib/auth';
+import { deriveSizeFromPreferences } from '@/lib/size_preferences';
 import {
   labelForCategory,
   labelForDressCode,
@@ -88,16 +90,34 @@ const blankFields = () => ({
   tags: [],
 });
 
-/** Coerce analyze payload into a plain, editable form dict. */
-const hydrate = (a) => ({
-  ...blankFields(),
-  ...Object.fromEntries(Object.entries(a || {}).filter(([k]) => k in blankFields())),
-});
+/** Coerce analyze payload into a plain, editable form dict.
+ *
+ * When ``user`` is provided and the analyser didn't return a usable
+ * ``size`` (couldn't read a tag, blank crop, …), we fall back to
+ * the user's stored body-measurement preference for the relevant
+ * garment category — Top→shirt_size, Bottom→pants_size,
+ * Footwear→shoe_size, etc. The user can still type any size they
+ * want; this only fills the field instead of leaving it empty.
+ */
+const hydrate = (a, user) => {
+  const out = {
+    ...blankFields(),
+    ...Object.fromEntries(
+      Object.entries(a || {}).filter(([k]) => k in blankFields()),
+    ),
+  };
+  if (user && (!out.size || String(out.size).trim() === '')) {
+    const pref = deriveSizeFromPreferences(user, out);
+    if (pref) out.size = pref;
+  }
+  return out;
+};
 
 /* -------------------- page -------------------- */
 export default function AddItem() {
   const { t } = useTranslation();
   const nav = useNavigate();
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error,dppData?}]
   const [saving, setSaving] = useState(false);
@@ -153,7 +173,7 @@ export default function AddItem() {
       base64: hasImage ? first.crop_base64 : null,
       status: 'ready',
       progress: 100,
-      fields: hydrate(analysis),
+      fields: hydrate(analysis, user),
       error: null,
       label: first.label || analysis.item_type || null,
       dppData,
@@ -299,7 +319,7 @@ export default function AddItem() {
           base64: it.crop_base64 || b64,
           mime: it.crop_mime || file.type || 'image/jpeg',
           file: null,
-          fields: hydrate(it.analysis || {}),
+          fields: hydrate(it.analysis || {}, user),
           useReconstructed: false,
         };
         try {
@@ -405,7 +425,7 @@ export default function AddItem() {
         setCards((prev) =>
           prev.map((c) =>
             c.id === card.id
-              ? { ...c, status: 'ready', progress: 100, fields: hydrate(resp) }
+              ? { ...c, status: 'ready', progress: 100, fields: hydrate(resp, user) }
               : c
           )
         );
@@ -438,7 +458,7 @@ export default function AddItem() {
                   ...c,
                   status: 'ready',
                   progress: 100,
-                  fields: hydrate(it.analysis || {}),
+                  fields: hydrate(it.analysis || {}, user),
                   label: it.label || null,
                   potentialDuplicate: it.potential_duplicate || null,
                   // Keep the original card.base64 untouched only if the
@@ -503,7 +523,7 @@ export default function AddItem() {
           useReconstructed: recValidated,
           status: 'ready',
           progress: 100,
-          fields: hydrate(it.analysis || {}),
+          fields: hydrate(it.analysis || {}, user),
           error: null,
           label: it.label || null,
           potentialDuplicate: it.potential_duplicate || null,
