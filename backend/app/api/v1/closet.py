@@ -346,7 +346,7 @@ async def analyze_item_image(
         try:
             detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %s", exc)
+            logger.warning("Outfit analysis failed: %r", exc)
             raise HTTPException(
                 503,
                 "Garment analyzer is temporarily unavailable. Please try again.",
@@ -372,7 +372,7 @@ async def analyze_item_image(
     try:
         parsed = await garment_vision_service.analyze(raw, language=user_lang)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Garment analysis failed: %s", exc)
+        logger.warning("Garment analysis failed: %r", exc)
         raise HTTPException(
             503, "Garment analyzer is temporarily unavailable. Please try again."
         ) from exc
@@ -392,6 +392,73 @@ async def analyze_item_image(
         "count": 1,
         **analysis,
     }
+
+
+@router.get("/analyze/diag")
+async def analyze_diag(
+    user: dict = Depends(get_current_user),  # noqa: ARG001 — auth-gate only
+) -> dict[str, Any]:
+    """Diagnostic — does a minimal real Gemini call with a 32x32 test
+    image and returns the FULL provider response or error. Helps tell
+    apart "API key revoked" / "API not enabled" / "key has referer
+    restrictions" / "model not accessible" without grepping logs.
+
+    Auth-gated so it can't be used for free LLM calls by anonymous traffic.
+    """
+    out: dict[str, Any] = {
+        "service_initialised": garment_vision_service is not None,
+        "provider": settings.GARMENT_VISION_PROVIDER,
+        "model": settings.GARMENT_VISION_MODEL,
+        "crop_model": settings.GARMENT_VISION_CROP_MODEL,
+        "has_gemini_api_key": bool(settings.GEMINI_API_KEY),
+        "has_emergent_llm_key": bool(settings.EMERGENT_LLM_KEY),
+    }
+    if garment_vision_service is None:
+        out["status"] = "service_not_initialised"
+        return out
+
+    # Build a tiny in-memory JPEG (32x32 grey square) so we exercise the
+    # exact image-input path that's failing in production.
+    try:
+        from PIL import Image
+        import io
+
+        buf = io.BytesIO()
+        Image.new("RGB", (32, 32), (180, 180, 180)).save(buf, format="JPEG", quality=85)
+        test_bytes = buf.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        out["status"] = "test_image_build_failed"
+        out["error"] = repr(exc)
+        return out
+
+    # Probe both models the production flow uses (default + crop_model)
+    # and capture the FULL exception repr so the user can paste it back
+    # without log truncation.
+    probes: dict[str, Any] = {}
+    for label, model in (
+        ("default_model", settings.GARMENT_VISION_MODEL),
+        ("crop_model", settings.GARMENT_VISION_CROP_MODEL),
+    ):
+        try:
+            res = await garment_vision_service.analyze(test_bytes, model=model)
+            probes[label] = {
+                "model": model,
+                "ok": True,
+                "title": res.get("title"),
+            }
+        except Exception as exc:  # noqa: BLE001
+            probes[label] = {
+                "model": model,
+                "ok": False,
+                "error": repr(exc),  # FULL — no truncation
+            }
+    out["probes"] = probes
+    out["status"] = (
+        "all_ok"
+        if all(p.get("ok") for p in probes.values())
+        else "provider_error"
+    )
+    return out
 
 
 # -------------------------------------------------------------------

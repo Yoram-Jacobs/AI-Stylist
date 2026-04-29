@@ -971,10 +971,14 @@ class GarmentVisionService:
                         crop_bytes, model=self.crop_model, language=language,
                     )
                 except Exception as exc:  # noqa: BLE001
+                    # Capture the full provider error (Gemini's 403 messages
+                    # are wrapped multiple layers deep and the previous
+                    # ``[:160]`` truncation chopped them at "Req..." — which
+                    # is exactly the diagnostic signal we need).
                     logger.warning(
                         "crop analyze failed for label=%s: %s",
                         det.get("label"),
-                        repr(exc)[:160],
+                        repr(exc)[:1500],
                     )
                     return None
                 # -------- Phase Q: optional auto-reconstruction --------
