@@ -43,6 +43,18 @@ RUN pip install --no-cache-dir \
       torch==2.5.1 torchvision==0.20.1
 
 COPY backend/requirements.txt ./requirements.txt
+COPY backend/requirements-ml.txt ./requirements-ml.txt
+# Lightweight backend deps. Torch is already installed above — pip
+# will skip it during the ML install.
+RUN pip install --no-cache-dir -r requirements.txt
+# Heavy ML stack — local SegFormer + rembg matting. Kept in a SEPARATE
+# requirements file so the lightweight Emergent deploy
+# (`ai-stylist-api.emergent.host`) which only installs
+# `requirements.txt` doesn't try to OOM-build torch / cuda-toolkit on
+# its 250m/1Gi pod. Code paths in `clothing_parser.py` and
+# `background_matting.py` already detect the missing imports at
+# runtime and fall back to the HF Inference API or skip cleanly.
+RUN pip install --no-cache-dir -r requirements-ml.txt
 # Torch is already installed above — pip will skip it here.
 RUN pip install --no-cache-dir --use-deprecated=legacy-resolver --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
 

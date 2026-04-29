@@ -33,13 +33,16 @@ DressApp turns a closet of physical clothes into a structured, queryable wardrob
 
 **Frontend** — React 19 · React Router · Tailwind · Shadcn/UI · `react-i18next` (12 locales) · Sonner toasts · Lucide icons
 
-**Vision pipeline (in-pod, no external API)** — `rembg` (U2-Net) for matting · HuggingFace SegFormer-b3 fine-tuned for clothes · Fashion-CLIP for embeddings
+**Vision pipeline** — environment-aware:
+* **Hetzner / dev** (full stack): `rembg` (U2-Net) for matting · HuggingFace SegFormer-b2-clothes for clothing parsing · Fashion-CLIP for embeddings — all CPU-local.
+* **Emergent host** (lightweight pod, 250 m CPU / 1 Gi RAM): Gemini Nano Banana for multi-item detection · HuggingFace Inference API for SegFormer · Cleanly skips matting when `rembg` is absent.
+* The same image runs on both — see `requirements-ml.txt` and the auto-detection in `app/config.py`.
 
 **Voice** — Deepgram (STT + TTS, multi-voice)
 
-**LLM** — Emergent universal key (OpenAI / Gemini / Claude). Default stylist model: Gemini Flash 2.x
+**LLM** — Direct `GEMINI_API_KEY` in production · Emergent universal key in dev. Default stylist model: Gemini Flash 2.x. Image generation: Gemini 2.5 Flash Image (Nano Banana).
 
-**External APIs** — OpenWeather · PayPal Live · Google OAuth + Google Calendar
+**External APIs** — OpenWeather · PayPal Live · Google OAuth + Google Calendar · HuggingFace Inference API
 
 **Hosting** — Docker Compose · Caddy 2 (auto Let's Encrypt) · MongoDB Atlas
 
@@ -62,10 +65,13 @@ DressApp turns a closet of physical clothes into a structured, queryable wardrob
    └────┬─────┘    └────────────────────┘
         │
         ├─ MongoDB Atlas (users, closet, listings, trends, …)
-        ├─ Local SegFormer + rembg (CPU inference, ~1.4 GB RAM)
+        ├─ Vision pipeline · auto-selected per deploy:
+        │    · Hetzner   → local SegFormer + rembg + Fashion-CLIP
+        │    · Emergent  → Gemini Nano Banana detector + skip-matting
         ├─ Deepgram (STT/TTS over HTTPS)
         ├─ OpenWeather, PayPal Live, Google OAuth/Calendar
-        └─ Emergent LLM key → OpenAI / Gemini / Anthropic
+        └─ Direct GEMINI_API_KEY (prod) or Emergent LLM key (dev)
+             → text + Nano Banana image generation
 ```
 
 A more detailed write-up lives in [`/app/docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the database shape in [`/app/docs/MONGODB_SCHEMA.md`](docs/MONGODB_SCHEMA.md).
@@ -86,7 +92,9 @@ A more detailed write-up lives in [`/app/docs/ARCHITECTURE.md`](docs/ARCHITECTUR
 │   │   └── core/           # Settings, security, deps
 │   ├── scripts/
 │   │   └── seed_demo.py    # Idempotent demo-data seeder
-│   └── requirements.txt
+│   ├── requirements.txt    # Lightweight deps — installed by both deploys
+│   └── requirements-ml.txt # Heavy ML stack (torch, transformers, rembg)
+│                           # — only installed by the Hetzner Dockerfile
 │
 ├── frontend/               # React SPA (Create-React-App + craco)
 │   ├── src/
@@ -148,11 +156,17 @@ python -m scripts.seed_demo   # idempotent — re-running upserts
 
 ## Production deployment
 
-DressApp is designed to run as a 3-container Docker Compose stack on any 4 GB+ VPS:
+DressApp ships **one codebase, two production targets** that share the same backend image. The vision pipeline auto-detects which dependencies are present and chooses a code path accordingly — no per-deploy env overrides needed.
 
-- `backend` — FastAPI + ML models (~1.5 GB RAM at idle)
+### Target A — Hetzner VPS (`dressapp.co`) · full local ML
+
+3-container Docker Compose stack on any 4 GB+ VPS:
+
+- `backend` — FastAPI + local SegFormer + rembg + Fashion-CLIP (~1.5 GB RAM at idle)
 - `frontend` — Nginx serving the built SPA
 - `caddy` — TLS termination, automatic Let's Encrypt, HTTP→HTTPS redirect
+
+`deploy/Dockerfile.backend` installs `requirements.txt` **and** `requirements-ml.txt` so torch / transformers / rembg are all present. `app/config.py` auto-detects them and turns `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` to `true`.
 
 Step-by-step instructions: [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
@@ -169,6 +183,25 @@ Routine update:
 git pull origin main
 docker compose up -d --build
 ```
+
+### Target B — Emergent host (`ai-stylist-api.emergent.host`) · cloud-only ML
+
+Emergent's auto-deploy pod is sized at 250 m CPU / 1 Gi RAM, which cannot host the local ML stack. The deploy pipeline only installs `backend/requirements.txt` (no torch / transformers / rembg / cuda-*), so:
+
+- `app/config._HAS_TORCH` / `_HAS_REMBG` resolve to `False`.
+- `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` default to `false`.
+- The analyse pipeline falls through to the **Gemini multi-item detector** (already implemented in `garment_vision._gemini_detect`), and matting cleanly returns `None` so the original crop is kept.
+
+A health probe at `GET /api/v1/closet/analyze/version` exposes the active mode:
+
+```jsonc
+// dressapp.co
+{ "torch_installed": true,  "use_local_clothing_parser": true,  "auto_matte_crops": true,  ... }
+// ai-stylist-api.emergent.host
+{ "torch_installed": false, "use_local_clothing_parser": false, "auto_matte_crops": false, ... }
+```
+
+Both targets serve identical user-facing functionality — Add Item, Reanalyse, Clean Background, Stylist, Marketplace — the only difference is *where* the ML runs.
 
 ---
 

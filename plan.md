@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post-production stabilisation + Stylist Power-Up + Google Sign-in + UX Polish)**
+# DressApp — Development Plan (Core-first) **UPDATED (post-production stabilisation + Stylist Power-Up + Google Sign-in + UX Polish + Dual-Deploy + Pre-deploy Audit)**
 
 ## 1) Objectives
 
@@ -7,22 +7,22 @@
 - ✅ **Ad-blocker hardening**: renamed all `/ads` endpoints → `/promotions` (backend + frontend).
 - ✅ **Add Item UX upgrades**:
   - Sticky “Save all” action bar.
-  - Background batch upload (>5 items) with concurrent workers + progress UI.
+  - Background batch upload (>5 items) with progress UI.
 - ✅ **Demo seeding**: `backend/scripts/seed_demo.py` added + tested.
 - ✅ **Docker build hardening**:
-  - Backend dependencies stabilized (legacy resolver + emergent extra index).
+  - Backend dependencies stabilized.
 - ✅ **Hetzner VPS access**: passwordless SSH (ED25519) configured.
 - ✅ **Closet crash + slowness fixed on production**:
   - Root cause #1: MongoDB Atlas M0 32MB sort cap → added `allow_disk_use(True)` + compound index `(user_id, created_at -1)`.
-  - Root cause #2: `/api/v1/closet` payload was massive due to base64 `*_image_url` blobs.
+  - Root cause #2: `/api/v1/closet` payload massive due to base64 `*_image_url` blobs.
     - Added thumbnailing + response stripping + frontend cache (stale-while-revalidate).
-  - Result: Closet loads reliably and quickly, no 30s reload loop on navigation.
-- ✅ **Frontend API base URL fix**: ensured `DOMAIN` is set so `REACT_APP_BACKEND_URL` bakes correctly (fixed “Unsupported protocol” axios error).
+  - Result: closet loads reliably + fast.
+- ✅ **Frontend API base URL fix**: ensured `DOMAIN` is set so `REACT_APP_BACKEND_URL` bakes correctly.
 - ✅ **Stylist production 500 fixed**:
   - Root cause: `repos.find_one()` lacked `sort` kwarg → crashed `get_or_create_active_session`.
-  - Added `sort=` support to `repos.find_one`.
+  - Added `sort=` support.
 - ✅ **Direct Gemini (production)**:
-  - `GEMINI_API_KEY` supported; chat calls route directly to Google via litellm (no Emergent proxy).
+  - `GEMINI_API_KEY` supported; chat calls route directly to Google (no Emergent proxy).
   - Model split: **Pro for Stylist**, **Flash for The Eyes/Trend-Scout**.
   - Nano Banana (`gemini-2.5-flash-image`) integrated for reconstruction when direct key present.
 - ✅ **Stylist Phase R + Phase S implementation complete (deployment pending)**:
@@ -32,46 +32,38 @@
 ### ✅ UX Polish (post-listing/auth fixes) — **SHIPPED IN CODE — DEPLOYMENT PENDING**
 Small high-impact UX fixes to eliminate “did it save?” ambiguity and missing visual feedback.
 - ✅ **Create Listing**
-  - Show thumbnail preview for the linked closet item (uses `thumbnail_data_url`, since heavy URLs are stripped from closet payload).
-  - Post-publish redirect: **/market** (instead of deep-linked listing detail).
+  - Show thumbnail preview for linked closet item (uses `thumbnail_data_url`).
+  - Post-publish redirect: **/market**.
 - ✅ **Item Detail (Edit item)**
   - Post-save redirect: **/closet**.
-  - “Clean background” action now shows a real **shadcn Progress** bar:
+  - “Clean background” action uses real **shadcn Progress** bar:
     - animated, asymptotic ramp to **92%**, snap to **100%** on completion.
 - ✅ **Settings / Profile**
   - Post-save redirect: **/home**.
 
-**Status notes**
-- Frontend lint clean; esbuild bundle green.
-- No backend changes required for this polish (listing image hydration was previously fixed server-side).
-- Deployment still required on Hetzner VPS (manual `git pull` + `docker compose up -d --build`).
-
 ### 🎯 Current product direction — **Stylist Power-Up (Outfit Composer) + Widened Search**
 Make the Stylist uniquely valuable by enabling:
-1. **Multi-image upload** in Stylist chat AND a dedicated **Compose Outfit** page.
-2. **Outfit construction** from uploaded items with:
-   - near-duplicate removal (e.g., 3 shirts → pick best 1)
-   - brief matching + cohesion scoring
-   - reject list with rationale
-3. **Marketplace gap fill (LIVE)**: if outfit missing shoes/outerwear/etc., suggest better matches from **Marketplace listings**.
-4. **Professional referral (heuristic-triggered)**: suggest a relevant pro from the `/professionals` directory when repair/tailoring/special-occasion/fit risk signals appear.
-5. **Widen horizons (LIVE)**: stylist can optionally search beyond closet using Marketplace/Fashion Scout and user preferences (gender/age/body/region/style profile).
-6. **Model-agnostic architecture**: keep LLM calls behind a thin shim so swapping to fine-tuned **Gemma 4** models later is single-file.
+1. Multi-image upload in Stylist chat and a dedicated Compose Outfit page.
+2. Outfit construction with dedupe, cohesion scoring, rationale.
+3. Marketplace gap-fill suggestions.
+4. Pro referral (heuristics).
+5. Search wider beyond closet using preferences + marketplace/scout.
+6. Model-agnostic LLM shim for future Gemma swap.
 
-### 🔐 New must-have direction — **Phase T-Auth: Google Sign-in / Google Login**
-Add **Sign in with Google** / **Log in with Google** (OAuth) to:
-- verify the suspected Calendar silent-fail cause (dev/mock email vs real identity)
-- simplify onboarding and reduce password friction
+### 🔐 Must-have direction — **Phase T-Auth: Google Sign-in / Google Login**
+Add Sign in with Google / Log in with Google to:
+- validate Calendar silent-fail cause using real Google identity
+- reduce password friction
 - unify identity between OAuth and Calendar connect
 
 **Decisions locked (user):**
-- **1c Hybrid:** Lean Google sign-in by default (`openid email profile`), with **“Also connect my calendar”** checkbox on Login.
-- **2a Auto-link by email:** Google login merges into existing password account if emails match.
-- **3a UI placement:** Google button on **Login + Register** pages.
+- **1c Hybrid:** Google sign-in default + “Also connect my calendar” checkbox.
+- **2a Auto-link by email:** merge into existing password account if emails match.
+- **3a UI placement:** Google button on Login + Register.
 - **4a Keep dev-bypass** for backwards compatibility.
-- **Admin access:** `ADMIN_EMAILS` env-var allow-list (comma-separated) checked on every login/register; CLI script `grant_admin.py` as fallback.
+- **Admin access:** `ADMIN_EMAILS` allow-list; `grant_admin.py` as fallback.
 
-> **Operational note:** Production no longer depends on Emergent universal key for core LLM. `GEMINI_API_KEY` is the primary production path; `EMERGENT_LLM_KEY` remains as dev fallback.
+> **Operational note:** Production no longer depends on Emergent universal key for core LLM. `GEMINI_API_KEY` is primary; `EMERGENT_LLM_KEY` is dev fallback.
 
 ---
 
@@ -110,13 +102,13 @@ Status unchanged: blocked due to off-pod merge/hosting.
 ---
 
 ### Phase R — **Stylist Power-Up: Outfit Composer** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-This phase extends the already-shipped multi-session Stylist by adding a *composer pipeline* and a rich outfit canvas.
+This phase extends the multi-session Stylist by adding a composer pipeline and rich outfit canvas.
 
 #### R.0 — Finalise UX + schema contract **(DONE)**
-- Multi-image upload in **Stylist chat** + dedicated **Compose Outfit** page.
-- Output: chat bubble summary + **tap-to-expand canvas**.
-- Marketplace search live; Places/retail feeds deferred but architecture-ready.
-- Pro referral: **heuristic-triggered**.
+- Multi-image upload in Stylist chat + Compose Outfit page.
+- Output: chat bubble summary + tap-to-expand canvas.
+- Marketplace search live; retail feeds deferred but architecture-ready.
+- Pro referral heuristic-triggered.
 
 #### R.1 — Backend pipeline **(DONE)**
 - `POST /api/v1/stylist/compose-outfit` (multipart)
@@ -124,165 +116,115 @@ This phase extends the already-shipped multi-session Stylist by adding a *compos
   - `app/services/outfit_composer.py`
   - `app/services/marketplace_search.py`
   - `app/services/professional_matcher.py`
-- Persistence:
-  - store composer outputs inside stylist session messages.
-- Reliability:
-  - avoid 500s on provider failures (return empty canvas + retry hints).
+- Persistence: composer outputs stored in stylist session messages.
+- Reliability: provider failures return empty canvas + retry hints (no 500).
 
 #### R.2 — Frontend integration **(DONE)**
-- `Stylist.jsx` upgraded:
-  - multi-image attachments + previews
-  - compose flow
-- `OutfitCanvas.jsx` added
+- `Stylist.jsx` upgraded: multi-image attachments + previews + compose flow.
+- `OutfitCanvas.jsx` added.
 
 #### R.3 — Polish + Testing **(DONE: local smoke)**
-- Backend smoke tests passed
-- Frontend compiles successfully
-- **Pending:** user deploy + real browser verification on VPS
+- Backend smoke tests passed.
+- Frontend compiles.
+- Pending: user deploy + real browser verification on VPS.
 
 ---
 
 ### Phase S — **Stylist Widen Search + User Preferences** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-#### S.1 — Backend (DONE)
-- New services:
-  - `app/services/user_preferences.py` (extract and normalize user profile preferences)
-  - `app/services/stylist_widen.py` (optional external suggestion layer)
-- Updated schema:
-  - `StylistAdvice` supports marketplace/scout suggestions
-- Prompting:
-  - injects preferences (gender/age/body/region/style profile)
-  - `widen_search` flag controls whether out-of-closet suggestions are produced
+#### S.1 — Backend **(DONE)**
+- Services:
+  - `app/services/user_preferences.py`
+  - `app/services/stylist_widen.py`
+- Schema: `StylistAdvice` supports marketplace/scout suggestions.
+- Prompting injects preferences (gender/age/body/region/style profile).
 
-#### S.2 — Frontend (DONE)
-- `Stylist.jsx`:
-  - “Search wider” toggle
-  - renders marketplace/scout suggestions
+#### S.2 — Frontend **(DONE)**
+- “Search wider” toggle + rendering of marketplace/scout suggestions.
 
-#### S.3 — Known limitations (explicit)
-- Marketplace/Fashion Scout may return 0 results when DB is unseeded
+#### S.3 — Known limitations
+- Marketplace/Fashion Scout may return 0 results when DB is unseeded.
 
 ---
 
 ### Phase T-Auth — **Google Sign-in / Log in with Google** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-Implement an unauthenticated Google OAuth flow to create/login users, optionally connect Calendar in the same step.
+Implement unauthenticated Google OAuth to create/login users, optionally connect Calendar.
 
-#### T.0 — Data model + config (P0)
-**Config**
-- Add `ADMIN_EMAILS` env var in backend:
-  - comma-separated, normalized to lowercase
-  - used to auto-assign `admin` role for matching emails
+(Implementation details unchanged from prior plan; still needs VPS deploy + real account verification.)
 
-**User schema alignment**
-- Ensure the user doc stores Google identity in a stable place.
-  - Existing model has `google_oauth` (tokens container)
-  - Existing calendar connect flow currently persists to `google_calendar_tokens` (needs consolidation to avoid confusion)
+---
 
-> Deliverable: single source of truth for Google tokens/identity fields (either migrate to `google_oauth` or keep `google_calendar_tokens` but standardize usage). Plan is to unify during implementation.
+### Phase Z — **Pre-deployment audit (current)** **(SHIPPED IN CODE — DEPLOYMENT PENDING)**
+A consolidation phase capturing the work shipped in this session, plus the repo-wide lint + documentation audit required before deployment.
 
-#### T.1 — Backend OAuth flow (P0)
-**Refactor calendar OAuth helper for reuse**
-- Update `calendar_service.py`:
-  - allow building authorization URLs with **custom scopes**
-  - support **custom callback path** (calendar connect vs auth login)
+#### Z.1 — UX polish pack **(DONE)**
+- Create Listing: linked-item thumbnail preview + redirect to `/market`.
+- Item Detail: redirect to `/closet` after save.
+- Profile: redirect to `/home` after save.
+- Clean background progress: shimmer replaced with `Progress` component + simulated progress ramp.
 
-**State JWT hardening**
-- Extend state payload:
-  - `purpose`: distinguishes
-    - `google-oauth-link` (existing connect-calendar)
-    - `google-oauth-login` (new sign-in)
-  - include `redirect_to` (frontend path)
-  - include `with_calendar` boolean
+#### Z.2 — Batch upload pipeline reliability **(DONE)**
+- Frontend: `handleBatchBackground` now sequential (no parallelism on small VPS), retry-with-backoff; surfaces `analyzeFailed` counts in final toast.
+- Backend: added process-wide `_ANALYZE_LOCK = asyncio.Semaphore(1)`; applied to `analyze_outfit`, `analyze`, and new `reanalyze`.
 
-**New endpoints (in `app/api/v1/google_auth.py`)**
-- `GET /api/v1/auth/google/login/start`
-  - unauthenticated
-  - query:
-    - `with_calendar=true|false` (from checkbox)
-    - `next=/path` (optional)
-  - returns `{ authorization_url }`
+#### Z.3 — Edit page regression fix: restore weighted taxonomy **(DONE)**
+- Extracted `WeightedList` from `AddItem.jsx` → `frontend/src/components/WeightedList.jsx`.
+- `ItemDetail.jsx` now exposes and edits:
+  - `colors[]` (weighted, percentage)
+  - `fabric_materials[]` (weighted, percentage)
+- `diffPatch` upgraded with deep-compare for object arrays (fixes perpetual dirty state).
 
-- `GET /api/v1/auth/google/login/callback`
-  - exchanges `code` → tokens
-  - fetches userinfo (email)
-  - **find-or-create user**:
-    - if email exists: link Google identity to that user (2a)
-    - else create new user with:
-      - email, display_name, avatar_url, locale where available
-      - `password_hash=None`
-  - if `with_calendar=true`:
-    - persist refresh token + calendar scope metadata
-  - applies admin role via `ADMIN_EMAILS`
-  - redirects to frontend `/auth/callback#token=...&next=...` (hash fragment)
+#### Z.4 — Re-analyse + replace-photo UX **(DONE)**
+- Backend: `POST /api/v1/closet/{id}/reanalyze`
+  - re-runs The Eyes on stored image (segmented → reconstructed → original)
+  - overwrites analyser-owned fields only; preserves user-managed metadata
+  - mirrors dominant weighted `colors/fabric_materials` into legacy `color/material`
+- Frontend: Item Detail now has **Analyze** button + progress.
+- Replace photo now uses `autoSegment:false` so user explicitly triggers Clean Background / Analyze.
 
-**Role enforcement / admin utilities**
-- `app/services/auth.py`:
-  - add `apply_admin_role(user, email)` helper
-  - called on register/login/google-login; idempotent
+#### Z.5 — Over-cropping regression fix (graphic-print shredding) **(DONE)**
+- `clothing_parser._split_instances` now treats single-garment classes as non-splittable:
+  - `Upper-clothes`, `Dress`, `Skirt`, `Pants`
+- Prevents shredding into multiple instances when prints break SegFormer mask continuity.
+- Marker: `single_instance_classes_v1=true`.
 
-- Add CLI fallback:
-  - `backend/scripts/grant_admin.py you@email.com`
-  - sets `roles` to include `admin` for a given user
+#### Z.6 — Size auto-derivation from user preferences **(DONE)**
+- New `frontend/src/lib/size_preferences.js` deriving size from `user.body_measurements`:
+  - Top/Outerwear → `shirt_size`
+  - Bottom → `pants_size`
+  - Footwear → `shoe_size`
+  - Full-body/Dress → `dress_size` (fallback `shirt_size`)
+  - Underwear/bra → `bra_size` (as applicable)
+- Wired into AddItem `hydrate()` and ItemDetail `toFormState()` symmetrically (prevents `isDirty` flapping).
 
-#### T.2 — Frontend integration (P0)
-**API glue**
-- `frontend/src/lib/api.js`
-  - add `getGoogleLoginUrl({ withCalendar, next })`
+#### Z.7 — Dual-deploy support for Emergent host **(DONE)**
+Goal: make `https://ai-stylist-api.emergent.host` function with equivalent user-facing behaviour despite low pod resources.
 
-**Login UI**
-- `pages/Login.jsx`
-  - add “Continue with Google” button
-  - add “Also connect my calendar” checkbox
-  - on click:
-    - request start URL, redirect browser to Google
+- Split dependencies:
+  - `backend/requirements.txt` — lightweight deps (installed by Emergent host)
+  - `backend/requirements-ml.txt` — heavy ML (torch/transformers/rembg/scipy/onnxruntime/etc.)
+- Updated `deploy/Dockerfile.backend` to install both files for Hetzner.
+- Removed unused `cuda-*` packages from default deps.
+- Added runtime auto-detection in `app/config.py`:
+  - probes `torch`, `transformers`, `rembg` via `find_spec`
+  - defaults `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` based on installed modules
+- Updated default CORS origins to include `https://ai-stylist-api.emergent.host`.
+- Added live markers on `GET /api/v1/closet/analyze/version`:
+  - `torch_installed`, `rembg_installed`, `use_local_clothing_parser`, `auto_matte_crops`
 
-**Register UI**
-- `pages/Register.jsx`
-  - add “Continue with Google” button (no calendar checkbox by default)
-
-**OAuth callback landing page**
-- New `pages/AuthCallback.jsx`
-  - reads hash fragment `#token=...&next=...`
-  - persists token + user (if included)
-  - redirects to `next` or `/home`
-
-**Routing**
-- Update `App.jsx` routes:
-  - add `/auth/callback` route
-
-**i18n**
-- Update `locales/en.json` and `locales/he.json`:
-  - button labels
-  - checkbox label
-  - error states
-
-#### T.3 — Testing + verification (P0)
-**Backend**
-- Smoke-test start URL:
-  - `GET /api/v1/auth/google/login/start?with_calendar=false`
-- Callback test in real browser:
-  - verify:
-    - new user creation
-    - existing user auto-link
-    - token returned and session established
-    - `ADMIN_EMAILS` grants admin only to allow-listed emails
-
-**Frontend**
-- Manual browser test:
-  - Login with Google (with_calendar false)
-  - Login with Google (with_calendar true)
-  - Register with Google
-  - Existing email+password account → Google login links correctly
-
-**Calendar suspicion validation**
-- After Google login, call:
-  - `/api/v1/calendar/status`
-  - `/api/v1/calendar/upcoming`
-- Confirm events sync for the same real Google identity.
+#### Z.8 — Pre-deploy audit + docs refresh **(DONE)**
+- Backend lint: ruff clean.
+- Frontend lint: ESLint clean.
+- esbuild: bundle compiles.
+- Locales: all 12 JSON-valid.
+- `server.py` cold-imports cleanly; routes registered.
+- Docs updated:
+  - README: dual-deploy story + requirements split.
+  - ARCHITECTURE.md: updated deployment modes, `_ANALYZE_LOCK`, `/reanalyze`, dual-deploy.
 
 ---
 
 ### Phase Q+ — Wardrobe Reconstructor migration note **(SHIPPED)**
-- Production now prefers **Nano Banana** image edit/generation when `GEMINI_API_KEY` is present.
+- Production prefers Nano Banana when `GEMINI_API_KEY` present.
 - HF FLUX remains dev fallback.
 
 ---
@@ -290,77 +232,77 @@ Implement an unauthenticated Google OAuth flow to create/login users, optionally
 ## 3) Next Actions (immediate)
 
 ### P0 (now)
-1. **Deploy “UX Polish” changes to VPS**
-   - On VPS: `git pull` (resolve any broken git state if present) + rebuild: `docker compose up -d --build`
+1. **Deploy Phase Z bundle to Hetzner**
+   - On VPS: `git pull` + rebuild: `docker compose up -d --build`
    - Verify in real browser:
      - Create Listing shows linked-item thumbnail preview
-     - Create Listing publish redirects to **/market**
-     - Item Detail save redirects to **/closet**
-     - Item Detail “Clean background” shows Progress bar and completes cleanly
-     - Profile save redirects to **/home**
+     - Create Listing publish redirects to `/market`
+     - Item Detail save redirects to `/closet`
+     - Clean background shows Progress bar + completes
+     - Profile save redirects to `/home`
+     - Replace Photo stores raw photo (no auto-segmentation)
+     - Analyze button re-fills colors/materials with percentages
+     - Batch upload >5 items: each item is analysed (no “first item ok, rest blank”) and final toast reports any `analyzeFailed` items
+     - Graphic-print tees no longer shred into multiple cropped fragments
+     - Size defaults to user preference when analyzer cannot infer it
 
-2. **Phase T-Auth — Google Sign-in / Log in with Google**
-   - Backend endpoints + state JWT + admin allow-list
-   - Frontend buttons + callback route
-   - Consolidate Google token fields (`google_oauth` vs `google_calendar_tokens`) to avoid silent-fail confusion
-   - End-to-end test on VPS with real Google account
+2. **Redeploy Emergent host (`ai-stylist-api.emergent.host`)**
+   - Confirm deploy no longer 520.
+   - Probe `GET /api/v1/closet/analyze/version`:
+     - Expect `torch_installed:false`, `rembg_installed:false`, `use_local_clothing_parser:false`, `auto_matte_crops:false`.
+   - Validate core flows still work (with fallback ML path): Add Item, Analyze, Stylist, Marketplace.
 
 3. **Deploy Phase R + Phase S to VPS**
-   - Push to GitHub
-   - On VPS: pull + rebuild (`docker compose up -d --build`)
-   - Verify:
-     - Stylist multi-image compose works
-     - “Search wider” toggle returns responses (even if empty marketplace)
+   - Pull + rebuild.
+   - Verify stylist multi-image compose and “Search wider”.
+
+4. **Phase T-Auth verification on VPS (real Google account)**
+   - Verify login, account-linking by email, optional calendar connect.
+   - Validate calendar endpoints and error surfacing.
 
 ### P1
-4. **Calendar sync deep-dive (silent fail)**
-   - After Phase T-Auth ships, debug with a real Google identity
-   - Validate token persistence, scopes, refresh behavior, and Calendar API calls
+5. **Calendar sync deep-dive (silent fail)**
+   - After Phase T-Auth ships, debug with real identity.
+   - Validate token persistence, scopes, refresh behaviour, and Calendar API calls.
 
 ### P2 (blocked)
-5. Phase 6/N: merge and host fine-tuned Gemma 4 E2B (The Eyes).
-6. Phase O: Gemma 4 E4B Stylist brain swap.
+6. Phase 6/N: merge and host fine-tuned Gemma 4 E2B (The Eyes).
+7. Phase O: Gemma 4 E4B Stylist brain swap.
 
 ---
 
 ## 4) Success Criteria
 
 ### Production health
-- ✅ Closet loads quickly (
-  - no Mongo sort memory failure,
-  - no multi-MB list payload,
-  - navigation back to closet is instant due to cache
-)
-- ✅ Stylist endpoint returns 200 consistently (no `repos.find_one(sort=...)` crash)
-- ✅ Frontend bundle has valid `REACT_APP_BACKEND_URL` and makes API calls without protocol errors
+- ✅ Closet loads quickly (no Mongo sort memory failure, no multi-MB payload, cache works).
+- ✅ Stylist endpoint stable (no `repos.find_one(sort=...)` crash).
+- ✅ Frontend bundle has correct API base URL.
 
-### UX Polish (post-listing/auth fixes)
-- Create Listing:
-  - linked closet item has a visible thumbnail preview
-  - publish redirects to **/market**
-- Item Detail:
-  - saving redirects to **/closet**
-  - “Clean background” shows a real progress bar (does not appear frozen during long matting)
-- Profile:
-  - saving redirects to **/home**
+### Phase Z (pre-deploy audit) bundle
+- ✅ UX polish behaviour present (previews + redirects + progress).
+- ✅ Batch upload does not skip analysis after first item; `_ANALYZE_LOCK` prevents concurrent OOM.
+- ✅ Edit page shows weighted `colors[]` and `fabric_materials[]` with percentages.
+- ✅ Replace photo is raw; user triggers background removal + analyze explicitly.
+- ✅ `POST /closet/{id}/reanalyze` works, preserves user fields.
+- ✅ Graphic-print tees do not shred.
+- ✅ Size defaults from user body measurements when missing.
+- ✅ Emergent host deploy works without torch/rembg (fallback path), and `analyze/version` markers reflect mode.
 
 ### Phase R + S — Stylist Power-Up + Widen Search
-- Multi-image upload supported in chat and dedicated compose page.
-- Dedupe works (reject duplicates; pick best candidate).
-- Outfit constructed with visible slots and clear rationale.
+- Multi-image upload in chat and compose page.
+- Outfit constructed with visible slots and rationale.
 - Marketplace gap-fill suggestions appear when outfit incomplete.
-- “Search wider” toggle uses user preferences and can suggest out-of-closet items.
+- “Search wider” uses user preferences and can suggest out-of-closet items.
 
 ### Phase T-Auth — Google Sign-in
 - Users can:
   - create an account via Google
   - log in via Google
-  - optionally connect Calendar during login (checkbox)
-  - seamlessly link Google identity to existing password account by email
+  - optionally connect Calendar during login
+  - auto-link to existing password account by email
 - Admin access:
-  - only emails in `ADMIN_EMAILS` receive `admin` role
-  - non-admin users remain `roles: ['user']`
-  - `grant_admin.py` can promote a user as fallback
+  - only `ADMIN_EMAILS` get `admin` role
+  - `grant_admin.py` fallback works
 - Calendar validation:
-  - calendar events successfully sync for real Google identities
-  - if sync fails, errors are surfaced and diagnosable (logs + status endpoint)
+  - events sync for real Google identities
+  - failures are surfaced and diagnosable (logs + status endpoint)

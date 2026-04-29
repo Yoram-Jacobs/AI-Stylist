@@ -252,12 +252,22 @@
       "error": "Clean-background failed. Please try again.",
       "disclaimer": "Uses a non-generative matting model. Your original photo is never replaced with an invented one."
     },
+    "reanalyze": {
+      "label": "Re-analyse photo",
+      "subtitle": "Run The Eyes against the stored image and refill the form — useful after replacing the photo or recovering from a noisy first analysis.",
+      "cta": "Analyse",
+      "running": "Analysing…",
+      "progressHint": "Reading the photo, identifying the garment, and rewriting the auto-fill fields.",
+      "success": "Analysis refreshed",
+      "error": "Analysis failed. Please try again.",
+      "disclaimer": "Only auto-filled fields are overwritten. Your manual edits to size, price, notes, and intent are preserved."
+    },
     "photo": {
       "addLabel": "Add photo",
       "replaceLabel": "Replace photo",
-      "subtitleEmpty": "This item has no photo yet — take or upload one and we'll auto-crop the garment.",
-      "subtitleReplace": "Upload a new photo — we'll auto-crop the garment and refresh search.",
-      "running": "Processing…",
+      "subtitleEmpty": "This item has no photo yet — take or upload one. Use Clean background and Analyse afterwards if you want a fresh cutout / form refill.",
+      "subtitleReplace": "Upload a new photo. The original is saved as-is — use Clean background and Analyse afterwards to refresh the cutout and fields.",
+      "running": "Uploading…",
       "success": "Photo updated",
       "error": "Couldn't update the photo. Please try again.",
       "placeholderHint": "DPP-only item — no photo attached"

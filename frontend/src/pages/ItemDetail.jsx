@@ -43,6 +43,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { WeightedList } from '@/components/WeightedList';
 import {
   Select,
   SelectContent,
@@ -70,6 +71,7 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { isSTTSupported, createRecognition } from '@/lib/speech';
+import { deriveSizeFromPreferences } from '@/lib/size_preferences';
 
 /* -------------------- enum option lists (kept in-file to avoid a cross-page coupling) -------------------- */
 const CATEGORY_OPTIONS = [
@@ -123,7 +125,9 @@ const EDITABLE_FIELDS = [
   'tradition',
   'size',
   'color',
+  'colors',
   'material',
+  'fabric_materials',
   'pattern',
   'state',
   'condition',
@@ -138,8 +142,40 @@ const EDITABLE_FIELDS = [
   'notes',
 ];
 
-/** Pick the subset of fields we mutate + normalise to a stable shape. */
-function toFormState(item) {
+/** Pick the subset of fields we mutate + normalise to a stable shape.
+ *
+ * When ``user`` is provided and the item has no recorded size, the
+ * size field defaults to the user's saved preference for the
+ * relevant garment category (e.g. shirt_size for tops). This is
+ * applied symmetrically to both the displayed form state AND the
+ * `diffPatch` baseline so it never causes a spurious "dirty"
+ * indicator — the user has to actually change the size for it to
+ * be sent in a PATCH.
+ */
+function toFormState(item, user = null) {
+  // The analyser writes `colors` / `fabric_materials` as `[{name, pct}]`
+  // arrays. We surface them as-is so the WeightedList editor can render
+  // the per-material percentages. The legacy single-string `color` /
+  // `material` fields are kept editable too for backward compat with
+  // older items that pre-date the weighted taxonomy.
+  const normalisedColors = Array.isArray(item.colors)
+    ? item.colors
+        .filter((c) => c && (c.name || c.pct != null))
+        .map((c) => ({ name: c.name || '', pct: c.pct ?? null }))
+    : [];
+  const normalisedMaterials = Array.isArray(item.fabric_materials)
+    ? item.fabric_materials
+        .filter((c) => c && (c.name || c.pct != null))
+        .map((c) => ({ name: c.name || '', pct: c.pct ?? null }))
+    : [];
+  const rawSize = item.size || '';
+  // Prefill missing size with the user's stored measurement for the
+  // garment category (Top → shirt_size, Bottom → pants_size, …). The
+  // prefill is treated as the canonical "saved" value here so the
+  // diffPatch baseline matches and the form doesn't immediately
+  // report itself as dirty.
+  const size =
+    rawSize || (user ? deriveSizeFromPreferences(user, item) : '');
   return {
     title: item.title || '',
     name: item.name || '',
@@ -152,9 +188,11 @@ function toFormState(item) {
     dress_code: item.dress_code || '',
     season: Array.isArray(item.season) ? item.season : [],
     tradition: item.tradition || '',
-    size: item.size || '',
+    size,
     color: item.color || '',
+    colors: normalisedColors,
     material: item.material || '',
+    fabric_materials: normalisedMaterials,
     pattern: item.pattern || '',
     state: item.state || '',
     condition: item.condition || '',
@@ -175,8 +213,8 @@ function toFormState(item) {
  *  were previously set are translated to ``null`` (clear the field).
  *  Multi-select arrays are sent as the full array whenever they differ.
  */
-function diffPatch(loaded, form) {
-  const baseline = toFormState(loaded);
+function diffPatch(loaded, form, user = null) {
+  const baseline = toFormState(loaded, user);
   const out = {};
   for (const key of EDITABLE_FIELDS) {
     const a = baseline[key];
@@ -185,6 +223,18 @@ function diffPatch(loaded, form) {
     if (isArr) {
       const aa = Array.isArray(a) ? a : [];
       const bb = Array.isArray(b) ? b : [];
+      // Object arrays (`colors`, `fabric_materials`) need a deep
+      // compare — otherwise reference-equality always fails and
+      // `isDirty` is permanently true. JSON.stringify is fine here:
+      // entries are tiny (`{name, pct}`) and key order is stable.
+      const isObjArray = aa.some((v) => v && typeof v === 'object') ||
+        bb.some((v) => v && typeof v === 'object');
+      if (isObjArray) {
+        if (JSON.stringify(aa) !== JSON.stringify(bb)) {
+          out[key] = bb;
+        }
+        continue;
+      }
       if (aa.length !== bb.length || aa.some((v, i) => v !== bb[i])) {
         out[key] = bb;
       }
@@ -371,6 +421,11 @@ export default function ItemDetail() {
 
   // Phase V6 — photo add/replace state
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  // Re-analyse state. Same simulated-progress treatment as the
+  // clean-background flow because the backend `/reanalyze` endpoint
+  // is a single non-streaming POST that takes ~10–20 s on the VPS.
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const photoInputRef = useRef(null);
   const onPickPhoto = () => photoInputRef.current?.click();
   const onPhotoFileChosen = async (e) => {
@@ -389,9 +444,15 @@ export default function ItemDetail() {
       const res = await api.setItemPhoto(id, {
         imageBase64,
         imageMime: file.type || 'image/jpeg',
-        autoSegment: true,
+        // Per UX spec: "Replace photo" must just swap in the raw
+        // upload — don't auto-run the cutout/analysis pipeline. The
+        // user then explicitly chooses to "Clean background" and/or
+        // "Analyze" afterwards. This avoids surprise field rewrites
+        // and a long automatic wait the user didn't ask for.
+        autoSegment: false,
       });
       setItem(res.item);
+      setForm(toFormState(res.item, user));
       toast.dismiss(loadingId);
       toast.success(t('itemDetail.photo.success'));
     } catch (err) {
@@ -413,7 +474,7 @@ export default function ItemDetail() {
     try {
       const data = await api.getItem(id);
       setItem(data);
-      setForm(toFormState(data));
+      setForm(toFormState(data, user));
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('itemDetail.notFound'));
       nav('/closet');
@@ -428,8 +489,8 @@ export default function ItemDetail() {
   }, []);
 
   const patch = useMemo(
-    () => (item && form ? diffPatch(item, form) : {}),
-    [item, form],
+    () => (item && form ? diffPatch(item, form, user) : {}),
+    [item, form, user],
   );
   const isDirty = Object.keys(patch).length > 0;
 
@@ -442,7 +503,7 @@ export default function ItemDetail() {
     try {
       const updated = await api.updateItem(id, patch);
       setItem(updated);
-      setForm(toFormState(updated));
+      setForm(toFormState(updated, user));
       toast.success(t('itemDetail.detailsSaved'));
       // Per UX spec: after a successful edit, take the user back
       // to the closet so they immediately see the updated item in
@@ -456,8 +517,45 @@ export default function ItemDetail() {
   };
   const onDiscard = () => {
     if (!item) return;
-    setForm(toFormState(item));
+    setForm(toFormState(item, user));
     toast.message(t('itemDetail.changesDiscarded'));
+  };
+
+  /* ------------------- Re-analyse (rerun The Eyes) ------------------- */
+  // Triggers POST /api/v1/closet/:id/reanalyze on the backend, which
+  // pulls the item's stored image and rewrites the analysis-derived
+  // fields (title, taxonomy, colours, materials, condition, …). We
+  // surface a Progress bar with an asymptotic ramp because the API
+  // is a single non-streaming POST and the user shouldn't be left
+  // wondering whether anything is happening.
+  const onReanalyze = async () => {
+    if (analyzing) return;
+    setAnalyzing(true);
+    setAnalyzeProgress(4);
+    const ticker = setInterval(() => {
+      setAnalyzeProgress((p) => {
+        if (p >= 92) return 92;
+        const next = p + Math.max(1, Math.round((92 - p) * 0.07));
+        return Math.min(92, next);
+      });
+    }, 350);
+    try {
+      const res = await api.reanalyzeItem(id);
+      setItem(res.item);
+      setForm(toFormState(res.item, user));
+      toast.success(t('itemDetail.reanalyze.success'));
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.detail || t('itemDetail.reanalyze.error'),
+      );
+    } finally {
+      clearInterval(ticker);
+      setAnalyzeProgress(100);
+      setTimeout(() => {
+        setAnalyzing(false);
+        setAnalyzeProgress(0);
+      }, 350);
+    }
   };
 
   /* ------------------- Clean background (Phase V Fix 2) ------------------- */
@@ -481,7 +579,7 @@ export default function ItemDetail() {
       if (res.applied) {
         toast.success(t('itemDetail.cleanBackground.success'));
         setItem(res.item);
-        setForm(toFormState(res.item));
+        setForm(toFormState(res.item, user));
         setRepairHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));
@@ -795,6 +893,68 @@ export default function ItemDetail() {
               </p>
             </CardContent>
           </Card>
+
+          {/* Re-analyse card — runs The Eyes against the item's stored
+              image and rewrites the analysis-derived fields (title,
+              taxonomy, colour/material percentages, condition, …).
+              Useful after a "Replace photo" upload (which intentionally
+              skips auto-analysis), or to recover from a bad first
+              analysis without re-uploading. */}
+          <Card
+            className="rounded-[calc(var(--radius)+6px)] shadow-editorial"
+            data-testid="item-reanalyze-card"
+          >
+            <CardContent className="p-5 space-y-3">
+              <div className="caps-label text-muted-foreground">
+                {t('itemDetail.reanalyze.label')}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {t('itemDetail.reanalyze.subtitle')}
+              </p>
+              <Button
+                onClick={onReanalyze}
+                disabled={analyzing}
+                className="w-full rounded-xl"
+                variant="outline"
+                data-testid="item-reanalyze-button"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 me-2 animate-spin" />
+                    {t('itemDetail.reanalyze.running')}
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 me-2" />
+                    {t('itemDetail.reanalyze.cta')}
+                  </>
+                )}
+              </Button>
+              {analyzing && (
+                <div className="space-y-2" data-testid="item-reanalyze-progress">
+                  <Progress
+                    value={analyzeProgress}
+                    className="h-2 w-full"
+                    data-testid="item-reanalyze-progress-bar"
+                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground italic">
+                      {t('itemDetail.reanalyze.progressHint')}
+                    </p>
+                    <span
+                      className="text-[11px] tabular-nums text-muted-foreground"
+                      data-testid="item-reanalyze-progress-pct"
+                    >
+                      {Math.round(analyzeProgress)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground/80 italic">
+                {t('itemDetail.reanalyze.disclaimer')}
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         {/* ---------- Edit form column ---------- */}
@@ -964,6 +1124,25 @@ export default function ItemDetail() {
                   />
                 </Field>
               </div>
+
+              {/* Weighted taxonomies — these are what The Eyes actually
+                  populates with percentages, so the user can see and
+                  tweak the colour palette / fabric composition that
+                  drives Stylist matching and Marketplace search. */}
+              <WeightedList
+                labelKey="addItem.color"
+                items={form.colors}
+                onChange={(v) => setField('colors', v)}
+                placeholder={t('addItem.colorSlotPlaceholder')}
+                testid="item-edit-colors"
+              />
+              <WeightedList
+                labelKey="addItem.material"
+                items={form.fabric_materials}
+                onChange={(v) => setField('fabric_materials', v)}
+                placeholder={t('addItem.fabricSlotPlaceholder')}
+                testid="item-edit-fabrics"
+              />
             </CardContent>
           </Card>
 

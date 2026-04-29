@@ -17,11 +17,43 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 
+def _module_installed(name: str) -> bool:
+    """Return True iff ``name`` can be imported.
+
+    Used at config load to auto-disable code paths whose Python
+    dependency isn't installed in the current environment. Lets the
+    SAME backend image deploy to Hetzner (full ML stack) and the
+    Emergent host (lightweight pod) without per-deploy env overrides.
+    """
+    import importlib.util
+
+    return importlib.util.find_spec(name) is not None
+
+
+# Cached probes so we don't pay the find_spec cost on every Settings()
+# field access. None of these import the modules — they only check the
+# import system's metadata.
+_HAS_TORCH = _module_installed("torch")
+_HAS_TRANSFORMERS = _module_installed("transformers")
+_HAS_REMBG = _module_installed("rembg")
+_HAS_LOCAL_ML = _HAS_TORCH and _HAS_TRANSFORMERS
+
+
 class Settings:
     # --- infra ---
     MONGO_URL: str = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
     DB_NAME: str = os.environ.get("DB_NAME", "dressapp")
-    CORS_ORIGINS: str = os.environ.get("CORS_ORIGINS", "https://dressapp.co,https://www.dressapp.co")
+    # CORS default covers BOTH production targets:
+    #   * dressapp.co (Hetzner — full-fat ML stack)
+    #   * ai-stylist-api.emergent.host (Emergent — lightweight pod, falls
+    #     back to HF Inference API + Gemini for everything ML).
+    # Override via the CORS_ORIGINS env var on each deployment if you
+    # want to lock it down further.
+    CORS_ORIGINS: str = os.environ.get(
+        "CORS_ORIGINS",
+        "https://dressapp.co,https://www.dressapp.co,"
+        "https://ai-stylist-api.emergent.host",
+    )
 
     # --- auth ---
     JWT_SECRET: str = os.environ.get("JWT_SECRET", "dressapp_jwt_secret_xK9mQ2nP4vR7sT8uW")
@@ -254,9 +286,14 @@ class Settings:
     )
     # Auto-matte every crop during `analyze` so the per-item cards show
     # clean cutouts instead of bbox rectangles with background bleeding.
-    # Set to false to skip for performance testing.
+    # Default tracks ``rembg`` availability — true on Hetzner where rembg
+    # is installed, false on the lightweight Emergent pod which uses the
+    # HF Inference API matting path or skips matting entirely.
     AUTO_MATTE_CROPS: bool = (
-        os.environ.get("AUTO_MATTE_CROPS", "true").lower() == "true"
+        os.environ.get(
+            "AUTO_MATTE_CROPS", "true" if _HAS_REMBG else "false"
+        ).lower()
+        == "true"
     )
     # Largest edge we'll feed into rembg. u2netp resizes internally to
     # 320x320 anyway, so values above ~1500 just balloon memory without
@@ -266,12 +303,15 @@ class Settings:
         os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1024")
     )
     # Feature-flag for the local SegFormer inference path in
-    # clothing_parser.py. Enabled by default now that we've switched to
-    # segformer_b2_clothes (~95 MB weights, ~1 GB peak RAM) which fits
-    # comfortably inside the 8 GiB pod limit alongside FashionCLIP/rembg.
-    # Disable by setting USE_LOCAL_CLOTHING_PARSER=false if you OOM.
+    # clothing_parser.py. Default tracks torch+transformers availability:
+    # full-fat on Hetzner, off on the lightweight Emergent pod (which
+    # falls back to the Gemini multi-item detector — see
+    # `garment_vision._gemini_detect`). Override via env if needed.
     USE_LOCAL_CLOTHING_PARSER: bool = (
-        os.environ.get("USE_LOCAL_CLOTHING_PARSER", "true").lower() == "true"
+        os.environ.get(
+            "USE_LOCAL_CLOTHING_PARSER", "true" if _HAS_LOCAL_ML else "false"
+        ).lower()
+        == "true"
     )
     # Use the new clothing parser first in /closet/analyze (falls back to
     # legacy detector if it fails or returns nothing useful).

@@ -137,11 +137,33 @@ def _run_inference(pil_full: Image.Image) -> np.ndarray:
     return pred
 
 
+# Classes whose mask should ALWAYS be treated as a single instance,
+# regardless of how many disconnected blobs SegFormer's per-pixel
+# argmax produces. A high-contrast graphic print on a t-shirt or a
+# wide belt across a dress can break the mask into 2-5 disconnected
+# components, but anatomically the wearer can only have one
+# upper-garment / one bottom / one dress at a time. Splitting these
+# into separate "instances" was the root cause of the over-cropping
+# regression where graphic-print t-shirts produced multiple shredded
+# crops in the closet (one per fragment).
+_SINGLE_INSTANCE_CLASSES = {
+    "Upper-clothes",
+    "Dress",
+    "Skirt",
+    "Pants",
+}
+
+
 def _split_instances(class_mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
     """Split per-class mask into connected-component instances.
 
     Returns [(label_name, binary_mask_u8), ...]. Mask is same H×W as input.
     Small specks are dropped.
+
+    Note on graphic-print regression: classes in
+    ``_SINGLE_INSTANCE_CLASSES`` are intentionally NOT split into
+    components. Doing so caused the closet to fill with shredded
+    fragments whenever a t-shirt's print broke the mask continuity.
     """
     from scipy import ndimage
 
@@ -157,9 +179,23 @@ def _split_instances(class_mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
         if _LABEL_MAP.get(label_name) is None:
             continue
         class_binary = (class_mask == cid_i).astype(np.uint8)
+
+        # Single-instance classes: keep the entire class mask as ONE
+        # detection, no component-splitting. Tiny floating specks far
+        # from the main blob will be dropped by `_postprocess_mask`'s
+        # "largest connected component" step downstream — but the
+        # main garment region will stay whole even if its centre got
+        # chewed up by a high-contrast print.
+        if label_name in _SINGLE_INSTANCE_CLASSES:
+            if int(class_binary.sum()) >= 128:
+                out.append((label_name, class_binary))
+            continue
+
+        # Multi-instance-allowed classes (shoes, accessories, …):
+        # keep the legacy connected-component split so a user wearing
+        # two distinct shoes / a hat + a scarf gets one detection
+        # per item.
         labeled, n = ndimage.label(class_binary)
-        # Special-case Left-shoe / Right-shoe — keep ALL connected
-        # components (they'll be merged later as same-kind cluster).
         for inst in range(1, n + 1):
             mask = (labeled == inst).astype(np.uint8)
             if mask.sum() >= 128:  # drop tiny noise

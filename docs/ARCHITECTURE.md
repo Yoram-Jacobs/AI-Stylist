@@ -161,19 +161,62 @@ seller_net     = net_after_stripe - platform_fee
 
 ## 6. Deployment
 
-- Backend runs under supervisor on port 8001 with hot reload. MongoDB via the Emergent-managed `MONGO_URL`.
-- Frontend (later phases) served on port 3000, all API calls prefixed `/api`.
-- For a future Cloudflare migration, see `wrangler.toml` — all bindings (DO, Vectorize, KV, R2, secrets) are enumerated there.
+DressApp ships **a single backend codebase** that serves two production targets with different ML capabilities:
+
+### 6.1 Hetzner VPS — `dressapp.co` (full-fat)
+
+- 4-core / 8 GB VPS · Docker Compose · Caddy 2 (auto Let's Encrypt) · MongoDB Atlas.
+- `deploy/Dockerfile.backend` installs **both** `requirements.txt` (lightweight) **and** `requirements-ml.txt` (torch / transformers / rembg / scipy / accelerate).
+- CPU-only torch is pre-pulled from `https://download.pytorch.org/whl/cpu` so we don't drag in CUDA wheels.
+- `app/config.py` auto-detects torch + rembg via `importlib.util.find_spec` and turns `USE_LOCAL_CLOTHING_PARSER=true`, `AUTO_MATTE_CROPS=true`. Local SegFormer-b2-clothes + rembg run inside the pod.
+
+### 6.2 Emergent host — `ai-stylist-api.emergent.host` (cloud-only ML)
+
+- Auto-managed Kubernetes pod, 250 m CPU / 1 Gi RAM. Cannot host the local ML stack (torch alone exceeds the disk/RAM budget).
+- Only `requirements.txt` is installed by the Emergent build pipeline (no torch / transformers / rembg / cuda-*).
+- Auto-detection in `app/config.py` flips `USE_LOCAL_CLOTHING_PARSER=false`, `AUTO_MATTE_CROPS=false`. The analyse pipeline transparently falls through to:
+  - **Multi-item detection** → Gemini Nano Banana (`garment_vision._gemini_detect`).
+  - **Single-item analysis** → Gemini 2.5 Pro multimodal.
+  - **Background matting** → returns `None`; caller keeps the original crop.
+- Live deploy-mode probe: `GET /api/v1/closet/analyze/version` exposes `torch_installed`, `rembg_installed`, `use_local_clothing_parser`, `auto_matte_crops` so you can confirm at-a-glance which mode is live.
+
+### 6.3 Backend concurrency guard (both deploys)
+
+The heavy `analyze_outfit` / `analyze` / `reanalyze` paths share a single process-wide `asyncio.Semaphore(1)` (`_ANALYZE_LOCK` in `api/v1/closet.py`). This serialises any inbound parallel request — multiple browser tabs, future client-side concurrency creep, retries — so a memory-constrained VPS never gets blown up by simultaneous heavy ML runs. Sub-crops within a *single* call still run concurrently via the inner Semaphore in `analyze_outfit`.
+
+### 6.4 Re-analyse endpoint
+
+`POST /api/v1/closet/{item_id}/reanalyze` re-runs The Eyes against an item's stored image (segmented → reconstructed → original fallback chain) and patches **only** the analyser-owned fields (title, taxonomy, weighted `colors[]`, weighted `fabric_materials[]`, condition, tags, …). User-managed fields (size, price, currency, marketplace_intent, notes, purchase history) are preserved. Used by the Item Detail "Analyze" button after a Replace Photo (which intentionally skips auto-segmentation).
 
 ---
 
-## 7. Phase Roadmap (summary)
+## 7. Cloudflare migration path
+
+For a future Cloudflare migration, see `wrangler.toml` — all bindings (DO, Vectorize, KV, R2, secrets) are enumerated there.
+
+---
+
+## 8. Phase Roadmap (summary)
 
 | Phase | Deliverable                                                                                    |
 |-------|-----------------------------------------------------------------------------------------------|
 | 1     | Architecture doc + MongoDB schema + wrangler.toml + backend scaffold + **POC pipeline green**   |
 | 2     | Full CRUD (users / closet / listings / transactions) + vector search + stylist memory           |
 | 3     | React frontend — camera, closet, stylist chat (WS streaming), marketplace                       |
-| 4     | Stripe Connect Express onboarding + checkout + webhooks; Google Calendar OAuth; Trend-Scout     |
+| 4     | PayPal Live checkout + webhooks; Google Calendar OAuth; Trend-Scout                             |
 | 5     | Admin dashboard (revenue, users, trends) + E2E hardening + observability                        |
+| 6+    | Local SegFormer + rembg cutout pipeline, Phase R Stylist multi-image + OutfitCanvas, Phase S widened search, Phase T-Auth Google OAuth, duplicate detection, edit-page weighted taxonomy, batch-OOM serial guard |
+| Now   | **Dual-deploy split** — `requirements-ml.txt` for Hetzner, lightweight `requirements.txt` for the Emergent host. Auto-detection in `app/config.py` chooses local SegFormer vs Gemini fallback per environment. |
+
+---
+
+## 9. Notes on stale section content
+
+Sections 4.1 and 4.2 above reference the original Phase 1 design — `fal.ai/SAM-2`, Stripe, etc. The shipped product replaced these with:
+
+- **Garment segmentation**: local SegFormer-b2-clothes + rembg (Hetzner) / Gemini multi-item detector (Emergent), not fal.ai.
+- **Payments**: PayPal Live, not Stripe.
+- **Stylist memory**: persisted `stylist_sessions` collection per Phase 2; the `StylistAgent` orchestrator lives in `app/services/stylist/`.
+
+The original wording is preserved here for historical traceability against the Phase 1 contract. Section 6 above (Deployment) is the source of truth for the current runtime.
 
