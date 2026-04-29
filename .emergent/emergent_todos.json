@@ -1,30 +1,34 @@
 [
   {
-    "content": "Fix over-cropping regression: don't split single-garment classes (Upper-clothes/Skirt/Pants/Dress) into multiple instances when graphic prints fragment the SegFormer mask",
+    "content": "Run full backend ruff lint (all of /app/backend/app)",
     "status": "completed"
   },
   {
-    "content": "Issue #1: derive Item size from user.body_measurements based on category (AddItem + ItemDetail)",
+    "content": "Run full frontend ESLint on /app/frontend/src",
     "status": "completed"
   },
   {
-    "content": "Lint, restart, smoke-test on a synthetic graphic-T scenario",
+    "content": "esbuild compile-check on the entire frontend",
     "status": "completed"
   },
   {
-    "content": "Issue #3a: Strip heavy ML deps (torch/transformers/rembg/cuda/scipy/onnxruntime/...) from requirements.txt -> requirements-ml.txt",
+    "content": "JSON validity check on all locale files",
     "status": "completed"
   },
   {
-    "content": "Issue #3b: Update deploy/Dockerfile.backend (Hetzner) to install both requirements files",
+    "content": "Update README.md with the new dual-deploy story (Hetzner + Emergent host) and new requirements-ml.txt split",
     "status": "completed"
   },
   {
-    "content": "Issue #3c: Update CORS to include the Emergent host origin",
+    "content": "Update docs/ARCHITECTURE.md with the lazy-ML / auto-detect flow + new endpoints (/reanalyze)",
     "status": "completed"
   },
   {
-    "content": "Issue #3d: Verify Emergent host: dev preview should still build/run after this change",
+    "content": "Update plan.md with the latest phase status (UX polish, batch-OOM, edit-page taxonomy + Analyze, dual-deploy)",
+    "status": "completed"
+  },
+  {
+    "content": "Final smoke check + summary",
     "status": "completed"
   }
 ]
