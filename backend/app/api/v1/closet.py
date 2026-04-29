@@ -451,48 +451,64 @@ async def analyze_version() -> dict[str, Any]:
         markers["heuristic_error"] = repr(exc)
 
     # --- NEW: live rembg health probe ---
-    # Generates a 256x256 test image with a coloured rectangle on a white
-    # background and runs the FULL matte_crop pipeline on it. This tells
-    # us in one curl whether rembg is actually producing alpha cutouts
-    # in the running container. If rembg fails silently (OOM, model load
-    # error, opacity-rejection), this is where we'll see it.
+    # Generates two test images (256x256 sanity + 2000x2000 real-world
+    # scale) and runs the FULL matte_crop pipeline on each. The 2K test
+    # mirrors what your camera/phone uploads look like — if rembg silently
+    # fails on full-resolution input (OOM, timeout, opacity rejection),
+    # this is where we'll see it.
     rembg_probe: dict[str, Any] = {
         "auto_matte_crops_enabled": bool(settings.AUTO_MATTE_CROPS),
         "rembg_model": settings.BACKGROUND_MATTING_REMBG_MODEL,
+        "max_edge_setting": settings.BACKGROUND_MATTING_MAX_EDGE,
     }
     try:
-        from PIL import Image
+        from PIL import Image, ImageDraw
         import io
+        import asyncio as _asyncio
+        import numpy as _np
+        import time as _time
         from app.services import background_matting
 
-        buf = io.BytesIO()
-        img = Image.new("RGB", (256, 256), (240, 240, 240))
-        # Draw a solid coloured rectangle in the middle — rembg should
-        # treat it as foreground and the whitish surround as background.
-        from PIL import ImageDraw
+        async def _probe_one(size: int) -> dict[str, Any]:
+            buf = io.BytesIO()
+            img = Image.new("RGB", (size, size), (240, 240, 240))
+            ImageDraw.Draw(img).rectangle(
+                [int(size * 0.25), int(size * 0.25), int(size * 0.75), int(size * 0.75)],
+                fill=(40, 90, 200),
+            )
+            img.save(buf, format="JPEG", quality=85)
+            test_bytes = buf.getvalue()
+            t0 = _time.time()
+            try:
+                result = await _asyncio.wait_for(
+                    background_matting.matte_crop(test_bytes), timeout=90.0
+                )
+            except _asyncio.TimeoutError:
+                return {"ok": False, "reason": "timeout_90s", "input_size": size}
+            dt = round(_time.time() - t0, 1)
+            if not result:
+                return {"ok": False, "reason": "matte_crop_returned_None", "elapsed_s": dt, "input_size": size}
+            try:
+                out_im = Image.open(io.BytesIO(result)).convert("RGBA")
+                a = _np.array(out_im)[:, :, 3]
+                opaque = float((a > 32).sum()) / float(max(1, a.size))
+                return {
+                    "ok": opaque > 0.05,
+                    "elapsed_s": dt,
+                    "opaque_ratio": round(opaque, 3),
+                    "input_size": size,
+                    "output_dimensions": list(out_im.size),
+                    "png_bytes": len(result),
+                }
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "reason": "decode_failed", "error": repr(exc)[:160]}
 
-        ImageDraw.Draw(img).rectangle([60, 60, 196, 196], fill=(40, 90, 200))
-        img.save(buf, format="JPEG", quality=85)
-        test_bytes = buf.getvalue()
-
-        import asyncio as _asyncio
-
-        result = await _asyncio.wait_for(
-            background_matting.matte_crop(test_bytes), timeout=45.0
+        rembg_probe["small_256"] = await _probe_one(256)
+        rembg_probe["large_2000"] = await _probe_one(2000)
+        rembg_probe["ok"] = bool(
+            rembg_probe["small_256"].get("ok")
+            and rembg_probe["large_2000"].get("ok")
         )
-        if not result:
-            rembg_probe["ok"] = False
-            rembg_probe["reason"] = "matte_crop returned None"
-        else:
-            out_im = Image.open(io.BytesIO(result)).convert("RGBA")
-            import numpy as _np
-
-            alpha = _np.array(out_im)[:, :, 3]
-            opaque_ratio = float((alpha > 32).sum()) / float(max(1, alpha.size))
-            rembg_probe["ok"] = opaque_ratio > 0.05
-            rembg_probe["opaque_ratio"] = round(opaque_ratio, 3)
-            rembg_probe["png_bytes"] = len(result)
-            rembg_probe["dimensions"] = list(out_im.size)
     except Exception as exc:  # noqa: BLE001
         rembg_probe["ok"] = False
         rembg_probe["error"] = repr(exc)[:300]
