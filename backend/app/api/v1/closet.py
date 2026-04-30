@@ -107,6 +107,19 @@ class CreateItemIn(BaseModel):
     retail_metadata: RetailMetadata | None = None
     # Phase V6 — DPP data imported via QR scan (optional)
     dpp_data: dict[str, Any] | None = None
+    # ---- Phase Z2 — photo-fingerprint pre-flight (optional) ----
+    # The frontend computes these in-browser before upload and passes
+    # them through unchanged so we can later spot exact-byte duplicate
+    # JPEGs without an LLM call. ``source_sha256`` is the only field
+    # used for equality; the other two are stored verbatim for UI
+    # diagnostics ("we matched IMG_1742.jpg / 4.2 MB").
+    source_sha256: str | None = None
+    source_filename: str | None = None
+    source_size_bytes: int | None = None
+    # Set when the user explicitly approves a photo the pre-flight
+    # flagged as already in their closet. Closet card renders a red ⭐
+    # and the Stylist Brain skips it during outfit composition.
+    is_duplicate: bool = False
 
 
 class UpdateItemIn(BaseModel):
@@ -206,6 +219,14 @@ async def create_item(
         retail_metadata=payload.retail_metadata,
         reconstruction_metadata=payload.reconstruction_metadata,
         dpp_data=payload.dpp_data,
+        # Phase Z2 — photo fingerprint passthrough (used by the
+        # pre-flight duplicate check). All optional; legacy clients
+        # that don't send them simply produce items with these fields
+        # left as ``None`` / ``False``.
+        source_sha256=payload.source_sha256,
+        source_filename=payload.source_filename,
+        source_size_bytes=payload.source_size_bytes,
+        is_duplicate=payload.is_duplicate,
     )
     doc = item.model_dump()
 
@@ -284,6 +305,120 @@ async def create_item(
 
     await repos.insert(db.closet_items, doc)
     return doc
+
+
+# ---------------------------------------------------------------------------
+# Phase Z2 — photo-fingerprint pre-flight duplicate check
+# ---------------------------------------------------------------------------
+# The Eyes' very first job is to refuse to spend a Gemini token on a JPEG
+# the user has already saved. The frontend hashes each selected file
+# in-browser (``crypto.subtle.digest('SHA-256', bytes)`` is built into
+# every modern browser, so this is free, instant and local) and POSTs
+# the resulting list of {filename, size, sha256} tuples here. We answer
+# with whichever entries collide with an existing closet row's
+# ``source_sha256``. The frontend then either:
+#
+#   * shows a scrollable confirm dialog (interactive  \u2264 5 photos)
+#     where the user picks Skip / "Add anyway \u2b50" per match;
+#   * silently skips them and surfaces a count in the final toast
+#     (background batch upload, > 5 photos).
+#
+# Approved duplicates are saved with ``is_duplicate=True`` so the closet
+# card paints a red star and the Stylist Brain leaves them out of
+# outfit composition (preventing "wear the same polo twice" style
+# hallucinations).
+class PreflightPhotoIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # SHA-256 hex digest of the raw file bytes (64 lowercase chars).
+    # We don't enforce the length \u2014 if a client sends garbage it
+    # simply matches no one and the photo proceeds to analysis as new.
+    sha256: str
+    # Optional, surfaced back to the UI so the dialog can show
+    # "IMG_1742.jpg looks like a duplicate of \u2026".
+    filename: str | None = None
+    size_bytes: int | None = None
+
+
+class PreflightIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    photos: list[PreflightPhotoIn] = Field(default_factory=list, max_length=200)
+
+
+@router.post("/preflight")
+async def preflight_duplicates(
+    payload: PreflightIn, user: dict = Depends(get_current_user)
+) -> dict[str, Any]:
+    """Return any closet entries that already carry one of the supplied
+    SHA-256 hashes. The response is structured for direct rendering by
+    the duplicate-confirm dialog: each match carries the existing item's
+    id, title, ``thumbnail_data_url`` (or fallback) and the incoming
+    photo's filename so the UI can show side-by-side previews.
+    """
+    db = get_db()
+    if not payload.photos:
+        return {"matches": []}
+
+    hashes = [p.sha256 for p in payload.photos if p.sha256]
+    if not hashes:
+        return {"matches": []}
+
+    # One round-trip; ``$in`` is index-friendly. Project only fields
+    # the dialog needs so we don't ship 28 base64-encoded images back.
+    cursor = db.closet_items.find(
+        {
+            "user_id": user["id"],
+            "source_sha256": {"$in": hashes},
+        },
+        {
+            "_id": 0,
+            "id": 1,
+            "title": 1,
+            "name": 1,
+            "item_type": 1,
+            "sub_category": 1,
+            "color": 1,
+            "thumbnail_data_url": 1,
+            "segmented_image_url": 1,
+            "original_image_url": 1,
+            "source_sha256": 1,
+            "source_filename": 1,
+            "source_size_bytes": 1,
+            "is_duplicate": 1,
+        },
+    )
+    by_hash: dict[str, dict[str, Any]] = {}
+    async for row in cursor:
+        h = row.get("source_sha256")
+        if not h or h in by_hash:
+            continue
+        by_hash[h] = {
+            "id": row.get("id"),
+            "title": row.get("title") or row.get("name") or "Existing item",
+            "item_type": row.get("item_type"),
+            "sub_category": row.get("sub_category"),
+            "color": row.get("color"),
+            "thumbnail_data_url": (
+                row.get("thumbnail_data_url")
+                or row.get("segmented_image_url")
+                or row.get("original_image_url")
+            ),
+            "is_duplicate": bool(row.get("is_duplicate")),
+        }
+
+    matches: list[dict[str, Any]] = []
+    for p in payload.photos:
+        existing = by_hash.get(p.sha256)
+        if not existing:
+            continue
+        matches.append(
+            {
+                "sha256": p.sha256,
+                "filename": p.filename,
+                "size_bytes": p.size_bytes,
+                "existing": existing,
+            }
+        )
+    return {"matches": matches}
 
 
 class AnalyzeIn(BaseModel):

@@ -199,6 +199,21 @@ class ClosetItem(BaseDoc):
     # care & repair instructions, certifications, source URL, ...)
     # without polluting the flat taxonomy fields.
     dpp_data: dict[str, Any] | None = None
+    # ---- Phase Z2 — duplicate-photo detection ----
+    # The Eyes' deterministic pre-flight check uses these three fields
+    # (computed in-browser before upload, no LLM cost) to spot the case
+    # "user uploaded the same JPEG twice". Only the SHA-256 is used for
+    # equality; ``source_filename`` and ``source_size_bytes`` are kept
+    # for diagnostics / UI ("we matched IMG_1742.jpg / 4.2 MB"). All
+    # three are nullable so legacy items remain valid.
+    source_sha256: str | None = None
+    source_filename: str | None = None
+    source_size_bytes: int | None = None
+    # Set to ``True`` when the user explicitly approved adding a photo
+    # the pre-flight flagged as a duplicate. The closet UI overlays a
+    # red ⭐ on these cards, and the Stylist Brain filters them out of
+    # the recommendation pool to prevent doubled-up outfit suggestions.
+    is_duplicate: bool = False
 
 
 # ----------------- The Eyes: analyzer response payload -----------------

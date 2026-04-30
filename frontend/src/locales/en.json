@@ -103,6 +103,7 @@
     "title": "Your closet",
     "subtitle": "Every piece, tagged, searchable, ready.",
     "addItem": "Add item",
+    "duplicateBadge": "Marked as a duplicate — kept on purpose, hidden from outfit suggestions.",
     "searchPlaceholder": "Search your closet",
     "meaningSearch": "Meaning",
     "keywordSearch": "Keyword",
@@ -147,6 +148,23 @@
       "confirm": "Add anyway",
       "thisItem": "this item",
       "saveFailed": "Could not save the duplicate item. Please review and use Save All."
+    },
+    "preflight": {
+      "title": "{{count}} of your selected photos look like duplicates",
+      "body": "These exact files already exist in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
+      "existing": "in closet",
+      "incoming": "new upload",
+      "noThumb": "no preview",
+      "untitled": "Existing item",
+      "unnamedFile": "Untitled file",
+      "rowSkip": "Skip",
+      "rowAdd": "Add anyway",
+      "skipAll": "Skip all duplicates",
+      "addAll": "Add all anyway",
+      "confirm": "Continue",
+      "summary": "{{willAdd}} will be added · {{willSkip}} will be skipped",
+      "allSkipped": "All selected photos were duplicates and were skipped.",
+      "allDuplicatesSkippedBatch": "Skipped {{count}} photos already in your closet — nothing new to upload."
     },
     "saveAll": "Save all",
     "savedAll": "All items saved",
@@ -224,6 +242,7 @@
       "partialAnalyze": "Saved {{saved}} items · {{analyzeFailed}} need fields filled in (analysis failed).",
       "duplicatesPending": "Saved {{saved}} new items · {{pending}} look like duplicates — review them below.",
       "duplicatesInline": "{{count}} item(s) need your confirmation — they look like duplicates of items already in your closet.",
+      "skippedDupSuffix": "(skipped {{count}} already in closet)",
       "failed": "Could not save any items. Please try again."
     }
   },
