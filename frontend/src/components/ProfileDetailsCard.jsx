@@ -25,6 +25,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { CountryCombobox } from '@/components/CountryCombobox';
+import { AddressAutocomplete } from '@/components/AddressAutocomplete';
+import { resolveCountry } from '@/lib/countries';
 
 /**
  * Downscale a selected image in-browser before we ship it to Mongo. We cap
@@ -403,12 +406,35 @@ export function ProfileDetailsCard() {
                   />
                 </Field>
                 <Field label={t('profile.addressLine1')} htmlFor="f-l1">
-                  <Input
-                    id="f-l1"
+                  {/* Address line 1 (street + house number) — autocompletes
+                      via OpenStreetMap Nominatim, biased to the selected
+                      country. Picking a suggestion fills line1 + city +
+                      region + postal_code in one shot. */}
+                  <AddressAutocomplete
+                    inputId="f-l1"
+                    kind="street"
                     value={form.address.line1}
-                    onChange={(e) => setNested('address', 'line1', e.target.value)}
-                    className="rounded-xl"
-                    data-testid="profile-field-address_line1"
+                    onChange={(v) => setNested('address', 'line1', v)}
+                    onSelect={(addr) => {
+                      setForm((f) => ({
+                        ...f,
+                        address: {
+                          ...f.address,
+                          line1: addr.line1 || f.address.line1,
+                          city: addr.city || f.address.city,
+                          region: addr.region || f.address.region,
+                          postal_code:
+                            addr.postal_code || f.address.postal_code,
+                          country: addr.country || f.address.country,
+                        },
+                      }));
+                    }}
+                    countryCode={resolveCountry(form.address.country)?.code}
+                    placeholder={t('profile.addressLine1Placeholder', {
+                      defaultValue: 'Start typing your street…',
+                    })}
+                    autoComplete="address-line1"
+                    testid="profile-field-address_line1"
                   />
                 </Field>
                 <Field label={t('profile.addressLine2')} htmlFor="f-l2">
@@ -416,15 +442,36 @@ export function ProfileDetailsCard() {
                     id="f-l2"
                     value={form.address.line2}
                     onChange={(e) => setNested('address', 'line2', e.target.value)}
+                    autoComplete="address-line2"
                     className="rounded-xl"
                   />
                 </Field>
                 <Field label={t('profile.city')} htmlFor="f-city">
-                  <Input
-                    id="f-city"
+                  {/* City autocomplete — same backend, biased to country. */}
+                  <AddressAutocomplete
+                    inputId="f-city"
+                    kind="city"
                     value={form.address.city}
-                    onChange={(e) => setNested('address', 'city', e.target.value)}
-                    className="rounded-xl"
+                    onChange={(v) => setNested('address', 'city', v)}
+                    onSelect={(addr) => {
+                      setForm((f) => ({
+                        ...f,
+                        address: {
+                          ...f.address,
+                          city: addr.city || f.address.city,
+                          region: addr.region || f.address.region,
+                          postal_code:
+                            addr.postal_code || f.address.postal_code,
+                          country: addr.country || f.address.country,
+                        },
+                      }));
+                    }}
+                    countryCode={resolveCountry(form.address.country)?.code}
+                    placeholder={t('profile.cityPlaceholder', {
+                      defaultValue: 'Start typing your city…',
+                    })}
+                    autoComplete="address-level2"
+                    testid="profile-field-address_city"
                   />
                 </Field>
                 <Field label={t('profile.region')} htmlFor="f-region">
@@ -432,6 +479,7 @@ export function ProfileDetailsCard() {
                     id="f-region"
                     value={form.address.region}
                     onChange={(e) => setNested('address', 'region', e.target.value)}
+                    autoComplete="address-level1"
                     className="rounded-xl"
                   />
                 </Field>
@@ -440,15 +488,22 @@ export function ProfileDetailsCard() {
                     id="f-zip"
                     value={form.address.postal_code}
                     onChange={(e) => setNested('address', 'postal_code', e.target.value)}
+                    autoComplete="postal-code"
                     className="rounded-xl"
                   />
                 </Field>
                 <Field label={t('profile.country')} htmlFor="f-country">
-                  <Input
-                    id="f-country"
+                  {/* Static, offline country combobox — type to filter
+                      across name (localised + English) and ISO-2 code. */}
+                  <CountryCombobox
                     value={form.address.country}
-                    onChange={(e) => setNested('address', 'country', e.target.value)}
-                    className="rounded-xl"
+                    onChange={(name) =>
+                      setNested('address', 'country', name)
+                    }
+                    placeholder={t('profile.countryPlaceholder', {
+                      defaultValue: 'Pick or type your country…',
+                    })}
+                    testid="profile-field-address_country"
                   />
                 </Field>
               </div>

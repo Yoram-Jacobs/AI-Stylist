@@ -145,7 +145,8 @@
       "incoming": "New upload",
       "cancel": "Discard upload",
       "confirm": "Add anyway",
-      "thisItem": "this item"
+      "thisItem": "this item",
+      "saveFailed": "Could not save the duplicate item. Please review and use Save All."
     },
     "saveAll": "Save all",
     "savedAll": "All items saved",
@@ -220,6 +221,9 @@
       "savedFailed": "saved {{saved}} · failed {{failed}}",
       "done": "Saved {{count}} items. Edit any misfits in your closet.",
       "partial": "Saved {{saved}} · {{failed}} failed",
+      "partialAnalyze": "Saved {{saved}} items · {{analyzeFailed}} need fields filled in (analysis failed).",
+      "duplicatesPending": "Saved {{saved}} new items · {{pending}} look like duplicates — review them below.",
+      "duplicatesInline": "{{count}} item(s) need your confirmation — they look like duplicates of items already in your closet.",
       "failed": "Could not save any items. Please try again."
     }
   },
@@ -616,10 +620,16 @@
     "status_widowed": "Widowed",
     "address": "Address",
     "addressLine1": "Street",
+    "addressLine1Placeholder": "Start typing your street…",
     "addressLine2": "Apt / suite",
     "city": "City",
+    "cityPlaceholder": "Start typing your city…",
     "postalCode": "Postal code",
     "country": "Country",
+    "countryPlaceholder": "Pick or type your country…",
+    "countrySearch": "Search countries…",
+    "countryEmpty": "No country found.",
+    "addressNoResults": "No matches.",
     "units": "Units",
     "unitsWeight": "Weight",
     "unitsLength": "Length",

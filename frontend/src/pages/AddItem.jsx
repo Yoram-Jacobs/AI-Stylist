@@ -256,6 +256,14 @@ export default function AddItem() {
       // raw photo with blank fields. Surfaced in the final toast so
       // the user knows which ones need cleanup in /closet.
       analyzeFailed: 0,
+      // Items the analyzer flagged as potential_duplicate of an
+      // already-saved closet entry. The batch path no longer
+      // auto-saves these — instead each one is kicked over to the
+      // interactive `cards` list so the existing
+      // DuplicateConfirmDialog can ask the user to confirm/discard.
+      // We track the count so the final toast tells the user how
+      // many items still need their attention before we navigate.
+      pendingDuplicates: 0,
     });
     toast.success(
       t('addItem.bgUpload.started', {
@@ -322,6 +330,46 @@ export default function AddItem() {
           fields: hydrate(it.analysis || {}, user),
           useReconstructed: false,
         };
+
+        // Duplicate gate (regression fix, restored): if the analyzer
+        // flagged this item as a likely re-upload of something already
+        // in the user's closet, do NOT silently auto-save. Surface the
+        // crop as an interactive card so the existing
+        // DuplicateConfirmDialog can ask the user whether to add it
+        // anyway. The batch path keeps processing the rest of the
+        // queue while the dialog is open — duplicates pile up one
+        // card at a time and the modal pops them serially.
+        if (it.potential_duplicate) {
+          const mime = cardLike.mime;
+          const dupCard = {
+            id: `bgdup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            file: null,
+            mime,
+            previewUrl: cardLike.base64
+              ? `data:${mime};base64,${cardLike.base64}`
+              : null,
+            base64: cardLike.base64,
+            originalCropUrl: cardLike.base64
+              ? `data:${mime};base64,${cardLike.base64}`
+              : null,
+            status: 'ready',
+            progress: 100,
+            fields: cardLike.fields,
+            potentialDuplicate: it.potential_duplicate,
+            // Flag set on cards that were redirected here mid-batch.
+            // The DuplicateConfirmDialog's onConfirm uses this to
+            // immediately POST /closet (instead of waiting for the
+            // user to click "Save All"), keeping the batch flow
+            // close to the original "fire-and-forget" feel.
+            pendingBatchSave: true,
+          };
+          setCards((prev) => [...prev, dupCard]);
+          setBgBatch((b) =>
+            b ? { ...b, pendingDuplicates: (b.pendingDuplicates || 0) + 1 } : b,
+          );
+          continue;
+        }
+
         try {
           await api.createItem(buildCreatePayload(cardLike));
           createdHere += 1;
@@ -362,7 +410,20 @@ export default function AddItem() {
       const saved = b?.saved ?? 0;
       const failed = b?.failed ?? 0;
       const analyzeFailed = b?.analyzeFailed ?? 0;
-      if (saved && !failed && !analyzeFailed) {
+      const pendingDuplicates = b?.pendingDuplicates ?? 0;
+      if (pendingDuplicates) {
+        // Some uploads matched existing closet items — we surfaced
+        // them as interactive cards so the duplicate-confirm dialog
+        // can ask the user. Don't auto-navigate to /closet: the user
+        // needs to confirm/discard each one first.
+        toast.message(
+          t('addItem.bgUpload.duplicatesPending', {
+            saved,
+            pending: pendingDuplicates,
+            defaultValue: `Saved ${saved} new items · ${pendingDuplicates} look like duplicates — review them below.`,
+          }),
+        );
+      } else if (saved && !failed && !analyzeFailed) {
         toast.success(
           t('addItem.bgUpload.done', {
             count: saved,
@@ -388,7 +449,7 @@ export default function AddItem() {
             defaultValue: `Saved ${saved} · ${failed} failed`,
           })
         );
-      } else {
+      } else if (!saved && !pendingDuplicates) {
         toast.error(
           t('addItem.bgUpload.failed', {
             defaultValue: 'Could not save any items. Please try again.',
@@ -396,8 +457,10 @@ export default function AddItem() {
         );
       }
       // Brief pause so the user sees the final 100% before navigating.
+      // Only auto-navigate when there are no pending duplicates — those
+      // need the user's explicit confirm/discard click first.
       setTimeout(() => {
-        if (saved) nav('/closet');
+        if (saved && !pendingDuplicates) nav('/closet');
       }, 1200);
       return null;
     });
@@ -666,22 +729,89 @@ export default function AddItem() {
       {/* Duplicate-detection modal. We pop one card at a time — the
           first card with an unconfirmed potentialDuplicate becomes the
           active question. "Cancel" discards that card; "Add anyway"
-          stamps it as confirmed and moves on. */}
+          stamps it as confirmed and moves on (or, for cards that came
+          from the batch path, immediately POSTs /closet so the
+          fire-and-forget batch flow stays fire-and-forget). */}
       <DuplicateConfirmDialog
         cards={cards}
         onCancel={(cardId) => {
           setCards((prev) => {
             const removed = prev.find((c) => c.id === cardId);
             if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+            // Decrement the batch's pendingDuplicates counter so the
+            // final toast / nav logic stays accurate after a discard.
+            if (removed?.pendingBatchSave) {
+              setBgBatch((b) =>
+                b
+                  ? {
+                      ...b,
+                      pendingDuplicates: Math.max(
+                        0,
+                        (b.pendingDuplicates || 0) - 1,
+                      ),
+                    }
+                  : b,
+              );
+            }
             return prev.filter((c) => c.id !== cardId);
           });
         }}
-        onConfirm={(cardId) => {
-          setCards((prev) =>
-            prev.map((c) =>
-              c.id === cardId ? { ...c, duplicateConfirmed: true } : c
-            )
-          );
+        onConfirm={async (cardId) => {
+          // Snapshot the card so we don't lose state to the
+          // setCards stamp below if we have to read from it after.
+          const card = cards.find((c) => c.id === cardId);
+          if (!card) return;
+
+          // Cards that came through the foreground / interactive path
+          // just get stamped — the user clicks "Save All" afterwards.
+          if (!card.pendingBatchSave) {
+            setCards((prev) =>
+              prev.map((c) =>
+                c.id === cardId ? { ...c, duplicateConfirmed: true } : c,
+              ),
+            );
+            return;
+          }
+
+          // Batch-origin cards: save immediately and remove from the
+          // cards list. This restores the "uploads continue in the
+          // background" UX while still requiring an explicit user
+          // confirmation for each duplicate.
+          try {
+            await api.createItem(buildCreatePayload(card));
+            setCards((prev) => prev.filter((c) => c.id !== cardId));
+            setBgBatch((b) =>
+              b
+                ? {
+                    ...b,
+                    saved: (b.saved || 0) + 1,
+                    pendingDuplicates: Math.max(
+                      0,
+                      (b.pendingDuplicates || 0) - 1,
+                    ),
+                  }
+                : b,
+            );
+          } catch (err) {
+            // Saving failed — keep the card visible so the user can
+            // edit + retry through the normal Save All flow. We stamp
+            // duplicateConfirmed so the dialog doesn't pop again for
+            // this card.
+            setCards((prev) =>
+              prev.map((c) =>
+                c.id === cardId
+                  ? { ...c, duplicateConfirmed: true, pendingBatchSave: false }
+                  : c,
+              ),
+            );
+            toast.error(
+              err?.response?.data?.detail ||
+                t('addItem.duplicate.saveFailed', {
+                  defaultValue:
+                    'Could not save the duplicate item. Please review and use Save All.',
+                }),
+            );
+          }
         }}
       />
 
@@ -720,6 +850,21 @@ export default function AddItem() {
               className="h-2"
               data-testid="bg-batch-progress"
             />
+            {bgBatch.pendingDuplicates ? (
+              // Surfaced inline so the user knows the modal popping
+              // up over the progress card is intentional — these
+              // are uploads that matched something already in the
+              // closet and need their explicit OK before saving.
+              <div
+                className="mt-3 text-xs text-amber-700 dark:text-amber-400"
+                data-testid="bg-batch-duplicates"
+              >
+                {t('addItem.bgUpload.duplicatesInline', {
+                  count: bgBatch.pendingDuplicates,
+                  defaultValue: `${bgBatch.pendingDuplicates} item(s) need your confirmation — they look like duplicates of items already in your closet.`,
+                })}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : cards.length === 0 ? (

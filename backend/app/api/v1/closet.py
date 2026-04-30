@@ -523,6 +523,36 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
+    # Non-secret presence flags for the secrets that make the user-
+    # facing pipeline work. Each is a `bool(<setting>)` only — no
+    # values, no prefixes, no suffixes — safe to expose on this
+    # un-authenticated endpoint and lets you eyeball from a browser
+    # whether a deploy's Custom keys panel is wired up correctly.
+    markers["secrets_present"] = {
+        "gemini_api_key": bool(getattr(settings, "GEMINI_API_KEY", None)),
+        "emergent_llm_key": bool(getattr(settings, "EMERGENT_LLM_KEY", None)),
+        "gemini_image_model": bool(getattr(settings, "GEMINI_IMAGE_MODEL", None)),
+        "google_oauth_client_id": bool(
+            getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", None)
+        ),
+        "google_oauth_client_secret": bool(
+            getattr(settings, "GOOGLE_OAUTH_CLIENT_SECRET", None)
+        ),
+        "google_oauth_redirect_uri": bool(
+            getattr(settings, "GOOGLE_OAUTH_REDIRECT_URI", None)
+        ),
+        "google_oauth_post_login_redirect": bool(
+            getattr(settings, "GOOGLE_OAUTH_POST_LOGIN_REDIRECT", None)
+        ),
+        "hf_token": bool(getattr(settings, "HF_TOKEN", None)),
+        "deepgram_api_key": bool(getattr(settings, "DEEPGRAM_API_KEY", None)),
+        "openweather_api_key": bool(
+            getattr(settings, "OPENWEATHER_API_KEY", None)
+        ),
+        "jwt_secret": bool(getattr(settings, "JWT_SECRET", None)),
+        "mongo_url": bool(getattr(settings, "MONGO_URL", None)),
+    }
+
     # --- Live rembg health probe (opt-in) ---
     # Generates two test images (256x256 sanity + 2000x2000 real-world
     # scale) and runs the FULL matte_crop pipeline on each. The 2K test
@@ -1242,6 +1272,27 @@ async def clean_item_background(
     )
     if not item:
         raise HTTPException(404, "Item not found")
+
+    # Lightweight-deploy short-circuit. The Emergent host pod (250 m
+    # CPU / 1 Gi RAM) can't run rembg inside the 60 s gateway window —
+    # the model download + 2 K-image inference exceeds the budget and
+    # Cloudflare returns a 520 to the browser. When the deploy explicitly
+    # opted into lightweight mode (``USE_CLOTHING_PARSER=false`` /
+    # ``LIGHTWEIGHT_DEPLOY=true``), reply immediately with a clear,
+    # actionable message instead of hanging the request. The frontend
+    # already handles the ``applied:false`` shape (shows a toast and
+    # leaves the original crop intact).
+    if not settings.AUTO_MATTE_CROPS:
+        return {
+            "item": item,
+            "applied": False,
+            "detail": (
+                "Background matting isn't available on this deployment. "
+                "Use the Hetzner production host (dressapp.co) for clean cutouts, "
+                "or set AUTO_MATTE_CROPS=true / USE_CLOTHING_PARSER=true on this host."
+            ),
+            "reason": "lightweight_deploy_no_matting",
+        }
 
     crop_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not isinstance(crop_url, str) or not crop_url.startswith("data:"):

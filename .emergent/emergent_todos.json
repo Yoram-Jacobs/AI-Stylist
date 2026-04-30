@@ -1,34 +1,26 @@
 [
   {
-    "content": "Run full backend ruff lint (all of /app/backend/app)",
+    "content": "Patch handleBatchBackground to detect potential_duplicate and surface as interactive card instead of silent save",
     "status": "completed"
   },
   {
-    "content": "Run full frontend ESLint on /app/frontend/src",
+    "content": "Update DuplicateConfirmDialog onConfirm to actually save batch-origin cards (not just stamp confirmed flag)",
     "status": "completed"
   },
   {
-    "content": "esbuild compile-check on the entire frontend",
+    "content": "Update bgBatch counter to track pendingDuplicates and adjust final-toast nav logic",
     "status": "completed"
   },
   {
-    "content": "JSON validity check on all locale files",
+    "content": "Add i18n strings for pending-duplicates state (en.json minimum, with defaultValue fallback for other locales)",
     "status": "completed"
   },
   {
-    "content": "Update README.md with the new dual-deploy story (Hetzner + Emergent host) and new requirements-ml.txt split",
+    "content": "Lint + esbuild bundle compile check",
     "status": "completed"
   },
   {
-    "content": "Update docs/ARCHITECTURE.md with the lazy-ML / auto-detect flow + new endpoints (/reanalyze)",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md with the latest phase status (UX polish, batch-OOM, edit-page taxonomy + Analyze, dual-deploy)",
-    "status": "completed"
-  },
-  {
-    "content": "Final smoke check + summary",
+    "content": "Frontend smoke test via screenshot tool: confirm /closet/add still renders cleanly with no new runtime errors",
     "status": "completed"
   }
 ]

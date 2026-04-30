@@ -221,6 +221,69 @@ Goal: make `https://ai-stylist-api.emergent.host` function with equivalent user-
   - README: dual-deploy story + requirements split.
   - ARCHITECTURE.md: updated deployment modes, `_ANALYZE_LOCK`, `/reanalyze`, dual-deploy.
 
+#### Z.9 — Address autocomplete (Settings → Contact) **(DONE & VISUALLY VERIFIED)**
+- New `frontend/src/components/CountryCombobox.jsx`
+  - cmdk-powered Popover; flag emoji + localised name (Intl.DisplayNames) + ISO-2 fallback search.
+  - Free-text country still allowed (backend stores name as text).
+- New `frontend/src/components/AddressAutocomplete.jsx`
+  - Debounced (400 ms) calls to public Nominatim `/search` (no API key).
+  - `kind="city" | "street"`, country-biased, auto-cancels in-flight requests on each keystroke.
+  - Picking a suggestion fires structured `{line1,city,region,postal_code,country,country_code}` patch.
+- `ProfileDetailsCard.jsx` Contact accordion now uses both, with
+  resolved-country code piped from CountryCombobox into both
+  AddressAutocomplete instances.
+- Verified live in preview pod (3 screenshots): country search "germ"
+  → 🇩🇪 Germany; street "Brandenburger T" → 2 real OSM hits with
+  city/region in secondary line.
+
+#### Z.10 — `dressapp.co` production triage **(DONE — handed off to user)**
+- Diagnosed `dressapp.co` 405 / 404 responses on `/api/*` as a DNS-layer
+  issue — domain still points at AWS infra (which 301-redirects `/` to
+  the now-deprecated `ai-stylist-api.emergent.host` and rejects every
+  `/api/*` POST).
+- Confirmed Hetzner-side code is correct (`POST /auth/dev-bypass`
+  registered; preview pod login succeeds).
+- Wrote `/app/HETZNER_RECOVERY.md` — exact 10-step DNS + redeploy
+  checklist for the user to execute on their VPS.
+
+#### Z.11 — Batch upload duplicate-detection regression fix **(DONE)**
+- **Symptom:** uploading >5 photos via background batch silently saved
+  every analysed result — including items the analyzer flagged as
+  potential duplicates of existing closet entries — because
+  `handleBatchBackground` never read `it.potential_duplicate`.
+  Interactive (≤5 photo) path was unaffected: the `DuplicateConfirmDialog`
+  is wired only off the foreground `cards` array.
+- **Backend was already correct:** `find_potential_duplicate` matches on
+  case-insensitive `item_type` + `sub_category` + dominant colour (and
+  brand when both items carry one); `/closet/analyze` attaches the
+  result onto each returned item.
+- **Frontend fix** (`pages/AddItem.jsx`):
+  - `handleBatchBackground` now checks `it.potential_duplicate`. When
+    set, it pushes the analysed crop into the interactive `cards` array
+    (with a new `pendingBatchSave` flag) instead of auto-saving, and
+    increments a new `bgBatch.pendingDuplicates` counter.
+  - `DuplicateConfirmDialog`'s `onConfirm` upgraded: for cards with
+    `pendingBatchSave: true`, it immediately POSTs `/closet`, removes
+    the card from state, and bumps `bgBatch.saved` — preserving the
+    original "fire-and-forget" feel of the batch flow. Foreground
+    cards still just stamp `duplicateConfirmed: true` and wait for
+    Save All.
+  - Final-toast nav logic now suppresses the auto-redirect to `/closet`
+    when `pendingDuplicates > 0`, so the user can review the dialog
+    queue first.
+  - Inline amber-text counter on the batch progress card surfaces how
+    many duplicates are awaiting confirmation.
+- **i18n:** added `addItem.bgUpload.duplicatesPending`,
+  `addItem.bgUpload.duplicatesInline`,
+  `addItem.bgUpload.partialAnalyze` and `addItem.duplicate.saveFailed`
+  to `en.json`; other locales fall back to their inline `defaultValue`
+  via i18next's standard fallback.
+- **Verification:** ESLint clean, `en.json` valid JSON, esbuild bundle
+  compiles, `/closet/add` renders cleanly in preview pod (the
+  pre-existing third-party `Unexpected token '}'` pageerror is
+  unrelated and present on every route including `/login` even with
+  this change stashed).
+
 ---
 
 ### Phase Q+ — Wardrobe Reconstructor migration note **(SHIPPED)**
