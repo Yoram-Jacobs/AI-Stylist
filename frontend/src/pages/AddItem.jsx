@@ -20,6 +20,8 @@ import {
 } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
+import { sha256File } from '@/lib/utils';
+import DuplicatePreflightDialog from '@/components/DuplicatePreflightDialog';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
 import { useAuth } from '@/lib/auth';
@@ -127,6 +129,11 @@ export default function AddItem() {
   // each item with sane defaults; user is told to fix any misfits in
   // /closet afterwards.
   const [bgBatch, setBgBatch] = useState(null);
+  // Phase Z2 — pre-flight duplicate dialog state. Holds the
+  // `matches` array returned by /closet/preflight plus a continuation
+  // function that the dialog calls once the user has decided
+  // skip/add per row. Null when the dialog is closed.
+  const [preflight, setPreflight] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -208,15 +215,136 @@ export default function AddItem() {
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    // For large batches, skip the per-card editor and let the user fix
-    // any misfits later from /closet. Threshold kept at 5 — anything
-    // above is clearly a "dump my whole wardrobe" moment.
-    const BG_THRESHOLD = 5;
-    if (files.length > BG_THRESHOLD) {
-      return handleBatchBackground(files);
+
+    // ----------------------------------------------------------------
+    // Phase Z2 — pre-flight duplicate detection.
+    //
+    // Compute the SHA-256 of every selected file in-browser (free,
+    // ~50 ms each), POST the whole batch to /closet/preflight in ONE
+    // round-trip, and either prompt the user (≤5 photos) or silently
+    // drop the duplicates (>5 photos, batch path) before any analyze
+    // / Gemini / SegFormer cost is incurred.
+    // ----------------------------------------------------------------
+    const fingerprints = await Promise.all(
+      files.map(async (f) => ({
+        file: f,
+        sha256: await sha256File(f),
+        filename: f.name || null,
+        size_bytes: typeof f.size === 'number' ? f.size : null,
+      })),
+    );
+
+    let matches = [];
+    try {
+      const fpForApi = fingerprints
+        .filter((fp) => fp.sha256)
+        .map((fp) => ({
+          sha256: fp.sha256,
+          filename: fp.filename,
+          size_bytes: fp.size_bytes,
+        }));
+      if (fpForApi.length) {
+        const res = await api.preflightDuplicates(fpForApi);
+        matches = Array.isArray(res?.matches) ? res.matches : [];
+      }
+    } catch (err) {
+      // Pre-flight is purely advisory — never block the upload on a
+      // network/server error. Treat as "no duplicates found" and let
+      // the post-analysis duplicate detector still catch obvious hits.
+      matches = [];
     }
+
+    // BG_THRESHOLD: above this we skip the per-card editor and run
+    // the auto-save batch path. Anything above 5 is clearly a "dump
+    // my whole wardrobe" moment.
+    const BG_THRESHOLD = 5;
+    const isBatch = files.length > BG_THRESHOLD;
+
+    // No duplicates → straight through.
+    if (!matches.length) {
+      if (isBatch) return handleBatchBackground(files, 0);
+      return continueInteractive(fingerprints, /* duplicateAcks */ {});
+    }
+
+    // BATCH path (>5 photos): silently drop duplicates per the user's
+    // chosen behaviour (option 2B). Track the count so the final
+    // toast can mention them.
+    if (isBatch) {
+      const dupHashes = new Set(matches.map((m) => m.sha256));
+      const survivors = fingerprints
+        .filter((fp) => !fp.sha256 || !dupHashes.has(fp.sha256))
+        .map((fp) => fp.file);
+      const skipped = files.length - survivors.length;
+      if (!survivors.length) {
+        toast.message(
+          t('addItem.preflight.allDuplicatesSkippedBatch', {
+            count: skipped,
+            defaultValue: `Skipped ${skipped} photos already in your closet — nothing new to upload.`,
+          }),
+        );
+        return;
+      }
+      return handleBatchBackground(survivors, skipped);
+    }
+
+    // INTERACTIVE path (≤5 photos): open the scrollable confirm
+    // dialog. We need previewUrls *now* (data: URLs computed from the
+    // already-read base64) so the dialog can show side-by-side
+    // thumbnails without a network round-trip.
+    const matchesEnriched = matches.map((m) => {
+      const fp = fingerprints.find((x) => x.sha256 === m.sha256);
+      const file = fp?.file;
+      const previewUrl = file ? URL.createObjectURL(file) : null;
+      return { ...m, previewUrl };
+    });
+
+    setPreflight({
+      matches: matchesEnriched,
+      onResolve: (decisions) => {
+        // Free the temporary object URLs we created for the dialog.
+        matchesEnriched.forEach((m) => {
+          if (m.previewUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(m.previewUrl);
+          }
+        });
+        setPreflight(null);
+        // ``decisions`` is { sha256: 'add' | 'skip' }. Map back onto
+        // fingerprints — sha256 absent or 'skip' = drop.
+        const survivors = fingerprints.filter((fp) => {
+          const choice = decisions[fp.sha256];
+          if (choice === undefined) return true; // wasn't a duplicate
+          return choice === 'add';
+        });
+        if (!survivors.length) {
+          toast.message(
+            t('addItem.preflight.allSkipped', {
+              defaultValue:
+                'All selected photos were duplicates and were skipped.',
+            }),
+          );
+          return;
+        }
+        // Per-photo "this one is a known duplicate" map so cards can
+        // carry it through to /closet POST and the closet UI can
+        // paint the red ⭐.
+        const acks = {};
+        Object.entries(decisions).forEach(([sha, ch]) => {
+          if (ch === 'add') acks[sha] = true;
+        });
+        continueInteractive(survivors, acks);
+      },
+    });
+  };
+
+  // Carved out of handleFiles so the pre-flight dialog can call it
+  // after the user resolves the duplicates list. ``fingerprints`` is
+  // the post-filter array of {file, sha256, filename, size_bytes};
+  // ``duplicateAcks`` is sha256 → true for the ones the user
+  // explicitly approved as duplicates.
+  const continueInteractive = async (fingerprints, duplicateAcks) => {
     const drafts = await Promise.all(
-      files.map(async (file) => {
+      fingerprints.map(async (fp) => {
+        const file = fp.file;
         const b64 = await fileToBase64(file);
         return {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -229,11 +357,17 @@ export default function AddItem() {
           fields: blankFields(),
           error: null,
           label: null,
+          // Phase Z2 — fingerprint passthrough. Stored on the card so
+          // buildCreatePayload can hand them to /closet POST and the
+          // backend can persist them on the ClosetItem document.
+          sourceSha256: fp.sha256 || null,
+          sourceFilename: fp.filename || null,
+          sourceSizeBytes: fp.size_bytes || null,
+          isDuplicate: !!duplicateAcks[fp.sha256],
         };
-      })
+      }),
     );
     setCards((prev) => [...prev, ...drafts]);
-    // Kick off parallel analysis.
     drafts.forEach((d) => analyzeCard(d));
   };
 
@@ -246,7 +380,7 @@ export default function AddItem() {
   // time, items 2..N actually get analysed instead of silently
   // falling through to the "save raw image" branch.
   // ------------------------------------------------------------------
-  const handleBatchBackground = async (files) => {
+  const handleBatchBackground = async (files, skippedDuplicates = 0) => {
     setBgBatch({
       total: files.length,
       processed: 0,
@@ -264,6 +398,11 @@ export default function AddItem() {
       // We track the count so the final toast tells the user how
       // many items still need their attention before we navigate.
       pendingDuplicates: 0,
+      // Phase Z2 — pre-flight skipped this many photos because their
+      // SHA-256 hash already existed in the closet. Surfaced in the
+      // final toast so the user knows none of their selection went
+      // missing silently.
+      skippedDuplicates: skippedDuplicates || 0,
     });
     toast.success(
       t('addItem.bgUpload.started', {
@@ -296,6 +435,23 @@ export default function AddItem() {
       let failedHere = 0;
       let analyzeFailedHere = 0;
       let b64 = null;
+      // Phase Z2 — recompute the fingerprint here so each saved item
+      // carries source_sha256/filename/size in the DB, even on the
+      // batch path. (We already verified upstream none of these are
+      // duplicates of existing closet items, otherwise the pre-flight
+      // gate would have dropped them; the hash is stored so *future*
+      // uploads of the same file are caught for free.)
+      let sha256 = null;
+      try {
+        sha256 = await sha256File(file);
+      } catch (_) {
+        sha256 = null;
+      }
+      const sourceMeta = {
+        sourceSha256: sha256,
+        sourceFilename: file?.name || null,
+        sourceSizeBytes: typeof file?.size === 'number' ? file.size : null,
+      };
       try {
         b64 = await fileToBase64(file);
       } catch (_) {
@@ -329,6 +485,10 @@ export default function AddItem() {
           file: null,
           fields: hydrate(it.analysis || {}, user),
           useReconstructed: false,
+          // Phase Z2 — fingerprint passthrough into buildCreatePayload
+          // so the row stored in Mongo carries source_sha256 etc. and
+          // future uploads of the same file get caught by /preflight.
+          ...sourceMeta,
         };
 
         // Duplicate gate (regression fix, restored): if the analyzer
@@ -411,6 +571,17 @@ export default function AddItem() {
       const failed = b?.failed ?? 0;
       const analyzeFailed = b?.analyzeFailed ?? 0;
       const pendingDuplicates = b?.pendingDuplicates ?? 0;
+      const skippedDuplicates = b?.skippedDuplicates ?? 0;
+      // Phase Z2 — appended to whichever toast variant fires below
+      // so the user knows the pre-flight silently dropped some
+      // photos that were already in the closet.
+      const dupTrailer = skippedDuplicates
+        ? ' ' +
+          t('addItem.bgUpload.skippedDupSuffix', {
+            count: skippedDuplicates,
+            defaultValue: `(skipped ${skippedDuplicates} already in closet)`,
+          })
+        : '';
       if (pendingDuplicates) {
         // Some uploads matched existing closet items — we surfaced
         // them as interactive cards so the duplicate-confirm dialog
@@ -421,14 +592,14 @@ export default function AddItem() {
             saved,
             pending: pendingDuplicates,
             defaultValue: `Saved ${saved} new items · ${pendingDuplicates} look like duplicates — review them below.`,
-          }),
+          }) + dupTrailer,
         );
       } else if (saved && !failed && !analyzeFailed) {
         toast.success(
           t('addItem.bgUpload.done', {
             count: saved,
             defaultValue: `Saved ${saved} items. Edit any misfits in your closet.`,
-          })
+          }) + dupTrailer,
         );
       } else if (saved && analyzeFailed && !failed) {
         // All items saved, but some skipped analysis — tell the user
@@ -439,7 +610,7 @@ export default function AddItem() {
             saved,
             analyzeFailed,
             defaultValue: `Saved ${saved} items · ${analyzeFailed} need fields filled in (analysis failed).`,
-          })
+          }) + dupTrailer,
         );
       } else if (saved && failed) {
         toast.message(
@@ -447,9 +618,9 @@ export default function AddItem() {
             saved,
             failed,
             defaultValue: `Saved ${saved} · ${failed} failed`,
-          })
+          }) + dupTrailer,
         );
-      } else if (!saved && !pendingDuplicates) {
+      } else if (!saved && !pendingDuplicates && !skippedDuplicates) {
         toast.error(
           t('addItem.bgUpload.failed', {
             defaultValue: 'Could not save any items. Please try again.',
@@ -726,7 +897,24 @@ export default function AddItem() {
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
       />
 
-      {/* Duplicate-detection modal. We pop one card at a time — the
+      {/* Phase Z2 — pre-flight duplicate dialog. Pops up BEFORE any
+          analyze / Gemini cost when the user has selected ≤5 photos
+          and at least one of them collides on SHA-256 with an item
+          already in their closet. Multi-row, scrollable, per-row
+          Skip / "Add anyway ⭐" — see component for full spec. */}
+      <DuplicatePreflightDialog
+        open={!!preflight}
+        matches={preflight?.matches || []}
+        onResolve={(decisions) => {
+          if (preflight?.onResolve) {
+            preflight.onResolve(decisions);
+          } else {
+            setPreflight(null);
+          }
+        }}
+      />
+
+      {/* Duplicate-detection modal (post-analysis fallback). Pops one
           first card with an unconfirmed potentialDuplicate becomes the
           active question. "Cancel" discards that card; "Add anyway"
           stamps it as confirmed and moves on (or, for cards that came
@@ -1469,6 +1657,14 @@ function buildCreatePayload(card) {
       : undefined,
     // Phase V6: preserve DPP provenance imported via QR scan.
     dpp_data: card.dppData || undefined,
+    // Phase Z2 — photo fingerprint passthrough so future uploads of
+    // the same JPEG get caught by /closet/preflight, and the closet
+    // card knows whether to paint the red ⭐ overlay.
+    source_sha256: card.sourceSha256 || undefined,
+    source_filename: card.sourceFilename || undefined,
+    source_size_bytes:
+      typeof card.sourceSizeBytes === 'number' ? card.sourceSizeBytes : undefined,
+    is_duplicate: card.isDuplicate ? true : undefined,
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

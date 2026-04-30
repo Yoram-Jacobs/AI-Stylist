@@ -74,6 +74,15 @@ export const api = {
     client.get('/closet', { params }).then((r) => r.data),
   getItem: (id) => client.get(`/closet/${id}`).then((r) => r.data),
   createItem: (body) => client.post('/closet', body).then((r) => r.data),
+  // Phase Z2 — pre-flight duplicate check.
+  // Pass an array of `{sha256, filename, size_bytes}` for the photos
+  // the user just selected. Returns `{matches: [...]}` listing only
+  // those that collide with an existing closet item. The frontend
+  // either prompts (≤5 photos) or silently filters them out (>5).
+  preflightDuplicates: (photos) =>
+    client
+      .post('/closet/preflight', { photos })
+      .then((r) => r.data),
   analyzeItemImage: (body) =>
     client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
   searchCloset: (body) =>

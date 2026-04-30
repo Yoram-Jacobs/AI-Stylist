@@ -46,7 +46,17 @@ COPY backend/requirements.txt ./requirements.txt
 COPY backend/requirements-ml.txt ./requirements-ml.txt
 # Lightweight backend deps. Torch is already installed above — pip
 # will skip it during the ML install.
-RUN pip install --no-cache-dir -r requirements.txt
+#
+# `--extra-index-url` points pip at Emergent's private package index,
+# which is where `emergentintegrations` (our LLM shim) lives. Without
+# this flag pip only checks PyPI, fails to find the package, and the
+# whole build dies with:
+#     ERROR: No matching distribution found for emergentintegrations==0.1.0
+# PyPI stays the primary index so every other dep keeps resolving
+# normally.
+RUN pip install --no-cache-dir \
+      --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
+      -r requirements.txt
 # Heavy ML stack — local SegFormer + rembg matting. Kept in a SEPARATE
 # requirements file so the lightweight Emergent deploy
 # (`ai-stylist-api.emergent.host`) which only installs
@@ -54,6 +64,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # its 250m/1Gi pod. Code paths in `clothing_parser.py` and
 # `background_matting.py` already detect the missing imports at
 # runtime and fall back to the HF Inference API or skip cleanly.
+RUN pip install --no-cache-dir \
+      --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
+      -r requirements-ml.txt
 RUN pip install --no-cache-dir -r requirements-ml.txt
 # Torch is already installed above — pip will skip it here.
 RUN pip install --no-cache-dir --use-deprecated=legacy-resolver --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt

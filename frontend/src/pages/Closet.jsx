@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
-  Square, Loader2, ListChecks, Sparkles, Wand2, QrCode,
+  Square, Loader2, ListChecks, Sparkles, Wand2, QrCode, Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -609,6 +609,23 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
         )}
         {showCheckbox && isSelected && (
           <div className="absolute inset-0 bg-[hsl(var(--accent))]/10 pointer-events-none" />
+        )}
+        {/* Phase Z2 — red ⭐ overlay marks items the user explicitly
+            kept as duplicates of an existing closet entry. The
+            Stylist Brain filters these out of recommendations, so
+            this badge tells the user "yes, I have this twice, but
+            outfit suggestions won't double-count it." */}
+        {item.is_duplicate && (
+          <div
+            className="absolute top-2 left-2 h-7 w-7 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md ring-2 ring-background"
+            title={t('closet.duplicateBadge', {
+              defaultValue:
+                'Marked as a duplicate — kept on purpose, hidden from outfit suggestions.',
+            })}
+            data-testid="closet-item-duplicate-star"
+          >
+            <Star className="h-3.5 w-3.5 fill-white" />
+          </div>
         )}
       </AspectRatio>
       <CardContent className="p-3">

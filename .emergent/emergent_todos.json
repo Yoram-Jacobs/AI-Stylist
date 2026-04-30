@@ -1,26 +1,42 @@
 [
   {
-    "content": "Patch handleBatchBackground to detect potential_duplicate and surface as interactive card instead of silent save",
+    "content": "Read ClosetItem model + create endpoint to plan field additions",
     "status": "completed"
   },
   {
-    "content": "Update DuplicateConfirmDialog onConfirm to actually save batch-origin cards (not just stamp confirmed flag)",
+    "content": "Backend: add source_sha256/filename/size + is_duplicate to ClosetItem model + create endpoint",
     "status": "completed"
   },
   {
-    "content": "Update bgBatch counter to track pendingDuplicates and adjust final-toast nav logic",
+    "content": "Backend: add POST /closet/preflight endpoint",
     "status": "completed"
   },
   {
-    "content": "Add i18n strings for pending-duplicates state (en.json minimum, with defaultValue fallback for other locales)",
+    "content": "Backend: filter is_duplicate=true from Stylist Brain recommendation queries",
     "status": "completed"
   },
   {
-    "content": "Lint + esbuild bundle compile check",
+    "content": "Frontend: client-side sha256 helper + AddItem.jsx integration",
     "status": "completed"
   },
   {
-    "content": "Frontend smoke test via screenshot tool: confirm /closet/add still renders cleanly with no new runtime errors",
+    "content": "Frontend: build DuplicatePreflightDialog (interactive ≤5 path)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: silent skip + final-toast count for >5 batch path",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: red star overlay on closet item cards where is_duplicate=true",
+    "status": "completed"
+  },
+  {
+    "content": "i18n: add new keys to en.json",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + esbuild + screenshot smoke test on preview pod",
     "status": "completed"
   }
 ]

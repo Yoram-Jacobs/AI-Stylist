@@ -475,7 +475,15 @@ async def _fill_gaps_from_closet(
             continue
         item = await repos.find_one(
             db.closet_items,
-            {"user_id": user_id, **cat_filter},
+            {
+                "user_id": user_id,
+                # Phase Z2 \u2014 skip user-approved duplicates so we
+                # never recommend the same polo twice in one outfit
+                # session and so the Stylist Brain can't hallucinate
+                # "you have two of these" advice.
+                "is_duplicate": {"$ne": True},
+                **cat_filter,
+            },
             sort=[("wear_count", 1), ("created_at", -1)],
         )
         if not item:
