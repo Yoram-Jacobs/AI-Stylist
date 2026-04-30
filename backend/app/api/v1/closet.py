@@ -116,6 +116,11 @@ class CreateItemIn(BaseModel):
     source_sha256: str | None = None
     source_filename: str | None = None
     source_size_bytes: int | None = None
+    # Phase Z2.1 — 64-bit average-hash of the user's incoming photo
+    # (16 hex chars), computed in-browser via the same crypto.subtle
+    # path as sha256. Catches re-uploads even when the bytes differ
+    # (e.g. JPEG re-compression). Optional.
+    source_phash: str | None = None
     # Set when the user explicitly approves a photo the pre-flight
     # flagged as already in their closet. Closet card renders a red ⭐
     # and the Stylist Brain skips it during outfit composition.
@@ -226,9 +231,24 @@ async def create_item(
         source_sha256=payload.source_sha256,
         source_filename=payload.source_filename,
         source_size_bytes=payload.source_size_bytes,
+        source_phash=payload.source_phash,
         is_duplicate=payload.is_duplicate,
     )
     doc = item.model_dump()
+
+    # Phase Z2.1 — if the client didn't compute a phash (older client,
+    # camera capture, etc.) AND we have raw bytes here, compute one
+    # server-side so this item is immediately searchable by /preflight
+    # without waiting for the lazy backfill cycle.
+    if not doc.get("source_phash") and raw_bytes:
+        try:
+            from app.services.image_hash import average_hash
+
+            ph = average_hash(raw_bytes)
+            if ph:
+                doc["source_phash"] = ph
+        except Exception:  # noqa: BLE001
+            pass
 
     # Phase Q — persist the reconstructed image (data URL) when supplied.
     if payload.reconstructed_image_b64:
@@ -330,9 +350,12 @@ async def create_item(
 class PreflightPhotoIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # SHA-256 hex digest of the raw file bytes (64 lowercase chars).
-    # We don't enforce the length \u2014 if a client sends garbage it
-    # simply matches no one and the photo proceeds to analysis as new.
-    sha256: str
+    # Catches exact-byte re-uploads.
+    sha256: str | None = None
+    # 16-char hex aHash. Catches visually-identical re-uploads even
+    # after JPEG re-compression / resizing. Optional — the frontend
+    # computes it via canvas + the in-browser hashing helper.
+    phash: str | None = None
     # Optional, surfaced back to the UI so the dialog can show
     # "IMG_1742.jpg looks like a duplicate of \u2026".
     filename: str | None = None
@@ -349,26 +372,41 @@ async def preflight_duplicates(
     payload: PreflightIn, user: dict = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Return any closet entries that already carry one of the supplied
-    SHA-256 hashes. The response is structured for direct rendering by
-    the duplicate-confirm dialog: each match carries the existing item's
-    id, title, ``thumbnail_data_url`` (or fallback) and the incoming
+    SHA-256 / aHash values. The response is structured for direct
+    rendering by the duplicate-confirm dialog: each match carries the
+    existing item's id, title, ``thumbnail_data_url`` and the incoming
     photo's filename so the UI can show side-by-side previews.
+
+    Matching strategy (cheapest first):
+      1. ``source_sha256`` exact match — catches re-uploads of the
+         exact JPEG bytes for items uploaded after Phase Z2 shipped.
+      2. ``source_phash`` Hamming distance \u2264 6 bits — catches
+         visual duplicates including legacy items whose original
+         bytes were never stored. We lazily compute and persist the
+         phash for any closet item that doesn't have one yet, so the
+         backfill happens in the background as users use the app.
     """
+    from app.services.image_hash import (
+        DEFAULT_HAMMING_THRESHOLD,
+        average_hash,
+        hamming_distance,
+    )
+
     db = get_db()
     if not payload.photos:
         return {"matches": []}
 
-    hashes = [p.sha256 for p in payload.photos if p.sha256]
-    if not hashes:
+    sha_set = {p.sha256 for p in payload.photos if p.sha256}
+    has_any_fp = bool(sha_set) or any(p.phash for p in payload.photos)
+    if not has_any_fp:
         return {"matches": []}
 
-    # One round-trip; ``$in`` is index-friendly. Project only fields
-    # the dialog needs so we don't ship 28 base64-encoded images back.
+    # Single round-trip: pull the user's whole closet (id + hash
+    # fields + a thumbnail for the dialog). Even at 500+ items this
+    # is sub-100 ms on a warm Mongo and the projection keeps the
+    # payload small.
     cursor = db.closet_items.find(
-        {
-            "user_id": user["id"],
-            "source_sha256": {"$in": hashes},
-        },
+        {"user_id": user["id"]},
         {
             "_id": 0,
             "id": 1,
@@ -381,41 +419,113 @@ async def preflight_duplicates(
             "segmented_image_url": 1,
             "original_image_url": 1,
             "source_sha256": 1,
+            "source_phash": 1,
             "source_filename": 1,
             "source_size_bytes": 1,
             "is_duplicate": 1,
         },
     )
-    by_hash: dict[str, dict[str, Any]] = {}
-    async for row in cursor:
-        h = row.get("source_sha256")
-        if not h or h in by_hash:
-            continue
-        by_hash[h] = {
-            "id": row.get("id"),
-            "title": row.get("title") or row.get("name") or "Existing item",
-            "item_type": row.get("item_type"),
-            "sub_category": row.get("sub_category"),
-            "color": row.get("color"),
-            "thumbnail_data_url": (
-                row.get("thumbnail_data_url")
-                or row.get("segmented_image_url")
-                or row.get("original_image_url")
-            ),
-            "is_duplicate": bool(row.get("is_duplicate")),
-        }
 
-    matches: list[dict[str, Any]] = []
-    for p in payload.photos:
-        existing = by_hash.get(p.sha256)
-        if not existing:
+    candidates: list[dict[str, Any]] = []
+    async for row in cursor:
+        candidates.append(row)
+
+    # Lazy phash backfill: any candidate missing source_phash gets
+    # one computed from whichever stored image we can find. The first
+    # /preflight call after deployment may touch every legacy row, so
+    # we cap parallelism implicitly by doing this synchronously in a
+    # single request (~3 ms per row, total < 1 s for a 200-item
+    # closet). Subsequent calls hit the cached hash.
+    backfill_writes: list[tuple[str, str]] = []
+    for row in candidates:
+        if row.get("source_phash"):
             continue
+        src = (
+            row.get("thumbnail_data_url")
+            or row.get("segmented_image_url")
+            or row.get("original_image_url")
+        )
+        if not src:
+            continue
+        ph = average_hash(src)
+        if ph:
+            row["source_phash"] = ph
+            backfill_writes.append((row["id"], ph))
+    # Persist backfilled hashes in one bulk update so future
+    # /preflight calls skip the recompute.
+    if backfill_writes:
+        try:
+            from pymongo import UpdateOne
+
+            ops = [
+                UpdateOne(
+                    {"id": item_id, "user_id": user["id"]},
+                    {"$set": {"source_phash": ph}},
+                )
+                for item_id, ph in backfill_writes
+            ]
+            await db.closet_items.bulk_write(ops, ordered=False)
+        except Exception:  # noqa: BLE001
+            # Backfill is best-effort; if Mongo write fails the user
+            # still gets a correct response, we just recompute next
+            # time.
+            pass
+
+    # Resolve matches.
+    matches: list[dict[str, Any]] = []
+    seen_per_photo: set[str] = set()
+    for p in payload.photos:
+        # Prefer sha256 exact match — fastest, zero false-positive.
+        existing_match: dict[str, Any] | None = None
+        if p.sha256:
+            existing_match = next(
+                (
+                    r
+                    for r in candidates
+                    if r.get("source_sha256") == p.sha256
+                ),
+                None,
+            )
+        # Fall back to phash within Hamming threshold.
+        if existing_match is None and p.phash:
+            best_dist = DEFAULT_HAMMING_THRESHOLD + 1
+            for r in candidates:
+                d = hamming_distance(p.phash, r.get("source_phash"))
+                if d <= DEFAULT_HAMMING_THRESHOLD and d < best_dist:
+                    best_dist = d
+                    existing_match = r
+
+        if existing_match is None:
+            continue
+        # De-dupe across the same incoming photo (a bytewise dup of
+        # itself would otherwise appear twice if both sha256 and
+        # phash matched).
+        key = f"{p.sha256 or ''}|{p.phash or ''}"
+        if key in seen_per_photo:
+            continue
+        seen_per_photo.add(key)
+
         matches.append(
             {
                 "sha256": p.sha256,
+                "phash": p.phash,
                 "filename": p.filename,
                 "size_bytes": p.size_bytes,
-                "existing": existing,
+                "existing": {
+                    "id": existing_match.get("id"),
+                    "title": existing_match.get("title")
+                    or existing_match.get("name")
+                    or "Existing item",
+                    "item_type": existing_match.get("item_type"),
+                    "sub_category": existing_match.get("sub_category"),
+                    "color": existing_match.get("color"),
+                    "thumbnail_data_url": (
+                        existing_match.get("thumbnail_data_url")
+                        or existing_match.get("segmented_image_url")
+                        or existing_match.get("original_image_url")
+                    ),
+                    "is_duplicate": bool(existing_match.get("is_duplicate")),
+                },
             }
         )
     return {"matches": matches}

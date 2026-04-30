@@ -53,23 +53,23 @@ export default function DuplicatePreflightDialog({
     // a brand-new upload session.
     const init = {};
     (matches || []).forEach((m) => {
-      init[m.sha256] = "skip";
+      init[m.matchKey] = "skip";
     });
     setDecisions(init);
   }, [open, matches]);
 
-  const handleRow = (sha, choice) =>
-    setDecisions((prev) => ({ ...prev, [sha]: choice }));
+  const handleRow = (key, choice) =>
+    setDecisions((prev) => ({ ...prev, [key]: choice }));
 
   const skipAll = () => {
     const all = {};
-    (matches || []).forEach((m) => (all[m.sha256] = "skip"));
+    (matches || []).forEach((m) => (all[m.matchKey] = "skip"));
     onResolve(all);
   };
 
   const addAll = () => {
     const all = {};
-    (matches || []).forEach((m) => (all[m.sha256] = "add"));
+    (matches || []).forEach((m) => (all[m.matchKey] = "add"));
     onResolve(all);
   };
 
@@ -113,12 +113,13 @@ export default function DuplicatePreflightDialog({
             data-testid="duplicate-preflight-list"
           >
             {(matches || []).map((m) => {
-              const decision = decisions[m.sha256] || "skip";
+              const decision = decisions[m.matchKey] || "skip";
+              const shortKey = (m.matchKey || "").slice(0, 8);
               return (
                 <div
-                  key={m.sha256}
+                  key={m.matchKey}
                   className="flex items-stretch gap-3 rounded-lg border bg-muted/30 p-3"
-                  data-testid={`duplicate-preflight-row-${m.sha256.slice(0, 8)}`}
+                  data-testid={`duplicate-preflight-row-${shortKey}`}
                 >
                   {/* Existing closet thumbnail */}
                   <div className="flex shrink-0 flex-col items-center gap-1">
@@ -196,8 +197,8 @@ export default function DuplicatePreflightDialog({
                         type="button"
                         variant={decision === "skip" ? "default" : "outline"}
                         size="sm"
-                        onClick={() => handleRow(m.sha256, "skip")}
-                        data-testid={`duplicate-preflight-skip-${m.sha256.slice(0, 8)}`}
+                        onClick={() => handleRow(m.matchKey, "skip")}
+                        data-testid={`duplicate-preflight-skip-${shortKey}`}
                       >
                         <X className="mr-1 h-3.5 w-3.5" />
                         {t("addItem.preflight.rowSkip", {
@@ -208,13 +209,13 @@ export default function DuplicatePreflightDialog({
                         type="button"
                         variant={decision === "add" ? "default" : "outline"}
                         size="sm"
-                        onClick={() => handleRow(m.sha256, "add")}
+                        onClick={() => handleRow(m.matchKey, "add")}
                         className={
                           decision === "add"
                             ? "bg-rose-600 text-white hover:bg-rose-600/90"
                             : ""
                         }
-                        data-testid={`duplicate-preflight-add-${m.sha256.slice(0, 8)}`}
+                        data-testid={`duplicate-preflight-add-${shortKey}`}
                       >
                         <Star
                           className={`mr-1 h-3.5 w-3.5 ${

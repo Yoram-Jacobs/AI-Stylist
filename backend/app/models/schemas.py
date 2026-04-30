@@ -209,6 +209,13 @@ class ClosetItem(BaseDoc):
     source_sha256: str | None = None
     source_filename: str | None = None
     source_size_bytes: int | None = None
+    # Phase Z2.1 — 64-bit average-hash of the photo (16-char hex).
+    # Used by /closet/preflight to catch visual duplicates of legacy
+    # items whose ``source_sha256`` was never captured (the original
+    # bytes weren't stored). Backfilled lazily from
+    # ``thumbnail_data_url`` / ``segmented_image_url`` / etc. on the
+    # first /preflight call that touches the row.
+    source_phash: str | None = None
     # Set to ``True`` when the user explicitly approved adding a photo
     # the pre-flight flagged as a duplicate. The closet UI overlays a
     # red ⭐ on these cards, and the Stylist Brain filters them out of

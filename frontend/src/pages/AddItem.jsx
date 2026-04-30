@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { sha256File } from '@/lib/utils';
+import { sha256File, aHashFile } from '@/lib/utils';
 import DuplicatePreflightDialog from '@/components/DuplicatePreflightDialog';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
@@ -226,20 +226,31 @@ export default function AddItem() {
     // / Gemini / SegFormer cost is incurred.
     // ----------------------------------------------------------------
     const fingerprints = await Promise.all(
-      files.map(async (f) => ({
-        file: f,
-        sha256: await sha256File(f),
-        filename: f.name || null,
-        size_bytes: typeof f.size === 'number' ? f.size : null,
-      })),
+      files.map(async (f) => {
+        // Compute both hashes in parallel — sha256 catches exact-byte
+        // re-uploads (post-Z2 items), aHash catches visual duplicates
+        // including legacy items whose original bytes weren't stored.
+        const [sha256, phash] = await Promise.all([
+          sha256File(f),
+          aHashFile(f),
+        ]);
+        return {
+          file: f,
+          sha256,
+          phash,
+          filename: f.name || null,
+          size_bytes: typeof f.size === 'number' ? f.size : null,
+        };
+      }),
     );
 
     let matches = [];
     try {
       const fpForApi = fingerprints
-        .filter((fp) => fp.sha256)
+        .filter((fp) => fp.sha256 || fp.phash)
         .map((fp) => ({
-          sha256: fp.sha256,
+          sha256: fp.sha256 || null,
+          phash: fp.phash || null,
           filename: fp.filename,
           size_bytes: fp.size_bytes,
         }));
@@ -270,9 +281,18 @@ export default function AddItem() {
     // chosen behaviour (option 2B). Track the count so the final
     // toast can mention them.
     if (isBatch) {
-      const dupHashes = new Set(matches.map((m) => m.sha256));
+      // A photo is a duplicate if the backend returned a match keyed
+      // by EITHER its sha256 OR its phash. Build the lookup against
+      // both fingerprints so we can correlate back to the surviving
+      // file list.
+      const dupShas = new Set(matches.map((m) => m.sha256).filter(Boolean));
+      const dupPhashes = new Set(matches.map((m) => m.phash).filter(Boolean));
       const survivors = fingerprints
-        .filter((fp) => !fp.sha256 || !dupHashes.has(fp.sha256))
+        .filter(
+          (fp) =>
+            !(fp.sha256 && dupShas.has(fp.sha256)) &&
+            !(fp.phash && dupPhashes.has(fp.phash)),
+        )
         .map((fp) => fp.file);
       const skipped = files.length - survivors.length;
       if (!survivors.length) {
@@ -291,11 +311,21 @@ export default function AddItem() {
     // dialog. We need previewUrls *now* (data: URLs computed from the
     // already-read base64) so the dialog can show side-by-side
     // thumbnails without a network round-trip.
+    //
+    // Each match gets a stable composite key (sha256 || phash) so
+    // the dialog's per-row decision map can survive matches that
+    // only carry one fingerprint or the other (sha256-only for
+    // post-Z2 items, phash-only for legacy items).
     const matchesEnriched = matches.map((m) => {
-      const fp = fingerprints.find((x) => x.sha256 === m.sha256);
+      const fp = fingerprints.find(
+        (x) =>
+          (m.sha256 && x.sha256 === m.sha256) ||
+          (m.phash && x.phash === m.phash),
+      );
       const file = fp?.file;
       const previewUrl = file ? URL.createObjectURL(file) : null;
-      return { ...m, previewUrl };
+      const matchKey = m.sha256 || m.phash || `${m.filename}-${m.size_bytes}`;
+      return { ...m, previewUrl, matchKey };
     });
 
     setPreflight({
@@ -308,10 +338,21 @@ export default function AddItem() {
           }
         });
         setPreflight(null);
-        // ``decisions`` is { sha256: 'add' | 'skip' }. Map back onto
-        // fingerprints — sha256 absent or 'skip' = drop.
+
+        // ``decisions`` is { matchKey: 'add' | 'skip' }.
+        // Map back onto fingerprints by either sha256 or phash.
+        const decisionFor = (fp) => {
+          for (const m of matchesEnriched) {
+            const matched =
+              (m.sha256 && fp.sha256 === m.sha256) ||
+              (m.phash && fp.phash === m.phash);
+            if (matched) return decisions[m.matchKey];
+          }
+          return undefined;
+        };
+
         const survivors = fingerprints.filter((fp) => {
-          const choice = decisions[fp.sha256];
+          const choice = decisionFor(fp);
           if (choice === undefined) return true; // wasn't a duplicate
           return choice === 'add';
         });
@@ -326,10 +367,14 @@ export default function AddItem() {
         }
         // Per-photo "this one is a known duplicate" map so cards can
         // carry it through to /closet POST and the closet UI can
-        // paint the red ⭐.
-        const acks = {};
-        Object.entries(decisions).forEach(([sha, ch]) => {
-          if (ch === 'add') acks[sha] = true;
+        // paint the red ⭐. Indexed by both sha256 and phash for
+        // robust lookup.
+        const acks = { sha: new Set(), ph: new Set() };
+        matchesEnriched.forEach((m) => {
+          if (decisions[m.matchKey] === 'add') {
+            if (m.sha256) acks.sha.add(m.sha256);
+            if (m.phash) acks.ph.add(m.phash);
+          }
         });
         continueInteractive(survivors, acks);
       },
@@ -338,14 +383,22 @@ export default function AddItem() {
 
   // Carved out of handleFiles so the pre-flight dialog can call it
   // after the user resolves the duplicates list. ``fingerprints`` is
-  // the post-filter array of {file, sha256, filename, size_bytes};
-  // ``duplicateAcks`` is sha256 → true for the ones the user
+  // the post-filter array of {file, sha256, phash, filename, size_bytes};
+  // ``duplicateAcks`` is {sha:Set, ph:Set} of fingerprints the user
   // explicitly approved as duplicates.
   const continueInteractive = async (fingerprints, duplicateAcks) => {
+    // Normalise the empty-call case from the no-duplicates path.
+    const acks =
+      duplicateAcks && (duplicateAcks.sha || duplicateAcks.ph)
+        ? duplicateAcks
+        : { sha: new Set(), ph: new Set() };
     const drafts = await Promise.all(
       fingerprints.map(async (fp) => {
         const file = fp.file;
         const b64 = await fileToBase64(file);
+        const isDup =
+          (fp.sha256 && acks.sha.has(fp.sha256)) ||
+          (fp.phash && acks.ph.has(fp.phash));
         return {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           file,
@@ -361,9 +414,10 @@ export default function AddItem() {
           // buildCreatePayload can hand them to /closet POST and the
           // backend can persist them on the ClosetItem document.
           sourceSha256: fp.sha256 || null,
+          sourcePhash: fp.phash || null,
           sourceFilename: fp.filename || null,
           sourceSizeBytes: fp.size_bytes || null,
-          isDuplicate: !!duplicateAcks[fp.sha256],
+          isDuplicate: !!isDup,
         };
       }),
     );
@@ -442,13 +496,19 @@ export default function AddItem() {
       // gate would have dropped them; the hash is stored so *future*
       // uploads of the same file are caught for free.)
       let sha256 = null;
+      let phash = null;
       try {
-        sha256 = await sha256File(file);
+        [sha256, phash] = await Promise.all([
+          sha256File(file),
+          aHashFile(file),
+        ]);
       } catch (_) {
         sha256 = null;
+        phash = null;
       }
       const sourceMeta = {
         sourceSha256: sha256,
+        sourcePhash: phash,
         sourceFilename: file?.name || null,
         sourceSizeBytes: typeof file?.size === 'number' ? file.size : null,
       };
@@ -1661,6 +1721,7 @@ function buildCreatePayload(card) {
     // the same JPEG get caught by /closet/preflight, and the closet
     // card knows whether to paint the red ⭐ overlay.
     source_sha256: card.sourceSha256 || undefined,
+    source_phash: card.sourcePhash || undefined,
     source_filename: card.sourceFilename || undefined,
     source_size_bytes:
       typeof card.sourceSizeBytes === 'number' ? card.sourceSizeBytes : undefined,
