@@ -221,6 +221,31 @@ Goal: make `https://ai-stylist-api.emergent.host` function with equivalent user-
   - README: dual-deploy story + requirements split.
   - ARCHITECTURE.md: updated deployment modes, `_ANALYZE_LOCK`, `/reanalyze`, dual-deploy.
 
+#### Z.9 — Address autocomplete (Settings → Contact) **(DONE & VISUALLY VERIFIED)**
+- New `frontend/src/components/CountryCombobox.jsx`
+  - cmdk-powered Popover; flag emoji + localised name (Intl.DisplayNames) + ISO-2 fallback search.
+  - Free-text country still allowed (backend stores name as text).
+- New `frontend/src/components/AddressAutocomplete.jsx`
+  - Debounced (400 ms) calls to public Nominatim `/search` (no API key).
+  - `kind="city" | "street"`, country-biased, auto-cancels in-flight requests on each keystroke.
+  - Picking a suggestion fires structured `{line1,city,region,postal_code,country,country_code}` patch.
+- `ProfileDetailsCard.jsx` Contact accordion now uses both, with
+  resolved-country code piped from CountryCombobox into both
+  AddressAutocomplete instances.
+- Verified live in preview pod (3 screenshots): country search "germ"
+  → 🇩🇪 Germany; street "Brandenburger T" → 2 real OSM hits with
+  city/region in secondary line.
+
+#### Z.10 — `dressapp.co` production triage **(DONE — handed off to user)**
+- Diagnosed `dressapp.co` 405 / 404 responses on `/api/*` as a DNS-layer
+  issue — domain still points at AWS infra (which 301-redirects `/` to
+  the now-deprecated `ai-stylist-api.emergent.host` and rejects every
+  `/api/*` POST).
+- Confirmed Hetzner-side code is correct (`POST /auth/dev-bypass`
+  registered; preview pod login succeeds).
+- Wrote `/app/HETZNER_RECOVERY.md` — exact 10-step DNS + redeploy
+  checklist for the user to execute on their VPS.
+
 ---
 
 ### Phase Q+ — Wardrobe Reconstructor migration note **(SHIPPED)**
