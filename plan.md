@@ -246,6 +246,44 @@ Goal: make `https://ai-stylist-api.emergent.host` function with equivalent user-
 - Wrote `/app/HETZNER_RECOVERY.md` — exact 10-step DNS + redeploy
   checklist for the user to execute on their VPS.
 
+#### Z.11 — Batch upload duplicate-detection regression fix **(DONE)**
+- **Symptom:** uploading >5 photos via background batch silently saved
+  every analysed result — including items the analyzer flagged as
+  potential duplicates of existing closet entries — because
+  `handleBatchBackground` never read `it.potential_duplicate`.
+  Interactive (≤5 photo) path was unaffected: the `DuplicateConfirmDialog`
+  is wired only off the foreground `cards` array.
+- **Backend was already correct:** `find_potential_duplicate` matches on
+  case-insensitive `item_type` + `sub_category` + dominant colour (and
+  brand when both items carry one); `/closet/analyze` attaches the
+  result onto each returned item.
+- **Frontend fix** (`pages/AddItem.jsx`):
+  - `handleBatchBackground` now checks `it.potential_duplicate`. When
+    set, it pushes the analysed crop into the interactive `cards` array
+    (with a new `pendingBatchSave` flag) instead of auto-saving, and
+    increments a new `bgBatch.pendingDuplicates` counter.
+  - `DuplicateConfirmDialog`'s `onConfirm` upgraded: for cards with
+    `pendingBatchSave: true`, it immediately POSTs `/closet`, removes
+    the card from state, and bumps `bgBatch.saved` — preserving the
+    original "fire-and-forget" feel of the batch flow. Foreground
+    cards still just stamp `duplicateConfirmed: true` and wait for
+    Save All.
+  - Final-toast nav logic now suppresses the auto-redirect to `/closet`
+    when `pendingDuplicates > 0`, so the user can review the dialog
+    queue first.
+  - Inline amber-text counter on the batch progress card surfaces how
+    many duplicates are awaiting confirmation.
+- **i18n:** added `addItem.bgUpload.duplicatesPending`,
+  `addItem.bgUpload.duplicatesInline`,
+  `addItem.bgUpload.partialAnalyze` and `addItem.duplicate.saveFailed`
+  to `en.json`; other locales fall back to their inline `defaultValue`
+  via i18next's standard fallback.
+- **Verification:** ESLint clean, `en.json` valid JSON, esbuild bundle
+  compiles, `/closet/add` renders cleanly in preview pod (the
+  pre-existing third-party `Unexpected token '}'` pageerror is
+  unrelated and present on every route including `/login` even with
+  this change stashed).
+
 ---
 
 ### Phase Q+ — Wardrobe Reconstructor migration note **(SHIPPED)**
