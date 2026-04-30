@@ -1,34 +1,26 @@
 [
   {
-    "content": "Run full backend ruff lint (all of /app/backend/app)",
-    "status": "completed"
+    "content": "Bundle a static ISO country dataset (lib/countries.js)",
+    "status": "in_progress"
   },
   {
-    "content": "Run full frontend ESLint on /app/frontend/src",
-    "status": "completed"
+    "content": "Build CountryCombobox component using shadcn Command + Popover",
+    "status": "pending"
   },
   {
-    "content": "esbuild compile-check on the entire frontend",
-    "status": "completed"
+    "content": "Build AddressAutocomplete (city + street) using Nominatim with debounced search",
+    "status": "pending"
   },
   {
-    "content": "JSON validity check on all locale files",
-    "status": "completed"
+    "content": "Wire all three into ProfileDetailsCard Contact accordion + add autocomplete attrs",
+    "status": "pending"
   },
   {
-    "content": "Update README.md with the new dual-deploy story (Hetzner + Emergent host) and new requirements-ml.txt split",
-    "status": "completed"
+    "content": "Add i18n strings (en + he)",
+    "status": "pending"
   },
   {
-    "content": "Update docs/ARCHITECTURE.md with the lazy-ML / auto-detect flow + new endpoints (/reanalyze)",
-    "status": "completed"
-  },
-  {
-    "content": "Update plan.md with the latest phase status (UX polish, batch-OOM, edit-page taxonomy + Analyze, dual-deploy)",
-    "status": "completed"
-  },
-  {
-    "content": "Final smoke check + summary",
-    "status": "completed"
+    "content": "Lint + esbuild + screenshot smoke test",
+    "status": "pending"
   }
 ]
