@@ -617,7 +617,7 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
             outfit suggestions won't double-count it." */}
         {item.is_duplicate && (
           <div
-            className="absolute top-2 left-2 h-7 w-7 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md ring-2 ring-background"
+            className={`absolute ${typeof score === 'number' ? 'top-10' : 'top-2'} right-2 h-7 w-7 rounded-full bg-rose-600 text-white flex items-center justify-center shadow-md ring-2 ring-background`}
             title={t('closet.duplicateBadge', {
               defaultValue:
                 'Marked as a duplicate — kept on purpose, hidden from outfit suggestions.',
