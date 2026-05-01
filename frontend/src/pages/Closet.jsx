@@ -114,6 +114,22 @@ export default function Closet() {
 
   useEffect(() => { fetchItems(); }, [filters.category, filters.source, fetchItems]);
 
+  // Debounced live-search for keyword mode — typing updates the
+  // closet grid after ~300 ms of inactivity, matching standard
+  // search-bar UX so the user doesn't have to hit Enter. We
+  // deliberately skip this for ``meaning`` mode because the
+  // semantic search hits an LLM-grade endpoint that's expensive to
+  // call per keystroke; users still submit that one explicitly via
+  // the Search button.
+  useEffect(() => {
+    if (searchMode !== 'keyword') return undefined;
+    // Skip the initial mount fire for empty searches — the main
+    // ``fetchItems`` effect above already runs on mount.
+    const handle = setTimeout(() => { fetchItems(); }, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.search, searchMode]);
+
   const onSearch = (e) => {
     e.preventDefault();
     const q = filters.search.trim();
@@ -122,6 +138,15 @@ export default function Closet() {
     } else {
       fetchItems();
     }
+  };
+
+  // "x" button inside the search input — clears the query and
+  // re-fetches without needing an extra trip through Enter / Search.
+  const clearSearch = () => {
+    setSemanticActive(false);
+    setFilters((f) => ({ ...f, search: '' }));
+    // Let the debounced effect handle the actual re-fetch on the
+    // next tick so we don't double-fire.
   };
 
   const clearSemantic = () => {
@@ -263,9 +288,23 @@ export default function Closet() {
                   ? t('closet.semanticHint')
                   : t('closet.searchPlaceholder')
               }
-              className="pl-9 pr-24 rounded-xl"
+              className={`pl-9 ${filters.search ? 'pr-40' : 'pr-24'} rounded-xl`}
               data-testid="closet-search-input"
             />
+            {/* Clear (x) button — only appears when there's text, so
+                the in-input mode switch stays visible when the field
+                is empty. Sits to the left of the Keyword/Meaning pill. */}
+            {filters.search && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                aria-label={t('common.clear', { defaultValue: 'Clear search' })}
+                data-testid="closet-search-clear"
+                className="absolute right-[9.25rem] top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-foreground/15 hover:text-foreground flex items-center justify-center transition-colors"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
             {/* In-input mode switch */}
             <div
               className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center rounded-lg bg-secondary/70 p-0.5"
