@@ -1,42 +1,26 @@
 [
   {
-    "content": "Read ClosetItem model + create endpoint to plan field additions",
+    "content": "Verify dev pod services are running",
     "status": "completed"
   },
   {
-    "content": "Backend: add source_sha256/filename/size + is_duplicate to ClosetItem model + create endpoint",
+    "content": "Review preflight endpoint, image_hash service, and DuplicatePreflightDialog implementation",
     "status": "completed"
   },
   {
-    "content": "Backend: add POST /closet/preflight endpoint",
+    "content": "Test backend /api/v1/closet/preflight endpoint with curl",
     "status": "completed"
   },
   {
-    "content": "Backend: filter is_duplicate=true from Stylist Brain recommendation queries",
+    "content": "Run frontend lint check on AddItem.jsx and DuplicatePreflightDialog.jsx",
     "status": "completed"
   },
   {
-    "content": "Frontend: client-side sha256 helper + AddItem.jsx integration",
+    "content": "Verify Stylist Brain excludes is_duplicate items",
     "status": "completed"
   },
   {
-    "content": "Frontend: build DuplicatePreflightDialog (interactive ≤5 path)",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: silent skip + final-toast count for >5 batch path",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: red star overlay on closet item cards where is_duplicate=true",
-    "status": "completed"
-  },
-  {
-    "content": "i18n: add new keys to en.json",
-    "status": "completed"
-  },
-  {
-    "content": "Lint + esbuild + screenshot smoke test on preview pod",
-    "status": "completed"
+    "content": "Test end-to-end duplicate detection flow with testing agent (browser)",
+    "status": "in_progress"
   }
 ]
