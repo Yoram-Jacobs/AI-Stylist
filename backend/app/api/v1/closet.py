@@ -768,6 +768,25 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
         markers["category_synonyms_v1"] = (
             "_CATEGORY_SYNONYMS" in list_src and "footwear" in list_src.lower()
         )
+        # Marketplace cleanup — confirms DELETE /closet/{id} retires
+        # any draft/active listings linked via closet_item_id.
+        del_src = inspect.getsource(delete_item)
+        markers["listing_retire_on_closet_delete_v1"] = (
+            "retire_res" in del_src and "db.listings.update_many" in del_src
+        )
+        # Wave 1 marketplace features — auto-list on share, listing
+        # detail seller location, post-sale email dispatch.
+        upd_src = inspect.getsource(update_item)
+        markers["auto_list_on_share_v1"] = (
+            "auto_created=True" in upd_src and 'mode="swap"' in upd_src
+        )
+        # Email service availability — green only when RESEND_API_KEY
+        # is set in env. Independent of code path execution.
+        try:
+            from app.services import email_service as _es
+            markers["email_service_v1"] = _es.is_configured()
+        except Exception:  # noqa: BLE001
+            markers["email_service_v1"] = False
     except Exception as exc:  # noqa: BLE001
         markers["preflight_marker_error"] = repr(exc)
 
@@ -2000,11 +2019,103 @@ async def update_item(
         patch["reconstructed_image_url"] = None
         patch["reconstruction_metadata"] = None
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    db = get_db()
+    # Snapshot the prior source so we can detect the Private→Shared
+    # transition AFTER the update commits.
+    prior = await db.closet_items.find_one(
+        {"id": item_id, "user_id": user["id"]},
+        {"_id": 0, "source": 1},
+    )
     updated = await repos.update(
-        get_db().closet_items, {"id": item_id, "user_id": user["id"]}, patch
+        db.closet_items, {"id": item_id, "user_id": user["id"]}, patch
     )
     if not updated:
         raise HTTPException(404, "Item not found")
+
+    # Marketplace auto-list: when a closet item flips from Private to
+    # Shared, spin up an *active* listing on the marketplace so the
+    # item is immediately visible. The listing is created with sane
+    # defaults (mode='swap', list_price_cents=0) and an
+    # ``auto_created=True`` flag so the closet card can show a
+    # "Complete listing" CTA inviting the seller to refine price /
+    # mode / description before serious browsing happens. We never
+    # create more than one auto-listing per closet item.
+    new_source = patch.get("source")
+    prior_source = (prior or {}).get("source")
+    if new_source == "Shared" and prior_source != "Shared":
+        try:
+            existing = await db.listings.find_one(
+                {"closet_item_id": item_id, "seller_id": user["id"]},
+                {"_id": 0, "id": 1, "status": 1},
+            )
+            if existing and existing.get("status") in ("draft", "active", "reserved"):
+                # Already has a live listing — don't double-list.
+                pass
+            else:
+                # Build a minimal listing using info already on the
+                # closet item. We import lazily so closet.py doesn't
+                # take a hard dep on the listings module at import time.
+                from app.models.schemas import (
+                    FinancialMetadata,
+                    Listing,
+                )
+                images: list[str] = []
+                for fld in (
+                    "thumbnail_data_url",
+                    "segmented_image_url",
+                    "reconstructed_image_url",
+                    "original_image_url",
+                ):
+                    url = updated.get(fld)
+                    if isinstance(url, str) and url:
+                        images.append(url)
+                        break
+                listing = Listing(
+                    closet_item_id=item_id,
+                    seller_id=user["id"],
+                    source="Shared",
+                    mode="swap",
+                    title=updated.get("title") or "Untitled",
+                    description=updated.get("description"),
+                    category=updated.get("category") or "Top",
+                    size=updated.get("size"),
+                    condition=(
+                        updated.get("condition") or updated.get("state") or "good"
+                    ),
+                    images=images,
+                    location=updated.get("location"),
+                    financial_metadata=FinancialMetadata(
+                        list_price_cents=0,
+                        currency="USD",
+                        platform_fee_percent=0.0,
+                        estimated_seller_net_cents=0,
+                    ),
+                    auto_created=True,
+                    status="active",
+                )
+                await repos.insert(db.listings, listing.model_dump())
+                # Stamp the new listing id back on the closet item so
+                # the closet card UI can render a "Complete listing"
+                # CTA without a second round-trip.
+                await db.closet_items.update_one(
+                    {"id": item_id, "user_id": user["id"]},
+                    {"$set": {
+                        "auto_listing_id": listing.id,
+                        "auto_listing_needs_completion": True,
+                    }},
+                )
+                # Refresh in-memory copy so the response carries the
+                # new fields too.
+                updated["auto_listing_id"] = listing.id
+                updated["auto_listing_needs_completion"] = True
+                logger.info(
+                    "auto-listed closet item %s as listing %s", item_id, listing.id
+                )
+        except Exception as exc:  # noqa: BLE001
+            # Auto-list is a UX nicety — never block the underlying
+            # closet update if it fails.
+            logger.warning("auto-list failed for %s: %s", item_id, exc)
+
     return updated
 
 
@@ -2028,6 +2139,52 @@ async def delete_item(
     )
     if not deleted:
         raise HTTPException(404, "Item not found")
+
+    # Marketplace cleanup — when a user deletes a closet item that
+    # is linked to one or more listings, silently retire the open
+    # listings so the item doesn't linger on the marketplace with
+    # dead images. We only touch ``draft`` and ``active`` listings:
+    #
+    #   * ``draft``    — never published, safe to mark ``removed``.
+    #   * ``active``   — visible to buyers, flip to ``removed`` so
+    #                    the browse grid and direct links render a
+    #                    graceful "no longer available" state
+    #                    instead of 404'ing on the missing item.
+    #   * ``reserved`` — a buyer is mid-transaction; DO NOT touch.
+    #                    The seller can still delete their closet
+    #                    row (their records are theirs) but the
+    #                    listing stays alive until the reservation
+    #                    resolves, which is the buyer-protective
+    #                    behaviour we want.
+    #   * ``sold``     — already exchanged hands; leave as history.
+    #   * ``removed``  — already gone; nothing to do.
+    try:
+        retire_res = await db.listings.update_many(
+            {
+                "closet_item_id": item_id,
+                "seller_id": user["id"],
+                "status": {"$in": ["draft", "active"]},
+            },
+            {
+                "$set": {
+                    "status": "removed",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        if retire_res.modified_count:
+            logger.info(
+                "closet delete: retired %d listing(s) linked to %s",
+                retire_res.modified_count,
+                item_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Listing cleanup is a best-effort companion to the delete;
+        # never let a listings write failure raise 500 on an already
+        # successful closet delete.
+        logger.warning(
+            "listing retire failed for closet item %s: %s", item_id, exc
+        )
 
     # Phase Z2 — star auto-demotion. Scenario: user uploaded A
     # (is_duplicate=False), then approved B as a duplicate

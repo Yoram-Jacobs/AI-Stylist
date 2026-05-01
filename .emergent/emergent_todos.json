@@ -1,22 +1,30 @@
 [
   {
-    "content": "Audit existing search bar components in Closet.jsx + verify backend search tests pass",
+    "content": "Install resend lib + add RESEND_API_KEY/SENDER_EMAIL to backend/.env",
     "status": "completed"
   },
   {
-    "content": "Add debounced live-search (300ms) for keyword mode so typing updates results without hitting Enter",
+    "content": "Create app/services/email_service.py with helpers + 6 HTML templates",
     "status": "completed"
   },
   {
-    "content": "Add clear (X) button inside search input, visible only when the field has text",
+    "content": "Auto-list on Share toggle: backend hook in closet update endpoint",
     "status": "completed"
   },
   {
-    "content": "Add accent-ring active state on Category + Source selects when they hold a non-default value",
+    "content": "Listing detail enriched with seller country/city (fallback to home_location)",
     "status": "completed"
   },
   {
-    "content": "Lint + compile verify — all green",
+    "content": "Wire sale-completion emails to PayPal capture/webhook handler",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: 'Complete listing' CTA on closet card for auto-created listings",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + smoke test wave 1; add /analyze/version markers",
     "status": "completed"
   }
 ]

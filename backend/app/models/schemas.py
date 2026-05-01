@@ -286,6 +286,12 @@ class Listing(BaseDoc):
     status: ListingStatus = "active"
     views: int = 0
     favorites: int = 0
+    # ``auto_created=True`` marks listings created automatically when
+    # a closet item is shared. The frontend uses this flag to display
+    # a "Complete listing" CTA on the closet card, prompting the
+    # user to refine price / mode / description before serious
+    # browsing happens.
+    auto_created: bool = False
 
 
 # ------------------------- Transactions -------------------------
