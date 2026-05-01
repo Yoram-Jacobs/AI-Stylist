@@ -17,27 +17,33 @@ export function BrandLogo({ className, size = 'md', showWordmark = true, testId 
   const { t } = useTranslation();
   // Map the size prop to matching mark height + text class. Keeping
   // both in one table makes it obvious the two scale together.
+  // Mark heights are tuned to the cap-height of the Gloock wordmark
+  // so the figure optically sits on the same baseline as the letters.
+  // The wordmark already has ``leading-none`` which drops its line-box
+  // close to its cap-height; the mark is sized to roughly match that
+  // (≈ 0.75× of the text's em-box) instead of matching the whole
+  // line-height, which otherwise makes the icon look oversized.
   const sizing = {
-    sm: { markH: 'h-6', wordClass: 'text-xl' },
-    md: { markH: 'h-7', wordClass: 'text-2xl' },
-    lg: { markH: 'h-9', wordClass: 'text-3xl' },
-    xl: { markH: 'h-12', wordClass: 'text-4xl' },
-  }[size] || { markH: 'h-7', wordClass: 'text-2xl' };
+    sm: { markH: 'h-5', wordClass: 'text-xl' },
+    md: { markH: 'h-6', wordClass: 'text-2xl' },
+    lg: { markH: 'h-7', wordClass: 'text-3xl' },
+    xl: { markH: 'h-9', wordClass: 'text-4xl' },
+  }[size] || { markH: 'h-6', wordClass: 'text-2xl' };
 
   return (
     <span
-      className={cn('inline-flex items-center gap-2.5 select-none', className)}
+      className={cn('inline-flex items-baseline gap-2 select-none', className)}
       data-testid={testId}
     >
       <img
         src="/apple-touch-icon.png"
         alt={t('brand', { defaultValue: 'DressApp' })}
-        className={cn(sizing.markH, 'w-auto shrink-0 drop-shadow-sm')}
+        className={cn(sizing.markH, 'w-auto shrink-0 self-center drop-shadow-sm')}
         loading="eager"
         decoding="async"
       />
       {showWordmark && (
-        <span className={cn('font-display leading-none', sizing.wordClass)}>
+        <span className={cn('font-display leading-none self-center', sizing.wordClass)}>
           {t('brand', { defaultValue: 'DressApp' })}
         </span>
       )}
