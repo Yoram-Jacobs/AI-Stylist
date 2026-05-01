@@ -529,4 +529,52 @@ async def listing_buy_capture(
             )
 
     final = await db.transactions.find_one({"id": tx["id"]}, {"_id": 0})
+
+    # Marketplace celebration emails — fire AFTER the transaction is
+    # safely persisted as paid. Best-effort: a failure here must
+    # never roll back a successful capture or surface a 500 to the
+    # buyer, so we wrap the whole block.
+    try:
+        from app.services import email_service as es
+
+        seller_full = await db.users.find_one({"id": tx["seller_id"]}, {"_id": 0})
+        buyer_full = await db.users.find_one({"id": tx["buyer_id"]}, {"_id": 0})
+        listing_doc = await db.listings.find_one({"id": listing_id}, {"_id": 0})
+        item_doc: dict[str, Any] = {}
+        if listing_doc and listing_doc.get("closet_item_id"):
+            item_doc = (
+                await db.closet_items.find_one(
+                    {"id": listing_doc["closet_item_id"]},
+                    {
+                        "_id": 0,
+                        "title": 1, "brand": 1,
+                        "thumbnail_data_url": 1,
+                    },
+                )
+                or {}
+            )
+        # Fall back to listing fields if we couldn't load the closet item
+        item_doc.setdefault("title", (listing_doc or {}).get("title"))
+        if (listing_doc or {}).get("images"):
+            item_doc.setdefault("thumbnail_data_url", listing_doc["images"][0])
+
+        gross = int(tx["financial"]["gross_cents"])
+        net = int(tx["financial"]["seller_net_cents"])
+        currency = tx.get("currency", "USD")
+
+        if seller_full and seller_full.get("email"):
+            await es.sale_seller(
+                to=seller_full["email"],
+                seller=seller_full, buyer=buyer_full or {}, item=item_doc,
+                gross_cents=gross, seller_net_cents=net, currency=currency,
+            )
+        if buyer_full and buyer_full.get("email"):
+            await es.sale_buyer(
+                to=buyer_full["email"],
+                buyer=buyer_full, seller=seller_full or {}, item=item_doc,
+                gross_cents=gross, currency=currency,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("post-sale email dispatch failed for %s: %s", tx["id"], exc)
+
     return {"ok": True, "transaction": final}

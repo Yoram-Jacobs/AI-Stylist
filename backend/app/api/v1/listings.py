@@ -207,16 +207,65 @@ async def browse_listings(
 
 @router.get("/{listing_id}")
 async def get_listing(listing_id: str) -> dict[str, Any]:
-    listing = await repos.find_one(get_db().listings, {"id": listing_id})
+    db = get_db()
+    listing = await repos.find_one(db.listings, {"id": listing_id})
     if not listing:
         raise HTTPException(404, "Listing not found")
     # bump views (fire-and-forget)
     try:
-        await get_db().listings.update_one(
+        await db.listings.update_one(
             {"id": listing_id}, {"$inc": {"views": 1}}
         )
     except Exception:  # noqa: BLE001
         pass
+
+    # Hydrate the seller's public-facing city/country so the listing
+    # detail UI can render "From Lisbon, Portugal" without a second
+    # round-trip. Order of preference:
+    #   1. The listing's own `location` dict (set when the listing was
+    #      created — most specific, e.g. a pop-up sale at a different
+    #      address than the seller's home).
+    #   2. The seller's `home_location` (broader fallback).
+    #   3. The seller's `address` city/country (last resort, used
+    #      only for older accounts that pre-date `home_location`).
+    # Email/phone are deliberately NOT exposed here — buyers learn
+    # those after a successful transaction via the post-sale email.
+    seller_pub: dict[str, Any] = {}
+    try:
+        seller = await db.users.find_one(
+            {"id": listing.get("seller_id")},
+            {
+                "_id": 0,
+                "id": 1,
+                "display_name": 1,
+                "home_location": 1,
+                "address": 1,
+            },
+        )
+        if seller:
+            seller_pub["id"] = seller.get("id")
+            seller_pub["display_name"] = seller.get("display_name")
+            loc = (
+                listing.get("location")
+                or seller.get("home_location")
+                or {}
+            )
+            if not loc and isinstance(seller.get("address"), dict):
+                addr = seller["address"]
+                loc = {
+                    "city": addr.get("city"),
+                    "country": addr.get("country"),
+                    "region": addr.get("region"),
+                }
+            seller_pub["location"] = {
+                "city": (loc or {}).get("city"),
+                "country": (loc or {}).get("country"),
+                "region": (loc or {}).get("region"),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("seller hydrate failed: %s", exc)
+    listing = dict(listing)
+    listing["seller_public"] = seller_pub
     return listing
 
 

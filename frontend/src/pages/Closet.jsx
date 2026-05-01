@@ -675,6 +675,20 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
         <div className="text-xs text-muted-foreground mt-1">
           {[labelForCategory(item.category, t), item.color].filter(Boolean).join(' · ')}
         </div>
+        {/* Auto-list "Complete listing" CTA — appears when an item
+            has been auto-listed (Private→Shared toggle) and the user
+            hasn't yet refined the listing's price / mode / description.
+            One tap takes them to the edit-listing form. */}
+        {item.auto_listing_needs_completion && item.auto_listing_id && (
+          <Link
+            to={`/marketplace/listing/${item.auto_listing_id}/edit`}
+            data-testid="closet-item-complete-listing-cta"
+            className="mt-2 flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold py-1.5 rounded-md bg-[hsl(var(--accent))]/12 text-[hsl(var(--accent))] hover:bg-[hsl(var(--accent))]/20 transition-colors"
+          >
+            <Sparkles className="h-3 w-3" />
+            {t('closet.completeListingCta', { defaultValue: 'Complete listing' })}
+          </Link>
+        )}
       </CardContent>
     </Card>
   );
