@@ -611,22 +611,19 @@ async def analyze_item_image(
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
-        from app.services.duplicate_detection import find_potential_duplicate
 
+        # Phase Z2 — duplicate detection is now done up-front via
+        # /closet/preflight (SHA-256 + perceptual hash, runs in the
+        # browser BEFORE this analyze call). The legacy server-side
+        # attribute matcher (find_potential_duplicate) has been
+        # removed: by the time we reach this loop the user has
+        # already approved any pre-flight matches, so paying for a
+        # second round of duplicate detection here is pure waste.
         for det in detections:
             analysis = _safe_analysis(dict(det.get("analysis") or {}))
             if _is_unidentifiable(analysis):
                 dropped_unidentifiable += 1
                 continue
-            # Hint to the frontend if this analysed garment looks like
-            # something the user already owns. The frontend uses this
-            # to show a "Already in closet — add anyway?" modal before
-            # the user lands on the editable card.
-            try:
-                duplicate = await find_potential_duplicate(user["id"], analysis)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("duplicate detection failed: %r", exc)
-                duplicate = None
             items_out.append(
                 {
                     "label": det.get("label"),
@@ -635,7 +632,7 @@ async def analyze_item_image(
                     "crop_base64": det.get("crop_base64"),
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
-                    "potential_duplicate": duplicate,
+                    "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
                 }
             )
         if dropped_unidentifiable:
@@ -675,14 +672,10 @@ async def analyze_item_image(
             "Please try a clearer, well-lit shot.",
         )
     crop_b64 = base64.b64encode(raw).decode("ascii")
-    # Same duplicate hint as the multi-item path.
-    from app.services.duplicate_detection import find_potential_duplicate
-
-    try:
-        potential_duplicate = await find_potential_duplicate(user["id"], analysis)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("duplicate detection failed: %r", exc)
-        potential_duplicate = None
+    # Phase Z2 — duplicate detection is now exclusively handled by
+    # the browser-side /closet/preflight call (SHA-256 + perceptual
+    # hash) BEFORE the analyze request is ever sent. We deliberately
+    # do NOT run the legacy attribute matcher here.
     return {
         "items": [
             {
@@ -692,7 +685,7 @@ async def analyze_item_image(
                 "crop_base64": crop_b64,
                 "crop_mime": "image/jpeg",
                 "analysis": analysis,
-                "potential_duplicate": potential_duplicate,
+                "potential_duplicate": None,  # always None — kept for back-compat
             }
         ],
         "count": 1,
@@ -749,6 +742,27 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
     # behind a process-wide semaphore. Confirms a deploy that includes
     # the batch-upload OOM fix landed on the VPS.
     markers["analyze_serial_lock"] = "_ANALYZE_LOCK" in globals()
+
+    # Phase Z2 — confirms the pre-flight duplicate detection route
+    # (SHA-256 + perceptual hash, BEFORE analyze) is live AND the
+    # legacy post-analysis attribute matcher has been removed.
+    try:
+        markers["preflight_duplicate_v1"] = "preflight_duplicates" in globals()
+        # Verify the analyze handler no longer CALLS the legacy
+        # detector (a comment mentioning the function name is fine —
+        # we only care about real call sites).
+        import inspect
+        import re as _re
+        src = inspect.getsource(analyze_item_image)
+        # Strip Python comments and docstrings before checking
+        no_comments = "\n".join(
+            line.split("#", 1)[0] for line in src.splitlines()
+        )
+        markers["legacy_post_analyze_dup_removed"] = bool(
+            _re.search(r"\bfind_potential_duplicate\s*\(", no_comments) is None
+        )
+    except Exception as exc:  # noqa: BLE001
+        markers["preflight_marker_error"] = repr(exc)
 
     # Expose which ML path is live so the user can tell at a glance
     # whether dressapp.co is running the full-fat local stack or the
