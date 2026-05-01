@@ -1,18 +1,22 @@
 [
   {
-    "content": "Create shared BrandLogo component (logo mark + Gloock wordmark lockup)",
+    "content": "Audit existing search bar components in Closet.jsx + verify backend search tests pass",
     "status": "completed"
   },
   {
-    "content": "Wire into Login.jsx (desktop editorial panel + mobile header)",
+    "content": "Add debounced live-search (300ms) for keyword mode so typing updates results without hitting Enter",
     "status": "completed"
   },
   {
-    "content": "Wire into TopNav.jsx (persistent top nav on authenticated pages)",
+    "content": "Add clear (X) button inside search input, visible only when the field has text",
     "status": "completed"
   },
   {
-    "content": "Lint + screenshot-verify the lockup renders correctly on /login",
+    "content": "Add accent-ring active state on Category + Source selects when they hold a non-default value",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + compile verify — all green",
     "status": "completed"
   }
 ]
