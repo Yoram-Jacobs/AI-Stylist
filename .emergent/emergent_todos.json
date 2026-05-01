@@ -1,22 +1,18 @@
 [
   {
-    "content": "Move the closet duplicate star from top-left to top-right (with offset when score badge present)",
+    "content": "Create shared BrandLogo component (logo mark + Gloock wordmark lockup)",
     "status": "completed"
   },
   {
-    "content": "Download DressApp logo and generate favicon + PWA icon set (16/32/48/180/192/512 + .ico)",
+    "content": "Wire into Login.jsx (desktop editorial panel + mobile header)",
     "status": "completed"
   },
   {
-    "content": "Wire favicon + manifest icon entries into index.html and manifest.json",
+    "content": "Wire into TopNav.jsx (persistent top nav on authenticated pages)",
     "status": "completed"
   },
   {
-    "content": "Restart frontend service to pick up public/ changes (CRA doesn't hot-reload them)",
-    "status": "completed"
-  },
-  {
-    "content": "Verify all icon URLs return 200 and browser DOM picks up new link tags",
+    "content": "Lint + screenshot-verify the lockup renders correctly on /login",
     "status": "completed"
   }
 ]

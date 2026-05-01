@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -47,7 +48,7 @@ export default function Login() {
       {/* Editorial panel */}
       <div className="relative hidden md:flex flex-col justify-between p-10 hero-wash-light noise">
         <div>
-          <div className="font-display text-3xl" data-testid="brand-logo">{t('brand')}</div>
+          <BrandLogo size="lg" testId="brand-logo" />
           <div className="caps-label text-muted-foreground mt-2">{t('auth.tagline')}</div>
         </div>
         <figure className="relative overflow-hidden rounded-[calc(var(--radius)+6px)] border border-border shadow-editorial">
@@ -63,7 +64,7 @@ export default function Login() {
       {/* Form panel */}
       <div className="flex flex-col justify-center p-6 md:p-16">
         <div className="md:hidden mb-8">
-          <div className="font-display text-3xl" data-testid="brand-logo-mobile">{t('brand')}</div>
+          <BrandLogo size="lg" testId="brand-logo-mobile" />
           <div className="caps-label text-muted-foreground mt-1">{t('auth.signIn')}</div>
         </div>
         <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">

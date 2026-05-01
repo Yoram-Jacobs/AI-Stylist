@@ -12,6 +12,7 @@ import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { DppScanner } from '@/components/DppScanner';
+import { BrandLogo } from '@/components/BrandLogo';
 
 export const TopNav = () => {
   const { t } = useTranslation();
@@ -71,8 +72,8 @@ export const TopNav = () => {
       className="hidden md:block sticky top-0 z-30 bg-background/85 backdrop-blur border-b border-border"
     >
       <div className="mx-auto max-w-6xl px-6 h-16 flex items-center gap-8">
-        <Link to="/home" className="font-display text-2xl" data-testid="brand-logo">
-          {t('brand')}
+        <Link to="/home" data-testid="brand-logo" aria-label={t('brand')}>
+          <BrandLogo size="md" testId="brand-logo-mark" />
         </Link>
         <nav aria-label={t('nav.primary')} className="flex items-center gap-1">
           {LINKS.map(({ to, icon: Icon, key, label }) => (
