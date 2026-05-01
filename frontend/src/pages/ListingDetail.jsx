@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
-import { ArrowLeft, Eye, Loader2, Sparkles } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2, Sparkles, MapPin, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -105,6 +105,52 @@ export default function ListingDetail() {
               </div>
               <div className="mt-3 font-display text-3xl" data-testid="listing-detail-price">{fmt(fm.list_price_cents, fm.currency)}</div>
               {listing.description && <p className="text-sm text-muted-foreground mt-3">{listing.description}</p>}
+              {/* Seller card — name + public location only. Email /
+                  phone are deliberately hidden until after a
+                  successful transaction (they're sent in the
+                  post-sale email). Hydrated by the backend in
+                  listing.seller_public with a fallback chain:
+                  listing.location → seller.home_location →
+                  seller.address. */}
+              {(listing.seller_public?.display_name
+                || listing.seller_public?.location?.city
+                || listing.seller_public?.location?.country) && (
+                <div
+                  className="mt-4 pt-4 border-t border-border space-y-1.5"
+                  data-testid="listing-detail-seller"
+                >
+                  {listing.seller_public?.display_name && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Store className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-medium" data-testid="listing-detail-seller-name">
+                        {listing.seller_public.display_name}
+                      </span>
+                    </div>
+                  )}
+                  {(listing.seller_public?.location?.city
+                    || listing.seller_public?.location?.country) && (
+                    <div
+                      className="flex items-center gap-2 text-sm text-muted-foreground"
+                      data-testid="listing-detail-seller-location"
+                    >
+                      <MapPin className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {(() => {
+                          // Dedupe city/region — many accounts have the
+                          // same value in both (e.g. Berlin + Berlin),
+                          // and "Berlin, Berlin, Germany" reads poorly.
+                          const { city, region, country } =
+                            listing.seller_public.location || {};
+                          const parts = [city];
+                          if (region && region !== city) parts.push(region);
+                          if (country) parts.push(country);
+                          return parts.filter(Boolean).join(', ');
+                        })()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
