@@ -768,6 +768,12 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
         markers["category_synonyms_v1"] = (
             "_CATEGORY_SYNONYMS" in list_src and "footwear" in list_src.lower()
         )
+        # Marketplace cleanup — confirms DELETE /closet/{id} retires
+        # any draft/active listings linked via closet_item_id.
+        del_src = inspect.getsource(delete_item)
+        markers["listing_retire_on_closet_delete_v1"] = (
+            "retire_res" in del_src and "db.listings.update_many" in del_src
+        )
     except Exception as exc:  # noqa: BLE001
         markers["preflight_marker_error"] = repr(exc)
 
@@ -2028,6 +2034,52 @@ async def delete_item(
     )
     if not deleted:
         raise HTTPException(404, "Item not found")
+
+    # Marketplace cleanup — when a user deletes a closet item that
+    # is linked to one or more listings, silently retire the open
+    # listings so the item doesn't linger on the marketplace with
+    # dead images. We only touch ``draft`` and ``active`` listings:
+    #
+    #   * ``draft``    — never published, safe to mark ``removed``.
+    #   * ``active``   — visible to buyers, flip to ``removed`` so
+    #                    the browse grid and direct links render a
+    #                    graceful "no longer available" state
+    #                    instead of 404'ing on the missing item.
+    #   * ``reserved`` — a buyer is mid-transaction; DO NOT touch.
+    #                    The seller can still delete their closet
+    #                    row (their records are theirs) but the
+    #                    listing stays alive until the reservation
+    #                    resolves, which is the buyer-protective
+    #                    behaviour we want.
+    #   * ``sold``     — already exchanged hands; leave as history.
+    #   * ``removed``  — already gone; nothing to do.
+    try:
+        retire_res = await db.listings.update_many(
+            {
+                "closet_item_id": item_id,
+                "seller_id": user["id"],
+                "status": {"$in": ["draft", "active"]},
+            },
+            {
+                "$set": {
+                    "status": "removed",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        if retire_res.modified_count:
+            logger.info(
+                "closet delete: retired %d listing(s) linked to %s",
+                retire_res.modified_count,
+                item_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        # Listing cleanup is a best-effort companion to the delete;
+        # never let a listings write failure raise 500 on an already
+        # successful closet delete.
+        logger.warning(
+            "listing retire failed for closet item %s: %s", item_id, exc
+        )
 
     # Phase Z2 — star auto-demotion. Scenario: user uploaded A
     # (is_duplicate=False), then approved B as a duplicate
