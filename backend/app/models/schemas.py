@@ -94,6 +94,12 @@ class User(BaseDoc):
     # first Google connect, editable afterwards.
     first_name: str | None = None
     last_name: str | None = None
+    # Optional brand / company name — sellers running their listings as a
+    # boutique can set this and it'll appear instead of their personal
+    # name on the marketplace listing detail page. Distinct from
+    # display_name so power-users can have a casual handle plus a
+    # business-facing brand simultaneously.
+    company_name: str | None = None
     phone: str | None = None
     date_of_birth: str | None = None  # ISO YYYY-MM-DD
     sex: Literal["male", "female"] | None = None

@@ -1,30 +1,42 @@
 [
   {
-    "content": "Install resend lib + add RESEND_API_KEY/SENDER_EMAIL to backend/.env",
-    "status": "completed"
+    "content": "Wave 2 plan: schema additions for swap (offered_item_id, accepted_at, confirmations, denied_at)",
+    "status": "in_progress"
   },
   {
-    "content": "Create app/services/email_service.py with helpers + 6 HTML templates",
-    "status": "completed"
+    "content": "Backend: signed JWT helper for email Accept/Deny/Confirm URLs (no login required)",
+    "status": "pending"
   },
   {
-    "content": "Auto-list on Share toggle: backend hook in closet update endpoint",
-    "status": "completed"
+    "content": "Backend: POST /transactions for mode=swap (creates pending swap + sends swap_request email)",
+    "status": "pending"
   },
   {
-    "content": "Listing detail enriched with seller country/city (fallback to home_location)",
-    "status": "completed"
+    "content": "Backend: GET /transactions/{id}/respond?action=accept|deny&token= (no auth, JWT-verified)",
+    "status": "pending"
   },
   {
-    "content": "Wire sale-completion emails to PayPal capture/webhook handler",
-    "status": "completed"
+    "content": "Backend: GET /transactions/{id}/confirm?role=lister|swapper&token= → on both confirmed: swap items, mark Keep, retire listings",
+    "status": "pending"
   },
   {
-    "content": "Frontend: 'Complete listing' CTA on closet card for auto-created listings",
-    "status": "completed"
+    "content": "Backend: POST /transactions for mode=donate + /complete fires donation_both",
+    "status": "pending"
   },
   {
-    "content": "Lint + smoke test wave 1; add /analyze/version markers",
-    "status": "completed"
+    "content": "Frontend: SwapOfferModal — pick a closet item to offer; submit POST /transactions mode=swap",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: ListingDetail buttons — Buy (PayPal) for sell, Swap for swap, Donate for donate",
+    "status": "pending"
+  },
+  {
+    "content": "Frontend: minimal /transactions/{id}/landing page for Accept/Deny/Confirm follow-through after email click",
+    "status": "pending"
+  },
+  {
+    "content": "Lint, smoke test, add markers, finish summary",
+    "status": "pending"
   }
 ]

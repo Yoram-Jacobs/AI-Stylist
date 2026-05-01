@@ -219,15 +219,18 @@ async def get_listing(listing_id: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
-    # Hydrate the seller's public-facing city/country so the listing
-    # detail UI can render "From Lisbon, Portugal" without a second
-    # round-trip. Order of preference:
-    #   1. The listing's own `location` dict (set when the listing was
-    #      created — most specific, e.g. a pop-up sale at a different
-    #      address than the seller's home).
-    #   2. The seller's `home_location` (broader fallback).
-    #   3. The seller's `address` city/country (last resort, used
-    #      only for older accounts that pre-date `home_location`).
+    # Hydrate the seller's public-facing display name + city/country
+    # so the listing detail UI can render "From Lisbon, Portugal" without
+    # a second round-trip. Order of preference for the name:
+    #   1. ``display_name`` — the user's explicit handle.
+    #   2. ``company_name`` — for sellers running a brand / boutique.
+    #   3. ``first_name``  — friendly fallback before any "anon".
+    #   4. (no merchant-name line at all — never an email prefix.)
+    # Order of preference for the location:
+    #   1. The listing's own ``location`` dict (most specific, e.g. a
+    #      pop-up sale at a different address).
+    #   2. The seller's ``home_location`` (broader fallback).
+    #   3. The seller's ``address`` city/country (last resort).
     # Email/phone are deliberately NOT exposed here — buyers learn
     # those after a successful transaction via the post-sale email.
     seller_pub: dict[str, Any] = {}
@@ -238,13 +241,20 @@ async def get_listing(listing_id: str) -> dict[str, Any]:
                 "_id": 0,
                 "id": 1,
                 "display_name": 1,
+                "company_name": 1,
+                "first_name": 1,
                 "home_location": 1,
                 "address": 1,
             },
         )
         if seller:
             seller_pub["id"] = seller.get("id")
-            seller_pub["display_name"] = seller.get("display_name")
+            seller_pub["display_name"] = (
+                seller.get("display_name")
+                or seller.get("company_name")
+                or seller.get("first_name")
+                or None
+            )
             loc = (
                 listing.get("location")
                 or seller.get("home_location")
