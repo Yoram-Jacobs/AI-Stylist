@@ -1983,11 +1983,116 @@ async def update_item(
 async def delete_item(
     item_id: str, user: dict = Depends(get_current_user)
 ) -> Response:
+    db = get_db()
+    # Fetch first so we have the item's fingerprint (sha256 / phash)
+    # BEFORE it's gone. We need them to find any siblings still
+    # carrying a red ⭐ that would become orphaned by this delete.
+    item = await db.closet_items.find_one(
+        {"id": item_id, "user_id": user["id"]},
+        {"_id": 0, "id": 1, "source_sha256": 1, "source_phash": 1, "is_duplicate": 1},
+    )
+    if not item:
+        raise HTTPException(404, "Item not found")
+
     deleted = await repos.delete(
-        get_db().closet_items, {"id": item_id, "user_id": user["id"]}
+        db.closet_items, {"id": item_id, "user_id": user["id"]}
     )
     if not deleted:
         raise HTTPException(404, "Item not found")
+
+    # Phase Z2 — star auto-demotion. Scenario: user uploaded A
+    # (is_duplicate=False), then approved B as a duplicate
+    # (is_duplicate=True, red ⭐). They now delete A. Without this
+    # block, B would be left as the *only* copy in the closet yet
+    # still carry its ⭐ and be excluded from Stylist Brain
+    # suggestions — a confusing dangling state.
+    #
+    # Fix: look up every remaining closet item that shares the
+    # deleted item's fingerprint (exact SHA-256 match OR phash
+    # within the DEFAULT_HAMMING_THRESHOLD bits). If the group is
+    # now empty there's nothing to do. Otherwise we promote exactly
+    # one survivor to "original" by clearing its is_duplicate flag,
+    # preferring the oldest (most likely to be the first upload the
+    # user thought of as the "real" one). Any additional survivors
+    # beyond that stay starred — they're still duplicates of each
+    # other and of the promoted one.
+    try:
+        sha = item.get("source_sha256")
+        ph = item.get("source_phash")
+        if not (sha or ph):
+            return Response(status_code=204)
+
+        from app.services.image_hash import (
+            DEFAULT_HAMMING_THRESHOLD,
+            hamming_distance,
+        )
+
+        # Pull candidates cheaply — we need id, hashes, is_duplicate,
+        # and created_at (for the oldest-first tie-break).
+        or_clauses: list[dict[str, Any]] = []
+        if sha:
+            or_clauses.append({"source_sha256": sha})
+        # phash candidates are filtered client-side by Hamming
+        # distance because Mongo can't do that in a single query.
+        # We over-pull by matching "any non-null phash" + same user,
+        # then walk the list. At typical closet sizes (≤ 500) this
+        # is a sub-100 ms operation.
+        if ph:
+            or_clauses.append({"source_phash": {"$type": "string"}})
+        cursor = db.closet_items.find(
+            {"user_id": user["id"], "$or": or_clauses},
+            {
+                "_id": 0,
+                "id": 1,
+                "source_sha256": 1,
+                "source_phash": 1,
+                "is_duplicate": 1,
+                "created_at": 1,
+            },
+        )
+        siblings: list[dict[str, Any]] = []
+        async for row in cursor:
+            same_sha = sha and row.get("source_sha256") == sha
+            close_ph = (
+                ph
+                and row.get("source_phash")
+                and hamming_distance(ph, row.get("source_phash"))
+                <= DEFAULT_HAMMING_THRESHOLD
+            )
+            if same_sha or close_ph:
+                siblings.append(row)
+
+        if not siblings:
+            return Response(status_code=204)
+
+        # If ANY sibling already has is_duplicate=False, the group
+        # still has an "original" — nothing to promote.
+        if any(not s.get("is_duplicate") for s in siblings):
+            return Response(status_code=204)
+
+        # Otherwise every survivor is starred — promote the oldest
+        # one. Fall back to the first we saw if created_at is
+        # missing on every row.
+        promote = min(
+            siblings,
+            key=lambda s: s.get("created_at") or "",
+        )
+        await db.closet_items.update_one(
+            {"id": promote["id"], "user_id": user["id"]},
+            {"$set": {"is_duplicate": False,
+                      "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        logger.info(
+            "closet delete: promoted %s (group size=%d) after deleting %s",
+            promote["id"],
+            len(siblings),
+            item_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Auto-demotion is a UX nicety — never let a failure here
+        # break the delete itself (the item is already gone).
+        logger.warning("star auto-demotion failed for %s: %s", item_id, exc)
+
     return Response(status_code=204)
 
 
