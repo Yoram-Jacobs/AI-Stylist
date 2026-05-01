@@ -1,26 +1,22 @@
 [
   {
-    "content": "Verify dev pod services are running",
+    "content": "Remove find_potential_duplicate calls from /analyze (multi + legacy paths) in closet.py",
     "status": "completed"
   },
   {
-    "content": "Review preflight endpoint, image_hash service, and DuplicatePreflightDialog implementation",
+    "content": "Remove potential_duplicate field from analyze response shape",
     "status": "completed"
   },
   {
-    "content": "Test backend /api/v1/closet/preflight endpoint with curl",
+    "content": "Remove post-analysis duplicate UI flow in AddItem.jsx (it.potential_duplicate paths)",
     "status": "completed"
   },
   {
-    "content": "Run frontend lint check on AddItem.jsx and DuplicatePreflightDialog.jsx",
+    "content": "Add preflight_v1 marker to /analyze/version for production verification",
     "status": "completed"
   },
   {
-    "content": "Verify Stylist Brain excludes is_duplicate items",
+    "content": "Lint backend + frontend, restart backend, smoke-test /analyze + /preflight",
     "status": "completed"
-  },
-  {
-    "content": "Test end-to-end duplicate detection flow with testing agent (browser)",
-    "status": "in_progress"
   }
 ]
