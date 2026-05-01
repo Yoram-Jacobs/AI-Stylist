@@ -761,6 +761,13 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
         markers["legacy_post_analyze_dup_removed"] = bool(
             _re.search(r"\bfind_potential_duplicate\s*\(", no_comments) is None
         )
+        # Category-filter case-insensitive + synonym support. Fixes
+        # the "Shoes → 0 items" bug where DB rows used "Footwear"
+        # while the frontend CATEGORIES constant sent "shoes".
+        list_src = inspect.getsource(list_items)
+        markers["category_synonyms_v1"] = (
+            "_CATEGORY_SYNONYMS" in list_src and "footwear" in list_src.lower()
+        )
     except Exception as exc:  # noqa: BLE001
         markers["preflight_marker_error"] = repr(exc)
 
@@ -1060,7 +1067,29 @@ async def list_items(
     if source:
         query["source"] = source
     if category:
-        query["category"] = category
+        # Category filter — case-insensitive + synonym aware. Legacy
+        # rows in the DB have a mix of Title Case ("Top"), lowercase
+        # ("top"/"tops"), and older canonical labels ("Footwear",
+        # "Accessories", "Full Body") while the frontend sends the
+        # lowercase short form from CATEGORIES. Without this map, a
+        # user with 113 items can filter by "Shoes" and see zero,
+        # because the DB rows are stored as "Footwear".
+        _CATEGORY_SYNONYMS: dict[str, list[str]] = {
+            "top":        ["top", "tops"],
+            "bottom":     ["bottom", "bottoms"],
+            "outerwear":  ["outerwear"],
+            "shoes":      ["shoes", "footwear"],
+            "accessory":  ["accessory", "accessories"],
+            "dress":      ["dress", "dresses", "full body"],
+        }
+        requested = (category or "").strip().lower()
+        synonyms = _CATEGORY_SYNONYMS.get(requested, [requested])
+        # Build a case-insensitive regex that matches any of the
+        # accepted variants. Anchored + escaped so partial matches
+        # (e.g. "top" matching "topcoat") can't leak through.
+        import re as _re
+        pattern = "^(" + "|".join(_re.escape(s) for s in synonyms) + ")$"
+        query["category"] = {"$regex": pattern, "$options": "i"}
     if search:
         query["$text"] = {"$search": search}
     items = await repos.find_many(
