@@ -41,6 +41,10 @@ class CreateListingIn(BaseModel):
     ships_to: list[str] = Field(default_factory=list)
     list_price_cents: int = Field(ge=0)
     currency: str = "USD"
+    # Wave 3 — optional shipping fee attached to this listing. 0 means
+    # "free / local pickup only". Capped nowhere on the backend;
+    # product copy nudges users toward 0 for donations.
+    shipping_fee_cents: int = Field(default=0, ge=0)
 
 
 class UpdateListingIn(BaseModel):
@@ -54,6 +58,7 @@ class UpdateListingIn(BaseModel):
     location: dict[str, Any] | None = None
     ships_to: list[str] | None = None
     list_price_cents: int | None = None
+    shipping_fee_cents: int | None = Field(default=None, ge=0)
     status: ListingStatus | None = None
 
 
@@ -120,6 +125,7 @@ async def create_listing(
         location=payload.location,
         ships_to=payload.ships_to,
         financial_metadata=financial,
+        shipping_fee_cents=payload.shipping_fee_cents,
     )
     doc = listing.model_dump()
     await repos.insert(db.listings, doc)

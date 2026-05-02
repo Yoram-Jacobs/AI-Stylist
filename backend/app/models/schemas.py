@@ -297,6 +297,17 @@ class Listing(BaseDoc):
     location: dict[str, Any] | None = None
     ships_to: list[str] = Field(default_factory=list)
     financial_metadata: FinancialMetadata
+    # Optional shipping fee (Wave 3) — charged on top of the listing's
+    # mode-specific flow:
+    #   * ``sell``    → added to the buyer's PayPal order.
+    #   * ``donate``  → recipient pays *only* this on claim; otherwise
+    #                   the donation is free end-to-end.
+    #   * ``swap``    → display-only for now; parties coordinate directly.
+    # Defaults to 0 so every existing row stays valid without migration.
+    # DressApp's environmental ethos: we nudge users toward local pickup
+    # with "Meet locally to skip the fee 🌱" — sellers are encouraged to
+    # keep this at 0 whenever possible.
+    shipping_fee_cents: int = 0
     status: ListingStatus = "active"
     views: int = 0
     favorites: int = 0

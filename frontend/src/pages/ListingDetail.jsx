@@ -117,6 +117,32 @@ export default function ListingDetail() {
               </div>
               <div className="mt-3 font-display text-3xl" data-testid="listing-detail-price">{fmt(fm.list_price_cents, fm.currency)}</div>
 
+              {/* Wave 3 — shipping fee line. Hidden when 0 (listing is
+                  pickup-only). Copy intentionally leans on the
+                  environmental ethos when a fee IS present so buyers
+                  understand the default and know local pickup is the
+                  preferred path. */}
+              {Number(listing.shipping_fee_cents) > 0 ? (
+                <div
+                  className="mt-2 flex items-center gap-2 text-sm text-muted-foreground"
+                  data-testid="listing-detail-shipping"
+                >
+                  <span>
+                    + {fmt(listing.shipping_fee_cents, fm.currency)} shipping
+                  </span>
+                  <span className="text-[hsl(var(--accent))] text-xs">
+                    · Or meet locally to skip the fee 🌱
+                  </span>
+                </div>
+              ) : (
+                <div
+                  className="mt-2 text-xs text-[hsl(var(--accent))]"
+                  data-testid="listing-detail-shipping-free"
+                >
+                  🌱 Local pickup preferred — no shipping fee
+                </div>
+              )}
+
               {/* Meta badges — always visible so swap/donate listings
                   (which don't surface a price) still convey size and
                   condition at a glance. */}
@@ -247,44 +273,90 @@ export default function ListingDetail() {
                 </>
               ) : listing.mode === 'donate' ? (
                 <>
-                  <Button
-                    className="w-full rounded-xl"
-                    disabled={donateSubmitting}
-                    onClick={async () => {
-                      setDonateSubmitting(true);
-                      try {
-                        const tx = await api.claimDonation(id, 0);
-                        toast.success(
-                          'Request sent. The donor will get an email to confirm.',
-                        );
-                        nav(`/transactions#tx-${tx.id}`);
-                      } catch (err) {
-                        toast.error(
-                          err?.response?.data?.detail
-                            || 'Could not send donation request.',
-                        );
-                      } finally {
-                        setDonateSubmitting(false);
-                      }
-                    }}
-                    data-testid="listing-donate-button"
-                  >
-                    {donateSubmitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Sending…
-                      </>
-                    ) : (
-                      <>
-                        <HeartHandshake className="h-4 w-4 mr-2" />
-                        Claim this donation
-                      </>
-                    )}
-                  </Button>
-                  <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
-                    Donations are free. The donor may request a small handling
-                    fee once they reach out.
-                  </div>
+                  {Number(listing.shipping_fee_cents) > 0 ? (
+                    // Wave 3 — donation with a shipping fee. Recipient
+                    // covers shipping via PayPal. On capture the
+                    // backend emails the donor with accept/deny links,
+                    // so we can fire-and-forget navigate to the
+                    // transactions page after a successful payment.
+                    <div data-testid="listing-donate-wrapper">
+                      <PayPalCheckoutButton
+                        createOrder={async () => {
+                          const tx = await api.claimDonation(id, Number(listing.shipping_fee_cents));
+                          const orderId = tx?.paypal?.order_id;
+                          if (!orderId) {
+                            throw new Error('Donation claim did not return a PayPal order.');
+                          }
+                          return { order_id: orderId, ctx: { tx_id: tx.id } };
+                        }}
+                        captureOrder={async ({ order_id, ctx }) => {
+                          return api.captureDonationShipping(ctx.tx_id, order_id);
+                        }}
+                        onSuccess={(res) => {
+                          toast.success(
+                            'Shipping paid. Donor will get an email to confirm the hand-off.',
+                          );
+                          const txId = res?.transaction?.id;
+                          if (txId) nav(`/transactions#tx-${txId}`);
+                          else nav('/transactions');
+                        }}
+                        onError={(err) => {
+                          toast.error(
+                            err?.response?.data?.detail || 'PayPal payment failed.',
+                          );
+                        }}
+                        amountLabel={`Pay ${fmt(listing.shipping_fee_cents, fm.currency)} shipping`}
+                        className="w-full"
+                        testId="listing-donate-button"
+                      />
+                      <div className="text-[11px] text-muted-foreground text-center mt-2 leading-relaxed">
+                        Donations are free — you're only reimbursing shipping.
+                        Or message the donor to arrange local pickup.
+                      </div>
+                    </div>
+                  ) : (
+                    // Zero-fee path — keep the original direct-claim UX.
+                    <>
+                      <Button
+                        className="w-full rounded-xl"
+                        disabled={donateSubmitting}
+                        onClick={async () => {
+                          setDonateSubmitting(true);
+                          try {
+                            const tx = await api.claimDonation(id, 0);
+                            toast.success(
+                              'Request sent. The donor will get an email to confirm.',
+                            );
+                            nav(`/transactions#tx-${tx.id}`);
+                          } catch (err) {
+                            toast.error(
+                              err?.response?.data?.detail
+                                || 'Could not send donation request.',
+                            );
+                          } finally {
+                            setDonateSubmitting(false);
+                          }
+                        }}
+                        data-testid="listing-donate-button"
+                      >
+                        {donateSubmitting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Sending…
+                          </>
+                        ) : (
+                          <>
+                            <HeartHandshake className="h-4 w-4 mr-2" />
+                            Claim this donation
+                          </>
+                        )}
+                      </Button>
+                      <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
+                        This donation is free. Coordinate with the donor to
+                        meet locally or arrange shipping directly.
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <div data-testid="listing-buy-wrapper">

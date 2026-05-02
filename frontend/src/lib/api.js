@@ -133,6 +133,15 @@ export const api = {
         handling_fee_cents: handlingFeeCents,
       })
       .then((r) => r.data),
+  // Wave 3 — capture PayPal shipping fee for a donation claim. Called
+  // by the frontend right after the PayPal popup/button confirms the
+  // order. On success the donor gets their accept/deny email.
+  captureDonationShipping: (txId, orderId) =>
+    client
+      .post(`/transactions/donate/${txId}/capture`, null, {
+        params: { order_id: orderId },
+      })
+      .then((r) => r.data),
   confirmReceipt: (txId) =>
     client
       .post(`/transactions/${txId}/confirm-receipt`)

@@ -1,58 +1,54 @@
 [
   {
-    "content": "Add Transaction.kind, .swap, .donate schemas + extend TxStatus",
+    "content": "Add Listing.shipping_fee_cents schema + Create/Update DTOs",
     "status": "completed"
   },
   {
-    "content": "Build services/action_tokens.py (JWT mint/verify with aud + jti)",
+    "content": "SELL flow: include shipping in PayPal order gross (payments.py listing_buy_create)",
     "status": "completed"
   },
   {
-    "content": "Add POST /transactions/swap (propose + email lister)",
+    "content": "DONATE flow: PayPal order when shipping_fee > 0 + capture endpoint + JWT email after capture",
     "status": "completed"
   },
   {
-    "content": "Add GET /transactions/action (public, JWT verify, accept/deny + redirect)",
+    "content": "Backend: APP_PUBLIC_URL auto-derive from Request (refactor _action_url + _landing_redirect)",
     "status": "completed"
   },
   {
-    "content": "Add POST /transactions/{id}/confirm-receipt (both-party completion)",
+    "content": ".env.example: document APP_PUBLIC_URL",
     "status": "completed"
   },
   {
-    "content": "Add POST /transactions/donate (zero-fee + PayPal-fee paths)",
+    "content": "Frontend: CreateListing form input for shipping fee + community pickup nudge",
     "status": "completed"
   },
   {
-    "content": "Fix paypal.order_id unique index (partialFilterExpression)",
+    "content": "Frontend: ListingDetail shows shipping fee + community pickup nudge",
     "status": "completed"
   },
   {
-    "content": "Backend curl smoke tests (propose, accept, deny, token reuse)",
+    "content": "Frontend: Donate claim — handle PayPal redirect when shipping_fee > 0",
     "status": "completed"
   },
   {
-    "content": "Frontend: api.js client methods (proposeSwap, claimDonation, confirmReceipt, getLandingSummary)",
+    "content": "Transactions page: tabs (All/Buying/Selling/Swaps/Donations) + counts",
     "status": "completed"
   },
   {
-    "content": "Frontend: build SwapPickerModal component",
+    "content": "Transactions page: multi-select status chips + filtering",
     "status": "completed"
   },
   {
-    "content": "Frontend: enrich ListingDetail with size/condition/description + mode-aware CTAs (Buy/Swap/Donate)",
+    "content": "Transactions page: Confirm-receipt CTA on accepted swap/donate rows",
     "status": "completed"
   },
   {
-    "content": "Frontend: TransactionLanding page + route in App.js",
-    "status": "completed"
+    "content": "Backend curl + testing_agent E2E validation",
+    "status": "in_progress"
   },
   {
-    "content": "End-to-end testing via testing_agent (backend 100% / frontend 60% — session artifact, no bugs)",
-    "status": "completed"
-  },
-  {
-    "content": "Update CHANGELOG.md with Wave 2 entries",
-    "status": "completed"
+    "content": "Update CHANGELOG.md with Wave 3 entries",
+    "status": "pending"
   }
 ]

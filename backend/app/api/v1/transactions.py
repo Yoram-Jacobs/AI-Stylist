@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -42,7 +42,7 @@ from app.models.schemas import (
     TransactionFinancial,
     TxStatus,
 )
-from app.services import action_tokens, repos
+from app.services import action_tokens, paypal_client, repos
 from app.services import email_service as es
 from app.services.auth import get_current_user
 from app.services.fees import compute_fees
@@ -51,10 +51,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 # Public app URL used to build accept/deny links + post-action redirects.
-# Falls back to dressapp.co for prod and respects APP_PUBLIC_URL when set
-# on dev/staging pods so emails on those environments correctly point
-# back at their frontend.
-_APP_URL = os.environ.get("APP_PUBLIC_URL", "https://dressapp.co").rstrip("/")
+# Priority:
+#   1. Explicit ``APP_PUBLIC_URL`` env var (always wins; prod lock).
+#   2. Derived from the inbound ``Request`` using X-Forwarded-Proto and
+#      X-Forwarded-Host / Host headers (so dev/preview pods get correct
+#      URLs without configuration).
+#   3. Hard-coded ``https://dressapp.co`` fallback for out-of-request
+#      code paths (e.g. background jobs).
+_APP_URL_ENV = os.environ.get("APP_PUBLIC_URL", "").strip().rstrip("/") or None
+_APP_URL_FALLBACK = "https://dressapp.co"
+
+
+def _derive_app_url(request: Request | None) -> str:
+    """Resolve the public origin for outbound email links + redirects.
+
+    Always returns a fully-qualified origin with no trailing slash.
+    """
+    if _APP_URL_ENV:
+        return _APP_URL_ENV
+    if request is not None:
+        # Honour common reverse-proxy headers first so ingress-routed
+        # requests report https even when uvicorn itself speaks http.
+        headers = request.headers
+        proto = (
+            headers.get("x-forwarded-proto")
+            or request.url.scheme
+            or "https"
+        ).split(",")[0].strip()
+        host = (
+            headers.get("x-forwarded-host")
+            or headers.get("host")
+            or request.url.hostname
+            or ""
+        ).split(",")[0].strip()
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+    return _APP_URL_FALLBACK
 
 
 def _now_iso() -> str:
@@ -96,17 +128,22 @@ async def _load_listing_item(db, listing: dict) -> dict[str, Any]:
     return item
 
 
-def _action_url(token: str, decision: str) -> str:
+def _action_url(token: str, decision: str, *, request: Request | None = None) -> str:
+    base = _derive_app_url(request)
     qs = urlencode({"token": token, "decision": decision})
-    return f"{_APP_URL}/api/v1/transactions/action?{qs}"
+    return f"{base}/api/v1/transactions/action?{qs}"
 
 
-def _landing_redirect(tx_id: str, status: str, message: str | None = None) -> RedirectResponse:
+def _landing_redirect(
+    tx_id: str, status: str, message: str | None = None,
+    *, request: Request | None = None,
+) -> RedirectResponse:
+    base = _derive_app_url(request)
     params = {"status": status}
     if message:
         params["message"] = message
     return RedirectResponse(
-        url=f"{_APP_URL}/transactions/{tx_id}/landing?{urlencode(params)}",
+        url=f"{base}/transactions/{tx_id}/landing?{urlencode(params)}",
         status_code=303,
     )
 
@@ -174,7 +211,9 @@ class SwapProposeIn(BaseModel):
 
 @router.post("/swap", status_code=201)
 async def propose_swap(
-    payload: SwapProposeIn, user: dict = Depends(get_current_user)
+    payload: SwapProposeIn,
+    request: Request,
+    user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     db = get_db()
     listing = await repos.find_one(db.listings, {"id": payload.listing_id})
@@ -244,8 +283,8 @@ async def propose_swap(
                 to=lister["email"],
                 lister=lister, swapper=swapper,
                 listing_item=listing_item, offered_item=offered_item,
-                accept_url=_action_url(token, "accept"),
-                deny_url=_action_url(token, "deny"),
+                accept_url=_action_url(token, "accept", request=request),
+                deny_url=_action_url(token, "deny", request=request),
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("swap_request email dispatch failed for %s: %s", tx.id, exc)
@@ -254,71 +293,32 @@ async def propose_swap(
 
 
 # -----------------------------------------------------------------
-# Wave 2 — Donate claim
+# Wave 2/3 — Donate claim (shipping-fee aware)
+#
+# Donations themselves are always free — DressApp's environmental
+# ethos doesn't charge people for giving things away. Wave 3 adds an
+# OPTIONAL shipping fee *on the listing* (``listing.shipping_fee_cents``)
+# that the recipient covers via PayPal to reimburse the donor. When a
+# listing's shipping fee is 0 the flow stays identical to Wave 2:
+# accept/deny email to the donor, no payment step anywhere.
 # -----------------------------------------------------------------
 class DonateClaimIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     listing_id: str
-    handling_fee_cents: int | None = None  # 0 / null = free; else PayPal
+    # Deprecated: listings now carry their own ``shipping_fee_cents``.
+    # Kept to preserve backwards compatibility with older clients; the
+    # value is ignored on the server.
+    handling_fee_cents: int | None = None
 
 
-@router.post("/donate", status_code=201)
-async def claim_donation(
-    payload: DonateClaimIn, user: dict = Depends(get_current_user)
-) -> dict[str, Any]:
-    db = get_db()
-    listing = await repos.find_one(db.listings, {"id": payload.listing_id})
-    if not listing:
-        raise HTTPException(404, "Listing not found")
-    if listing.get("status") != "active":
-        raise HTTPException(409, "This donation is no longer available.")
-    if listing.get("seller_id") == user["id"]:
-        raise HTTPException(400, "You cannot claim your own donation.")
-    # Donations have to be flagged via mode=donate; if the lister forgot
-    # we still let it through but log so admins can clean up.
-    if listing.get("mode") != "donate":
-        logger.info(
-            "donate claim on non-donate listing %s mode=%s",
-            listing["id"], listing.get("mode"),
-        )
-
-    fee = max(0, int(payload.handling_fee_cents or 0))
-    fees = compute_fees(fee)
-    tx = Transaction(
-        listing_id=listing["id"],
-        buyer_id=user["id"],
-        seller_id=listing["seller_id"],
-        kind="donate",
-        currency=listing["financial_metadata"].get("currency", "USD"),
-        financial=TransactionFinancial(
-            gross_cents=fee,
-            stripe_fee_cents=fees.stripe_fee_cents if fee else 0,
-            net_after_stripe_cents=fees.net_after_stripe_cents if fee else 0,
-            platform_fee_percent=fees.platform_fee_percent,
-            platform_fee_cents=fees.platform_fee_cents if fee else 0,
-            seller_net_cents=fees.seller_net_cents if fee else 0,
-        ),
-        donate=DonatePointer(handling_fee_cents=fee),
-        status="pending",
-    )
-
-    # Always JWT path for now — PayPal handling-fee branch is a follow-up
-    # that will wrap this in paypal_client.create_order() and only email
-    # after capture. For Wave 2 we email the donor accept/deny links
-    # and surface the handling fee as display-only metadata on the tx.
-    token, jti = action_tokens.mint(
-        tx_id=tx.id, role="donor", decision_choices=("accept", "deny"),
-        expires_hours=24 * 7,
-    )
-    tx.donate.action_token_jti = jti
-    doc = tx.model_dump()
-    await repos.insert(db.transactions, doc)
-
-    # Reuse swap_request template under the hood — same shape (item
-    # card + accept/deny buttons). Donor = lister, recipient = swapper.
+async def _send_donation_accept_email(
+    *, db, tx: dict[str, Any], listing: dict[str, Any],
+    donor: dict[str, Any], recipient: dict[str, Any],
+    accept_url: str, deny_url: str,
+) -> None:
+    """Fire the donor-facing accept/deny email. Reuses ``swap_request``
+    for a consistent item card + CTA pair. Best-effort."""
     try:
-        donor = await _load_user(db, listing["seller_id"]) or {}
-        recipient = user
         listing_item = await _load_listing_item(db, listing)
         recipient_card = {
             "title": (
@@ -331,13 +331,222 @@ async def claim_donation(
                 to=donor["email"],
                 lister=donor, swapper=recipient,
                 listing_item=listing_item, offered_item=recipient_card,
-                accept_url=_action_url(token, "accept"),
-                deny_url=_action_url(token, "deny"),
+                accept_url=accept_url, deny_url=deny_url,
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("donation email dispatch failed for %s: %s", tx.id, exc)
+        logger.warning("donation email dispatch failed for %s: %s", tx.get("id"), exc)
 
-    return doc
+
+@router.post("/donate", status_code=201)
+async def claim_donation(
+    payload: DonateClaimIn,
+    request: Request,
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    db = get_db()
+    listing = await repos.find_one(db.listings, {"id": payload.listing_id})
+    if not listing:
+        raise HTTPException(404, "Listing not found")
+    if listing.get("status") != "active":
+        raise HTTPException(409, "This donation is no longer available.")
+    if listing.get("seller_id") == user["id"]:
+        raise HTTPException(400, "You cannot claim your own donation.")
+    if listing.get("mode") != "donate":
+        # Non-fatal: log so admins can clean up mode mismatches.
+        logger.info(
+            "donate claim on non-donate listing %s mode=%s",
+            listing["id"], listing.get("mode"),
+        )
+
+    shipping_cents = max(0, int(listing.get("shipping_fee_cents") or 0))
+    currency = (listing.get("financial_metadata") or {}).get("currency", "USD").upper()
+
+    fees = compute_fees(0)
+    tx = Transaction(
+        listing_id=listing["id"],
+        buyer_id=user["id"],
+        seller_id=listing["seller_id"],
+        kind="donate",
+        currency=currency,
+        financial=TransactionFinancial(
+            gross_cents=shipping_cents,
+            stripe_fee_cents=0,
+            net_after_stripe_cents=0,
+            platform_fee_percent=fees.platform_fee_percent,
+            platform_fee_cents=0,
+            seller_net_cents=0,
+        ),
+        donate=DonatePointer(handling_fee_cents=shipping_cents),
+        status="pending",
+    )
+
+    # Mint accept/deny token now so the email can go out as soon as the
+    # shipping fee (if any) is captured.
+    token, jti = action_tokens.mint(
+        tx_id=tx.id, role="donor", decision_choices=("accept", "deny"),
+        expires_hours=24 * 7,
+    )
+    tx.donate.action_token_jti = jti
+
+    order_info: dict[str, Any] | None = None
+    if shipping_cents > 0:
+        # Shipping fee requested — create a PayPal order. We DON'T send
+        # the donor email yet: the recipient still has to complete the
+        # PayPal capture on the frontend. Capture endpoint below fires
+        # the email and finalises the transaction.
+        if not paypal_client.is_configured():
+            raise HTTPException(
+                503,
+                {
+                    "code": "paypal_not_configured",
+                    "message": (
+                        "This donation requires a shipping fee but PayPal "
+                        "isn't configured on this environment."
+                    ),
+                },
+            )
+        try:
+            order = await paypal_client.create_order(
+                amount_cents=shipping_cents,
+                currency=currency,
+                reference_id=f"donate:{tx.id}",
+                description=(
+                    f"Shipping for donation: {listing.get('title','DressApp item')}"
+                )[:127],
+                custom_id=tx.id,
+            )
+        except paypal_client.PayPalError as exc:
+            raise HTTPException(502, {"paypal_error": str(exc.body)}) from exc
+        tx.paypal = PayPalPointer(order_id=order["id"])
+        order_info = {
+            "order_id": order["id"],
+            "amount_cents": shipping_cents,
+            "currency": currency,
+        }
+
+    doc = tx.model_dump()
+    await repos.insert(db.transactions, doc)
+
+    # If no shipping fee, fire the donor accept/deny email immediately —
+    # free donations skip the PayPal dance entirely.
+    if shipping_cents == 0:
+        donor = await _load_user(db, listing["seller_id"]) or {}
+        accept_url = _action_url(token, "accept", request=request)
+        deny_url = _action_url(token, "deny", request=request)
+        await _send_donation_accept_email(
+            db=db, tx=doc, listing=listing,
+            donor=donor, recipient=user,
+            accept_url=accept_url, deny_url=deny_url,
+        )
+
+    result = dict(doc)
+    if order_info:
+        result["paypal"] = {**result.get("paypal", {}), **order_info}
+    return result
+
+
+@router.post("/donate/{tx_id}/capture")
+async def capture_donation_shipping(
+    tx_id: str,
+    request: Request,
+    order_id: str = Query(...),
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Finalise a donation claim that required a shipping fee.
+
+    Flow:
+      1. Verify the transaction belongs to the claiming user and is
+         still pending.
+      2. Capture the PayPal order.
+      3. Persist capture metadata on the transaction.
+      4. Send the donor the accept/deny email (they couldn't act before
+         the recipient paid for shipping).
+    """
+    if not paypal_client.is_configured():
+        raise HTTPException(503, "PayPal not configured")
+    db = get_db()
+    tx = await db.transactions.find_one(
+        {"id": tx_id, "kind": "donate", "buyer_id": user["id"]}, {"_id": 0}
+    )
+    if not tx:
+        raise HTTPException(404, "Donation transaction not found")
+    if tx.get("paypal", {}).get("status") == "COMPLETED":
+        return {"ok": True, "already_captured": True, "transaction": tx}
+    if tx.get("paypal", {}).get("order_id") != order_id:
+        raise HTTPException(400, "Order id does not match this transaction.")
+
+    try:
+        captured = await paypal_client.capture_order(order_id)
+    except paypal_client.PayPalError as exc:
+        await db.transactions.update_one(
+            {"id": tx_id},
+            {"$set": {
+                "paypal.status": "DENIED",
+                "updated_at": _now_iso(),
+            }},
+        )
+        raise HTTPException(502, {"paypal_error": str(exc.body)}) from exc
+
+    capture = (
+        (captured.get("purchase_units") or [{}])[0]
+        .get("payments", {})
+        .get("captures", [{}])[0]
+    )
+    payer = captured.get("payer") or {}
+    now = _now_iso()
+    await db.transactions.update_one(
+        {"id": tx_id},
+        {"$set": {
+            "paypal.capture_id": capture.get("id"),
+            "paypal.status": capture.get("status", "COMPLETED"),
+            "paypal.payer_id": payer.get("payer_id"),
+            "paypal.payer_email": payer.get("email_address"),
+            "paypal.captured_at": now,
+            "updated_at": now,
+        }},
+    )
+
+    # Fire donor accept/deny email now that shipping is paid. We re-mint
+    # the URLs using the jti already persisted on the transaction so
+    # there's exactly one valid link pair per donation.
+    try:
+        fresh = await db.transactions.find_one({"id": tx_id}, {"_id": 0})
+        jti = ((fresh or {}).get("donate") or {}).get("action_token_jti")
+        # Build a synthetic token from the persisted jti. Mint a fresh
+        # token with the SAME jti so only one link pair is alive.
+        if jti:
+            import jwt as _jwt
+            from app.config import settings as _settings
+            from datetime import datetime, timedelta, timezone
+            now_dt = datetime.now(timezone.utc)
+            payload = {
+                "aud": action_tokens.ACTION_AUD,
+                "sub": tx_id,
+                "role": "donor",
+                "decision_choices": ["accept", "deny"],
+                "jti": jti,
+                "iat": int(now_dt.timestamp()),
+                "exp": int((now_dt + timedelta(hours=24 * 7)).timestamp()),
+            }
+            token = _jwt.encode(
+                payload, _settings.JWT_SECRET, algorithm=_settings.JWT_ALGORITHM
+            )
+            listing = await db.listings.find_one(
+                {"id": fresh["listing_id"]}, {"_id": 0}
+            ) or {}
+            donor = await _load_user(db, fresh["seller_id"]) or {}
+            recipient = await _load_user(db, fresh["buyer_id"]) or {}
+            await _send_donation_accept_email(
+                db=db, tx=fresh, listing=listing,
+                donor=donor, recipient=recipient,
+                accept_url=_action_url(token, "accept", request=request),
+                deny_url=_action_url(token, "deny", request=request),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("post-capture donation email failed for %s: %s", tx_id, exc)
+
+    final = await db.transactions.find_one({"id": tx_id}, {"_id": 0})
+    return {"ok": True, "transaction": final}
 
 
 # -----------------------------------------------------------------
@@ -345,6 +554,7 @@ async def claim_donation(
 # -----------------------------------------------------------------
 @router.get("/action")
 async def transaction_action(
+    request: Request,
     token: str = Query(...),
     decision: str = Query(..., regex="^(accept|deny)$"),
 ) -> RedirectResponse:
@@ -355,26 +565,24 @@ async def transaction_action(
 
     tx = await repos.find_one(db.transactions, {"id": tx_id}) if tx_id else None
     if not tx:
-        return _landing_redirect(tx_id or "unknown", "invalid")
+        return _landing_redirect(tx_id or "unknown", "invalid", request=request)
 
     kind = tx.get("kind", "buy")
     if kind not in ("swap", "donate"):
-        return _landing_redirect(tx_id, "invalid")
+        return _landing_redirect(tx_id, "invalid", request=request)
 
     nested = tx.get(kind) or {}
     expected_jti = nested.get("action_token_jti")
     used = nested.get("action_token_used")
 
     if not expected_jti or expected_jti != presented_jti:
-        return _landing_redirect(tx_id, "invalid")
+        return _landing_redirect(tx_id, "invalid", request=request)
     if used:
-        # Idempotent: figure out which decision we already recorded and
-        # bounce them to the same landing state instead of re-applying.
         if nested.get("accepted_at"):
-            return _landing_redirect(tx_id, "accepted")
+            return _landing_redirect(tx_id, "accepted", request=request)
         if nested.get("denied_at"):
-            return _landing_redirect(tx_id, "denied")
-        return _landing_redirect(tx_id, "invalid")
+            return _landing_redirect(tx_id, "denied", request=request)
+        return _landing_redirect(tx_id, "invalid", request=request)
 
     now = _now_iso()
     if decision == "accept":
@@ -428,7 +636,7 @@ async def transaction_action(
                 ),
             }
             if decision == "accept":
-                confirm_url = f"{_APP_URL}/transactions/{tx_id}/landing?status=accepted"
+                confirm_url = f"{_derive_app_url(request)}/transactions/{tx_id}/landing?status=accepted"
                 if lister.get("email"):
                     await es.swap_success(
                         to=lister["email"],
@@ -476,7 +684,10 @@ async def transaction_action(
     except Exception as exc:  # noqa: BLE001
         logger.warning("post-action email dispatch failed for %s: %s", tx_id, exc)
 
-    return _landing_redirect(tx_id, "accepted" if decision == "accept" else "denied")
+    return _landing_redirect(
+        tx_id, "accepted" if decision == "accept" else "denied",
+        request=request,
+    )
 
 
 # -----------------------------------------------------------------

@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Wave 2 shipped: Swap + Donate + Email Landing + Listing Detail Enrichment)**
+# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 planned: Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene)**
 
 ## 1) Objectives
 
@@ -27,25 +27,22 @@
   - **PII-safe name fallback**: `display_name → company_name → first_name → (hide)`
   - location fallback: `listing.location → seller.home_location → seller.address`.
 - ✅ Resend transactional email integration wired end-to-end.
-  - Templates live in `services/email_service.py`:
+  - Templates in `services/email_service.py`:
     - `sale_seller`, `sale_buyer`
     - `swap_request`, `swap_success`, `swap_denied`
     - `donation_both`
-  - Sale emails are triggered from PayPal capture flow.
+  - Sale emails triggered from PayPal capture flow.
 
 ### ✅ Marketplace Wave 2 — Swap + Donate pipelines (JWT-signed email actions) — **SHIPPED**
 Wave 2 shipped the first complete “non-buy” marketplace transaction flows:
 1. ✅ **Swap pipeline**: propose → email accept/deny (JWT-signed) → confirm receipt → complete.
 2. ✅ **Donation pipeline (MVP)**: claim donation → donor accept/deny via JWT email → confirmation email.
-   - Note: **optional PayPal handling-fee capture is deferred** (planned for next wave).
-3. ✅ **Transaction landing page**: a minimal page for accept/deny clicks from emails (auth-optional).
-4. ✅ **Listing detail enrichment**: shows **size, description, condition** clearly and renders mode-aware CTAs.
+3. ✅ **Transaction landing page**: minimal status UI after accept/deny clicks (auth-optional).
+4. ✅ **Listing detail enrichment**: shows **size, description, condition** + mode-aware CTAs.
 
 **Decisions implemented (locked):**
-- ✅ **JWT approach**: signed tokens using existing `JWT_SECRET` with dedicated `aud`.
-- ✅ **Swap UX**: swap button opens a **modal** listing the user’s closet; user selects **1 offered item**.
-- ✅ **Donation**: “Claim donation” wired to MVP accept/deny emails; PayPal handling-fee capture deferred.
-- ✅ **Landing page**: minimal status banner + listing summary + “Back to Marketplace” CTA.
+- ✅ **JWT action links** signed using `JWT_SECRET` with a dedicated `aud`.
+- ✅ **Swap UX**: modal closet picker (single item offer).
 - ✅ **Self actions**: hide Swap/Donate on own listings.
 
 ---
@@ -96,144 +93,142 @@ Delivered previously; unchanged.
 - ✅ Email action links are safe:
   - JWT signed with `JWT_SECRET`
   - dedicated audience claim `aud="dressapp.tx_action"`
-  - expiry (implemented at 7 days for usability; can be tightened to 24h later)
-  - single-use protection with persisted `jti` + `action_token_used`.
-
----
+  - expiry (implemented at 7 days for usability)
+  - single-use protection with persisted `jti` + `action_token_used`
 
 #### W2.1 — Backend schema updates (transactions) — **SHIPPED**
 **File:** `app/backend/app/models/schemas.py`
 - ✅ Added `Transaction.kind: "buy" | "swap" | "donate"` (default `"buy"`).
-- ✅ Added nested subdocuments:
-  - ✅ `Transaction.swap`: `offered_item_id`, `accepted_at`, `denied_at`, `lister_received_at`, `swapper_received_at`, `completed_at`, `action_token_jti`, `action_token_used`
-  - ✅ `Transaction.donate`: `handling_fee_cents`, `accepted_at`, `denied_at`, `completed_at`, `action_token_jti`, `action_token_used`
-- ✅ Extended `TxStatus` to include: `accepted`, `denied`, `shipped`, `completed` (legacy buy flows remain compatible).
-
----
+- ✅ Added nested `swap` + `donate` sub-documents.
+- ✅ Extended `TxStatus` with `accepted`, `denied`, `shipped`, `completed`.
 
 #### W2.2 — Backend service: JWT action tokens — **SHIPPED**
 **File:** `app/backend/app/services/action_tokens.py`
 - ✅ `mint(...) → (token, jti)` and `verify(token, expected_decision=...)`.
 - ✅ Dedicated audience: `aud="dressapp.tx_action"`.
-- ✅ Single-use via persisted `jti` on tx and `action_token_used` on consumption.
 
----
-
-#### W2.3 — Backend endpoints (Swap) — **SHIPPED**
+#### W2.3 — Backend endpoints (Swap/Donate/Action/Landing) — **SHIPPED**
 **File:** `app/backend/app/api/v1/transactions.py`
 - ✅ `POST /api/v1/transactions/swap`
-  - validates listing active + not self
-  - validates offered item belongs to swapper
-  - creates `kind="swap"` transaction
-  - emails lister via `email_service.swap_request(...)`
-- ✅ `GET /api/v1/transactions/action?token=...&decision=accept|deny` (public)
-  - verifies JWT + single-use
-  - applies decision idempotently
-  - sends follow-ups (`swap_success` / `swap_denied`)
-  - 303-redirects to `/transactions/:id/landing?status=...`
+- ✅ `POST /api/v1/transactions/donate` (MVP email-only accept/deny)
+- ✅ `GET /api/v1/transactions/action` (public)
 - ✅ `POST /api/v1/transactions/{tx_id}/confirm-receipt`
-  - both parties can confirm receipt
-  - when both confirmed → marks completed, flips closet item ownership, closes listing.
+- ✅ `GET /api/v1/transactions/{tx_id}/landing-summary` (public)
 
----
-
-#### W2.4 — Backend endpoints (Donate) — **SHIPPED (MVP)**
-**File:** `app/backend/app/api/v1/transactions.py`
-- ✅ `POST /api/v1/transactions/donate`
-  - creates `kind="donate"` transaction
-  - sends accept/deny email to donor (reuses swap_request layout)
-  - on accept → sends `donation_both` to donor+recipient
-- ⏳ PayPal handling-fee capture path: **deferred** (planned for next wave).
-
----
-
-#### W2.5 — Public landing projection — **SHIPPED**
-**File:** `app/backend/app/api/v1/transactions.py`
-- ✅ `GET /api/v1/transactions/{id}/landing-summary` (public)
-  - returns minimal transaction + listing fields for email landing page.
-
----
-
-#### W2.6 — DB index fix (PayPal order id uniqueness) — **SHIPPED**
+#### W2.4 — DB index fix (PayPal order id uniqueness) — **SHIPPED**
 **File:** `app/backend/app/db/database.py`
-- ✅ Migrated `transactions.paypal.order_id` uniqueness from `sparse=True` to `partialFilterExpression` (string only)
-  - prevents duplicate-key errors for swap/donate transactions where `paypal.order_id` is null.
+- ✅ Migrated `transactions.paypal.order_id` unique index from `sparse=True` to a `partialFilterExpression` (string only).
+
+#### W2.5 — Frontend Wave 2 components — **SHIPPED**
+- ✅ `ListingDetail.jsx` mode-aware CTA (Buy/Swap/Donate) + meta badges + description.
+- ✅ `SwapPickerModal.jsx` (closet picker).
+- ✅ `TransactionLanding.jsx` + route `/transactions/:id/landing` (auth-optional).
+- ✅ `api.js` additions: `proposeSwap`, `claimDonation`, `confirmReceipt`, `getLandingSummary`.
 
 ---
 
-#### W2.7 — Frontend: ListingDetail enrichment + mode-aware CTAs — **SHIPPED**
-**File:** `app/frontend/src/pages/ListingDetail.jsx`
-- ✅ Always shows size/condition/category/mode badges + description block.
-- ✅ Mode-aware primary CTA:
-  - `sell` → PayPal buy
-  - `swap` → “Propose a swap” (opens modal)
-  - `donate` → “Claim this donation” (MVP request)
-- ✅ Self-owned listings show “Manage in mine” only (CTAs hidden).
+### Marketplace Wave 3 — **Shipping Fee (listing-level) + Transactions UI polish + APP_PUBLIC_URL hygiene** — **P0 / NEXT**
+
+**Wave 3 scope (user-confirmed):**
+- ✅ **No “handling fee” concept for donations**. Donations remain free per DressApp’s environmental ethos.
+- ✅ Introduce **listing-level optional shipping fee**.
+- ✅ Add a community nudge: encourage local pickup / relationship-building.
+- ✅ Transactions UI: tabs + multi-select status chips.
+- ✅ APP_PUBLIC_URL: auto-derive when unset + explicit override when set.
+
+#### W3A — Shipping Fee (Listing-level) + PayPal hookup (P0)
+
+**Goal:** Shipping becomes a first-class, optional listing attribute. This shipping fee is the only money component for donation listings.
+
+**Backend changes**
+- **Schema:**
+  - Add `Listing.shipping_fee_cents: int = 0`.
+- **DTOs:**
+  - Add shipping fee to `CreateListingIn` and `UpdateListingIn`.
+- **SELL flow (PayPal):**
+  - Update PayPal `create_order` gross to include shipping:
+    - `amount = list_price_cents + shipping_fee_cents`
+  - Persist shipping fee on the transaction for transparency (either as part of `financial.gross_cents` or as an explicit field; decide implementation detail during coding).
+- **DONATE flow:**
+  - If `listing.shipping_fee_cents > 0`:
+    - Claim opens a PayPal order for shipping only.
+    - After PayPal capture succeeds → email donor accept/deny links (JWT).
+    - If donor accepts → send `donation_both`.
+  - If `listing.shipping_fee_cents == 0`:
+    - Keep current email-only flow (no payment).
+- **SWAP flow (Wave 3):**
+  - Shipping fee is **display-only**; parties coordinate directly.
+  - (Wave 4+ can add PayPal capture at propose-time if requested.)
+
+**Deprecation / compatibility**
+- Deprecate (but do not break) `DonateClaimIn.handling_fee_cents`:
+  - Backend should ignore it for business logic once shipping is listing-driven.
+  - Keep field temporarily so older clients don’t break.
+
+**Frontend changes**
+- Listing detail page displays shipping:
+  - Copy: `Shipping: $X.XX · Meet locally to skip the fee 🌱`
+  - For donate listings, CTA copy remains “Claim this donation”; payment step appears only when shipping fee > 0.
 
 ---
 
-#### W2.8 — Frontend: Swap picker modal — **SHIPPED**
-**File:** `app/frontend/src/components/SwapPickerModal.jsx`
-- ✅ Shadcn Dialog + closet grid, single-select.
-- ✅ Submits via `api.proposeSwap(...)`.
+#### W3B — Transactions Page Polish (P0)
+
+**Goal:** Make the transactions page useful across buy/swap/donate.
+
+**Frontend:** `app/frontend/src/pages/Transactions.jsx`
+- Add a **tab bar** with counts:
+  - `All / Buying / Selling / Swaps / Donations`
+- Add **filter chips** (multi-select) by status:
+  - `pending / accepted / denied / shipped / completed`
+- Per-row UI:
+  - kind-appropriate icon + label
+  - show listing title + mode
+  - show "Confirm receipt" CTA when:
+    - `kind=swap` and `status=accepted` (or shipped) and the current user hasn’t confirmed
+    - `kind=donate` and `status=accepted` and the recipient hasn’t confirmed
+- Filtering approach:
+  - Client-side filtering over one fetch from `/api/v1/transactions` (no new backend endpoints required).
 
 ---
 
-#### W2.9 — Frontend: Transaction landing page — **SHIPPED**
-**Files:**
-- `app/frontend/src/pages/TransactionLanding.jsx`
-- `app/frontend/src/App.js`
-- ✅ Route: `/transactions/:id/landing`
-- ✅ Status banner (Accepted / Declined / Pending / Invalid)
-- ✅ Listing summary includes size, condition, description.
-- ✅ Works without auth (uses public landing-summary endpoint).
+#### W3C — APP_PUBLIC_URL Hygiene (P0)
 
----
+**Goal:** Ensure email links and redirects point to the correct environment.
 
-#### W2.10 — API client updates — **SHIPPED**
-**File:** `app/frontend/src/lib/api.js`
-- ✅ `proposeSwap(listingId, offeredItemId)`
-- ✅ `claimDonation(listingId, handlingFeeCents)`
-- ✅ `confirmReceipt(txId)`
-- ✅ `getLandingSummary(txId)` (public)
+**Backend**
+- Auto-derive base URL when `APP_PUBLIC_URL` is unset:
+  - Use FastAPI `Request` with `X-Forwarded-Proto`, `X-Forwarded-Host`, `Host`.
+- Preserve explicit override:
+  - If `APP_PUBLIC_URL` is set → always use it (prod lock).
+- Refactor link builders:
+  - Update `_action_url()` and `_landing_redirect()` in `transactions.py` to accept `Request` and compute base dynamically.
 
----
-
-#### W2.11 — Testing & release hygiene — **SHIPPED**
-- ✅ Manual curl smoke tests passed (swap propose, accept/deny, token reuse, token tamper, donate).
-- ✅ `testing_agent` report:
-  - backend: **100% pass**
-  - frontend: **60% pass** due to automated session expiry (testing artifact; no product bugs reported)
-- ✅ `CHANGELOG.md` updated with Wave 2 entries.
+**Docs**
+- Add `.env.example` notes:
+  - `APP_PUBLIC_URL` should be set in prod; optional in preview/dev.
 
 ---
 
 ## 3) Next Actions (immediate)
 
-### P0 — Wave 3 follow-ups (next)
-1. **Donation handling-fee via PayPal** (finish the deferred branch):
-   - create PayPal order on claim when fee  > 0
-   - capture endpoint
-   - only send donor/recipient confirmation after capture
-   - ensure idempotency and refunds policy.
-2. **Transactions page polish**:
-   - filter/group by `kind` and `status`
-   - add clear labels for swap/donate vs buy
-   - show confirm-receipt CTA when applicable.
-3. **Environment URLs**:
-   - ensure `APP_PUBLIC_URL` is correctly set per environment so email redirects point to the correct frontend (prod vs preview).
+### P0 — Wave 3 (now)
+1. Implement listing-level `shipping_fee_cents` end-to-end.
+2. Wire PayPal shipping-fee capture for donation claim when shipping fee > 0.
+3. Transactions page polish: tabs + chips + confirm-receipt CTA.
+4. APP_PUBLIC_URL: auto-derive when unset + explicit override.
 
 ### P1
-4. Tighten swap reservation semantics:
-   - decide whether listing becomes `reserved` vs `removed` immediately on accept
-   - add timeout/release logic for stale accepted swaps.
+5. Tighten swap reservation semantics:
+   - reserved vs removed policy on accept
+   - timeout/release logic for stale accepted swaps
 
 ### P2
-5. Object storage migration (Mongo base64 bloat → R2/S3).
-6. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
+6. Object storage migration (Mongo base64 bloat → R2/S3).
+7. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
 
 ### P3
-7. Refactor `AddItem.jsx` into modules.
+8. Refactor `AddItem.jsx` into modules.
 
 ---
 
@@ -246,18 +241,25 @@ Delivered previously; unchanged.
 - ✅ Resend sale emails trigger on PayPal capture.
 
 ### Marketplace Wave 2 (shipped)
-- ✅ Swap:
-  - propose from listing detail
-  - lister receives JWT-signed Accept / Decline
-  - tokens have dedicated audience and single-use protection
-  - accept/decline redirects to `/transactions/:id/landing`
-  - both parties confirm receipt; swap completes, closet ownership flips, listing closes
-- ✅ Donate (MVP):
-  - claim donation
-  - donor accept/deny via JWT email
-  - donor/recipient receive confirmation email (`donation_both`) on accept
-  - PayPal handling-fee capture is explicitly deferred
-- ✅ UI:
-  - listing detail shows size/description/condition
-  - swap/donate CTAs hidden on own listings
-  - landing page works even in logged-out browsers
+- ✅ Swap: propose → JWT accept/deny → landing → confirm receipt → completion.
+- ✅ Donate (MVP): claim → donor accept/deny email → confirmation email.
+- ✅ UI: listing detail shows size/description/condition; CTAs hidden on own listings; landing page works logged-out.
+
+### Marketplace Wave 3 (target)
+- Shipping fee:
+  - ✅ `Listing.shipping_fee_cents` exists and is editable.
+  - ✅ Sell PayPal charges include shipping.
+  - ✅ Donate claim requires PayPal shipping payment only when shipping fee > 0.
+  - ✅ UI nudges local pickup: “Meet locally to skip the fee 🌱”.
+- Transactions UI:
+  - ✅ Tabs + multi-select status chips.
+  - ✅ Confirm receipt CTA appears appropriately.
+- Environment URLs:
+  - ✅ Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
+
+---
+
+## Out of scope for Wave 3 (deferred)
+- Swap PayPal capture at propose-time (Wave 4+ if community requests it)
+- Refund policy for captured donation shipping
+- Transactions page search by listing title
