@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 planned: Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene)**
+# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped: Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene)**
 
 ## 1) Objectives
 
@@ -44,6 +44,15 @@ Wave 2 shipped the first complete “non-buy” marketplace transaction flows:
 - ✅ **JWT action links** signed using `JWT_SECRET` with a dedicated `aud`.
 - ✅ **Swap UX**: modal closet picker (single item offer).
 - ✅ **Self actions**: hide Swap/Donate on own listings.
+
+### ✅ Marketplace Wave 3 — Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene — **SHIPPED**
+Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPal capture for donation shipping, and a polished transactions hub.
+
+**Ethos enforcement (implemented):**
+- ✅ **No handling fees for donations** (donations remain free; only optional shipping reimbursement).
+- ✅ UI nudges local pickup and community connection:
+  - “🌱 Prefer local pickup”
+  - “Meet locally to skip the fee 🌱”
 
 ---
 
@@ -110,7 +119,7 @@ Delivered previously; unchanged.
 #### W2.3 — Backend endpoints (Swap/Donate/Action/Landing) — **SHIPPED**
 **File:** `app/backend/app/api/v1/transactions.py`
 - ✅ `POST /api/v1/transactions/swap`
-- ✅ `POST /api/v1/transactions/donate` (MVP email-only accept/deny)
+- ✅ `POST /api/v1/transactions/donate` (Wave 2: email-only accept/deny)
 - ✅ `GET /api/v1/transactions/action` (public)
 - ✅ `POST /api/v1/transactions/{tx_id}/confirm-receipt`
 - ✅ `GET /api/v1/transactions/{tx_id}/landing-summary` (public)
@@ -127,108 +136,103 @@ Delivered previously; unchanged.
 
 ---
 
-### Marketplace Wave 3 — **Shipping Fee (listing-level) + Transactions UI polish + APP_PUBLIC_URL hygiene** — **P0 / NEXT**
+### Marketplace Wave 3 — **Shipping Fee (listing-level) + Transactions UI polish + APP_PUBLIC_URL hygiene** — **SHIPPED**
 
-**Wave 3 scope (user-confirmed):**
-- ✅ **No “handling fee” concept for donations**. Donations remain free per DressApp’s environmental ethos.
+**Wave 3 scope (user-confirmed & implemented):**
+- ✅ **No “handling fee” concept for donations**. Donations remain free.
 - ✅ Introduce **listing-level optional shipping fee**.
-- ✅ Add a community nudge: encourage local pickup / relationship-building.
+- ✅ Add community nudge: encourage local pickup / relationship-building.
 - ✅ Transactions UI: tabs + multi-select status chips.
 - ✅ APP_PUBLIC_URL: auto-derive when unset + explicit override when set.
 
-#### W3A — Shipping Fee (Listing-level) + PayPal hookup (P0)
+#### W3A — Listing-level Shipping Fee + PayPal hookup — **SHIPPED**
 
-**Goal:** Shipping becomes a first-class, optional listing attribute. This shipping fee is the only money component for donation listings.
+**Goal achieved:** Shipping is a first-class, optional listing attribute. For donations, the *only* money component is optional shipping reimbursement.
 
-**Backend changes**
-- **Schema:**
-  - Add `Listing.shipping_fee_cents: int = 0`.
-- **DTOs:**
-  - Add shipping fee to `CreateListingIn` and `UpdateListingIn`.
-- **SELL flow (PayPal):**
-  - Update PayPal `create_order` gross to include shipping:
+**Backend (shipped)**
+- ✅ **Schema:** `Listing.shipping_fee_cents: int = 0` (default 0, no cap)
+- ✅ **DTOs:** added to `CreateListingIn` + `UpdateListingIn`
+- ✅ **SELL flow (PayPal):**
+  - PayPal `create_order` gross now includes shipping:
     - `amount = list_price_cents + shipping_fee_cents`
-  - Persist shipping fee on the transaction for transparency (either as part of `financial.gross_cents` or as an explicit field; decide implementation detail during coding).
-- **DONATE flow:**
+  - Returns line-item breakdown to frontend:
+    - `list_price_cents`, `shipping_fee_cents`, `amount_cents`
+- ✅ **DONATE flow:**
   - If `listing.shipping_fee_cents > 0`:
-    - Claim opens a PayPal order for shipping only.
-    - After PayPal capture succeeds → email donor accept/deny links (JWT).
-    - If donor accepts → send `donation_both`.
+    - claim creates PayPal order for shipping reimbursement
+    - capture required before donor is emailed
+    - new endpoint: `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=...`
   - If `listing.shipping_fee_cents == 0`:
-    - Keep current email-only flow (no payment).
-- **SWAP flow (Wave 3):**
-  - Shipping fee is **display-only**; parties coordinate directly.
-  - (Wave 4+ can add PayPal capture at propose-time if requested.)
+    - keep email-only flow (no payment)
+- ✅ **Deprecation / compatibility:**
+  - `DonateClaimIn.handling_fee_cents` retained for backward compatibility but ignored for business logic.
 
-**Deprecation / compatibility**
-- Deprecate (but do not break) `DonateClaimIn.handling_fee_cents`:
-  - Backend should ignore it for business logic once shipping is listing-driven.
-  - Keep field temporarily so older clients don’t break.
-
-**Frontend changes**
-- Listing detail page displays shipping:
-  - Copy: `Shipping: $X.XX · Meet locally to skip the fee 🌱`
-  - For donate listings, CTA copy remains “Claim this donation”; payment step appears only when shipping fee > 0.
+**Frontend (shipped)**
+- ✅ Create Listing form:
+  - new shipping fee input (`shipping_fee_cents`) with community-first helper copy
+  - “🌱 Prefer local pickup” nudges default to 0
+- ✅ Listing detail:
+  - shows shipping line if shipping_fee > 0
+  - shows “🌱 Local pickup preferred — no shipping fee” when 0
+- ✅ Donation claim UI:
+  - shipping_fee == 0 → one-click claim (email donor)
+  - shipping_fee > 0 → PayPal flow (pay shipping → capture → donor emailed accept/deny)
+- ✅ Frontend API: `captureDonationShipping(txId, orderId)` added.
 
 ---
 
-#### W3B — Transactions Page Polish (P0)
+#### W3B — Transactions Page Polish — **SHIPPED**
 
-**Goal:** Make the transactions page useful across buy/swap/donate.
+**Goal achieved:** Transactions page works across buy/swap/donate and supports fast filtering.
 
-**Frontend:** `app/frontend/src/pages/Transactions.jsx`
-- Add a **tab bar** with counts:
+**Frontend (shipped):** `app/frontend/src/pages/Transactions.jsx`
+- ✅ Tabs by kind with counts:
   - `All / Buying / Selling / Swaps / Donations`
-- Add **filter chips** (multi-select) by status:
-  - `pending / accepted / denied / shipped / completed`
-- Per-row UI:
+- ✅ Multi-select status chips:
+  - `pending / accepted / denied / shipped / completed / paid / refunded`
+- ✅ Row affordances:
   - kind-appropriate icon + label
-  - show listing title + mode
-  - show "Confirm receipt" CTA when:
-    - `kind=swap` and `status=accepted` (or shipped) and the current user hasn’t confirmed
-    - `kind=donate` and `status=accepted` and the recipient hasn’t confirmed
-- Filtering approach:
-  - Client-side filtering over one fetch from `/api/v1/transactions` (no new backend endpoints required).
+  - status tone
+  - inline **Confirm receipt** CTA on accepted swap/donate rows where the current user hasn’t confirmed
 
 ---
 
-#### W3C — APP_PUBLIC_URL Hygiene (P0)
+#### W3C — APP_PUBLIC_URL Hygiene — **SHIPPED**
 
-**Goal:** Ensure email links and redirects point to the correct environment.
+**Goal achieved:** Email links + redirects resolve correctly across prod and preview environments.
 
-**Backend**
-- Auto-derive base URL when `APP_PUBLIC_URL` is unset:
-  - Use FastAPI `Request` with `X-Forwarded-Proto`, `X-Forwarded-Host`, `Host`.
-- Preserve explicit override:
-  - If `APP_PUBLIC_URL` is set → always use it (prod lock).
-- Refactor link builders:
-  - Update `_action_url()` and `_landing_redirect()` in `transactions.py` to accept `Request` and compute base dynamically.
+**Backend (shipped)**
+- ✅ Auto-derive base URL when `APP_PUBLIC_URL` is unset:
+  - reads `X-Forwarded-Proto`, `X-Forwarded-Host`, `Host`
+- ✅ Preserve explicit override:
+  - if `APP_PUBLIC_URL` is set → always use it (prod lock)
+- ✅ Refactor link builders:
+  - `_action_url()` and `_landing_redirect()` accept FastAPI `Request`
 
-**Docs**
-- Add `.env.example` notes:
-  - `APP_PUBLIC_URL` should be set in prod; optional in preview/dev.
+**Docs (shipped)**
+- ✅ Added `backend/.env.example` documenting env vars and precedence rules.
 
 ---
 
 ## 3) Next Actions (immediate)
 
-### P0 — Wave 3 (now)
-1. Implement listing-level `shipping_fee_cents` end-to-end.
-2. Wire PayPal shipping-fee capture for donation claim when shipping fee > 0.
-3. Transactions page polish: tabs + chips + confirm-receipt CTA.
-4. APP_PUBLIC_URL: auto-derive when unset + explicit override.
-
-### P1
-5. Tighten swap reservation semantics:
+### P0 — Next wave candidates
+1. Swap payment support (optional): PayPal capture for swap shipping (only if community requests).
+2. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
 
+### P1
+3. Transactions page quality-of-life:
+   - search by listing title
+   - per-kind empty states and summaries
+
 ### P2
-6. Object storage migration (Mongo base64 bloat → R2/S3).
-7. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
+4. Object storage migration (Mongo base64 bloat → R2/S3).
+5. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
 
 ### P3
-8. Refactor `AddItem.jsx` into modules.
+6. Refactor `AddItem.jsx` into modules.
 
 ---
 
@@ -245,21 +249,23 @@ Delivered previously; unchanged.
 - ✅ Donate (MVP): claim → donor accept/deny email → confirmation email.
 - ✅ UI: listing detail shows size/description/condition; CTAs hidden on own listings; landing page works logged-out.
 
-### Marketplace Wave 3 (target)
-- Shipping fee:
-  - ✅ `Listing.shipping_fee_cents` exists and is editable.
-  - ✅ Sell PayPal charges include shipping.
-  - ✅ Donate claim requires PayPal shipping payment only when shipping fee > 0.
-  - ✅ UI nudges local pickup: “Meet locally to skip the fee 🌱”.
-- Transactions UI:
-  - ✅ Tabs + multi-select status chips.
-  - ✅ Confirm receipt CTA appears appropriately.
-- Environment URLs:
-  - ✅ Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
+### Marketplace Wave 3 (shipped)
+- ✅ Shipping fee:
+  - `Listing.shipping_fee_cents` exists, is editable, and defaults to 0.
+  - Sell PayPal charges include shipping and return a line-item breakdown.
+  - Donate claim requires PayPal shipping reimbursement **only** when shipping fee > 0.
+  - UI nudges local pickup: “🌱 Prefer local pickup” / “Meet locally to skip the fee 🌱”.
+  - Donations remain free (no handling fee concept; backward-compat stub deprecated).
+- ✅ Transactions UI:
+  - Tabs + multi-select status chips.
+  - Confirm receipt CTA appears appropriately for accepted swap/donate rows.
+- ✅ Environment URLs:
+  - Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
+  - Explicit `APP_PUBLIC_URL` overrides derivation (prod lock).
 
 ---
 
-## Out of scope for Wave 3 (deferred)
+## Out of scope (deferred)
 - Swap PayPal capture at propose-time (Wave 4+ if community requests it)
 - Refund policy for captured donation shipping
-- Transactions page search by listing title
+- Transactions search by listing title (future QoL)

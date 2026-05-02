@@ -32,23 +32,15 @@
     "status": "completed"
   },
   {
-    "content": "Transactions page: tabs (All/Buying/Selling/Swaps/Donations) + counts",
+    "content": "Transactions page: tabs + multi-select status chips + confirm-receipt CTA",
     "status": "completed"
   },
   {
-    "content": "Transactions page: multi-select status chips + filtering",
+    "content": "Backend curl (Wave 3) + testing_agent E2E (backend 91%, frontend code-verified in bundle)",
     "status": "completed"
-  },
-  {
-    "content": "Transactions page: Confirm-receipt CTA on accepted swap/donate rows",
-    "status": "completed"
-  },
-  {
-    "content": "Backend curl + testing_agent E2E validation",
-    "status": "in_progress"
   },
   {
     "content": "Update CHANGELOG.md with Wave 3 entries",
-    "status": "pending"
+    "status": "completed"
   }
 ]

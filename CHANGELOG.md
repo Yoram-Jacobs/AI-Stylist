@@ -8,6 +8,68 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
+## [Unreleased] — Marketplace Wave 3
+
+### Added
+- **Listing-level shipping fee** (`Listing.shipping_fee_cents`). Optional,
+  defaults to 0 (local-pickup only), and applies uniformly across sell,
+  swap, and donate modes. DressApp's environmental ethos is expressed
+  directly in the UI: listings without a shipping fee advertise
+  "🌱 Local pickup preferred — no shipping fee", and listings with a
+  fee pair it with "Or meet locally to skip the fee 🌱" messaging.
+- **PayPal capture for donation shipping**. When a donate listing sets
+  `shipping_fee_cents > 0`, claimers pay that amount via PayPal:
+  - `POST /api/v1/transactions/donate` creates a PayPal order instead
+    of emailing the donor.
+  - `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=…`
+    finalises the capture and only then fires the donor's JWT-signed
+    accept/deny email.
+  - Frontend reuses `PayPalCheckoutButton` for consistent checkout UX
+    across buy and donation-shipping flows.
+- **Transactions page rewrite**. `/transactions` now features:
+  - Primary tabs by transaction kind (All / Buying / Selling / Swaps /
+    Donations), each with a live count badge.
+  - Secondary multi-select status chips (pending / accepted / denied /
+    shipped / completed / paid / refunded).
+  - Per-row kind-appropriate icons, status tone, and an inline
+    "Confirm receipt" button for accepted swap + donate rows belonging
+    to the current user.
+- **Create Listing form** adds a shipping-fee input with community-first
+  helper copy pushing users toward local pickup.
+- **`APP_PUBLIC_URL` auto-derive**. When the env var is unset, the
+  backend now derives the public origin from `X-Forwarded-Proto` +
+  `X-Forwarded-Host` (or `Host`) on the inbound request, so preview
+  and staging pods build correct email links without per-env
+  configuration. Explicit `APP_PUBLIC_URL` still wins when set. A new
+  `backend/.env.example` documents every environment variable the
+  backend reads, including the precedence rules for this one.
+
+### Changed
+- `payments.py::listing_buy_create` now adds `listing.shipping_fee_cents`
+  on top of `list_price_cents` when creating the PayPal order. The
+  returned payload breaks `list_price_cents`, `shipping_fee_cents`,
+  and `amount_cents` apart so the frontend can render a clean line-
+  item preview. Seller-side fee math remains computed on the item
+  price only (shipping is pass-through).
+- `transactions.py` endpoints that emit outbound URLs (`/action`,
+  `/swap`, `/donate`, `/donate/{id}/capture`) now accept the FastAPI
+  `Request` so `_action_url` and `_landing_redirect` can auto-derive
+  the correct origin.
+
+### Deprecated
+- `DonateClaimIn.handling_fee_cents` — donations are always free per
+  DressApp's environmental ethos. The field is still accepted by the
+  endpoint for backwards compatibility but is ignored server-side;
+  shipping fees are now driven by `listing.shipping_fee_cents`.
+
+### API / endpoints added
+- `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=…`
+
+### Frontend api.js additions
+- `api.captureDonationShipping(txId, orderId)`
+
+---
+
 ## [Unreleased] — Marketplace Wave 2
 
 ### Added
