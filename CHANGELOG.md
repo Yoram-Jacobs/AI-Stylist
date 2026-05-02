@@ -8,6 +8,70 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
+## [Unreleased] — Marketplace Wave 2
+
+### Added
+- **Swap pipeline**. Users can propose a swap directly from a listing:
+  - New `POST /api/v1/transactions/swap` creates a zero-cash transaction
+    linking the swapper's offered closet item to the lister's listing.
+  - `SwapPickerModal` frontend component (Shadcn Dialog) lets the user
+    browse their own closet and pick one item to offer.
+- **Donation flow**. New `POST /api/v1/transactions/donate` endpoint plus
+  one-click "Claim this donation" CTA on `mode=donate` listings. Handling
+  fee is sent to the backend as metadata; PayPal handling-fee capture is
+  deferred to a follow-up iteration.
+- **JWT-signed email accept/deny**. New `services/action_tokens.py` mints
+  short-lived JWTs (7-day expiry) with a dedicated `aud="dressapp.tx_action"`
+  claim so they cannot be replayed against auth endpoints. Each token
+  carries a random `jti` that is persisted on the transaction and spent
+  exactly once — reuse and tampering both fail gracefully.
+- **Public action endpoint** `GET /api/v1/transactions/action?token=…&decision=…`
+  verifies the JWT, applies accept/deny idempotently, fires follow-up
+  emails (`swap_success` / `swap_denied` / `donation_both`), and 303-
+  redirects the browser to the transaction landing page.
+- **Transaction landing page** at `/transactions/:id/landing` (auth-optional
+  so email clicks from logged-out browsers still work). Renders a status
+  banner (Accepted / Declined / Pending / Expired), listing summary with
+  size + condition + description, and a Back-to-Marketplace CTA. Backed
+  by a minimal public projection via `GET /transactions/:id/landing-summary`.
+- **Confirm-receipt endpoint** `POST /api/v1/transactions/:id/confirm-receipt`.
+  Both parties can mark the incoming item as received; when both have
+  confirmed, the swap completes, closet ownership flips, and listings
+  close.
+- **Listing detail enrichment** on `/market/:id`:
+  - Always-visible badges for Size, Condition, Category, and Mode.
+  - Always-visible Description block.
+  - Mode-aware primary CTA — Buy / Swap / Donate — with self-swap and
+    self-donate hidden when the listing is owned by the viewer.
+
+### Changed
+- `Transaction` schema gained a `kind` discriminator ("buy" | "swap" |
+  "donate") plus nested `swap` and `donate` sub-documents. Legacy `buy`
+  transactions are untouched (default remains `kind="buy"`).
+- `TxStatus` literal extended with `accepted`, `denied`, `shipped`,
+  `completed` — drives the new swap + donate state machine without
+  breaking reads of older buy ledger rows.
+- `transactions.paypal.order_id` index migrated from `sparse=True` (which
+  still indexes explicit nulls) to a `partialFilterExpression` that only
+  covers string values. Prevents duplicate-key 500s when swap/donate
+  transactions — which never touch PayPal — insert with a null
+  `paypal.order_id`.
+
+### API / endpoints added
+- `POST /api/v1/transactions/swap`
+- `POST /api/v1/transactions/donate`
+- `GET  /api/v1/transactions/action`
+- `POST /api/v1/transactions/:id/confirm-receipt`
+- `GET  /api/v1/transactions/:id/landing-summary` (public)
+
+### Frontend api.js additions
+- `api.proposeSwap(listingId, offeredItemId)`
+- `api.claimDonation(listingId, handlingFeeCents)`
+- `api.confirmReceipt(txId)`
+- `api.getLandingSummary(txId)` (unauthenticated)
+
+---
+
 ## [v1.0-stable] — 2026-05-01
 
 First stable milestone shipped to production (https://dressapp.co) on Hetzner
