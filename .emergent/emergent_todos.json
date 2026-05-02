@@ -1,42 +1,58 @@
 [
   {
-    "content": "Wave 2 plan: schema additions for swap (offered_item_id, accepted_at, confirmations, denied_at)",
+    "content": "Add Transaction.kind, .swap, .donate schemas + extend TxStatus",
+    "status": "completed"
+  },
+  {
+    "content": "Build services/action_tokens.py (JWT mint/verify with aud + jti)",
+    "status": "completed"
+  },
+  {
+    "content": "Add POST /transactions/swap (propose + email lister)",
+    "status": "completed"
+  },
+  {
+    "content": "Add GET /transactions/action (public, JWT verify, accept/deny + redirect)",
+    "status": "completed"
+  },
+  {
+    "content": "Add POST /transactions/{id}/confirm-receipt (both-party completion)",
+    "status": "completed"
+  },
+  {
+    "content": "Add POST /transactions/donate (zero-fee + PayPal-fee paths)",
+    "status": "completed"
+  },
+  {
+    "content": "Fix paypal.order_id unique index (partialFilterExpression)",
+    "status": "completed"
+  },
+  {
+    "content": "Backend curl smoke tests (propose, accept, deny, token reuse)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: api.js client methods (proposeSwap, claimDonation, confirmReceipt, getLandingSummary)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: build SwapPickerModal component",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: enrich ListingDetail with size/condition/description + mode-aware CTAs (Buy/Swap/Donate)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: TransactionLanding page + route in App.js",
+    "status": "completed"
+  },
+  {
+    "content": "End-to-end testing via testing_agent (backend + frontend)",
     "status": "in_progress"
   },
   {
-    "content": "Backend: signed JWT helper for email Accept/Deny/Confirm URLs (no login required)",
-    "status": "pending"
-  },
-  {
-    "content": "Backend: POST /transactions for mode=swap (creates pending swap + sends swap_request email)",
-    "status": "pending"
-  },
-  {
-    "content": "Backend: GET /transactions/{id}/respond?action=accept|deny&token= (no auth, JWT-verified)",
-    "status": "pending"
-  },
-  {
-    "content": "Backend: GET /transactions/{id}/confirm?role=lister|swapper&token= → on both confirmed: swap items, mark Keep, retire listings",
-    "status": "pending"
-  },
-  {
-    "content": "Backend: POST /transactions for mode=donate + /complete fires donation_both",
-    "status": "pending"
-  },
-  {
-    "content": "Frontend: SwapOfferModal — pick a closet item to offer; submit POST /transactions mode=swap",
-    "status": "pending"
-  },
-  {
-    "content": "Frontend: ListingDetail buttons — Buy (PayPal) for sell, Swap for swap, Donate for donate",
-    "status": "pending"
-  },
-  {
-    "content": "Frontend: minimal /transactions/{id}/landing page for Accept/Deny/Confirm follow-through after email click",
-    "status": "pending"
-  },
-  {
-    "content": "Lint, smoke test, add markers, finish summary",
+    "content": "Update CHANGELOG.md with Wave 2 entries",
     "status": "pending"
   }
 ]

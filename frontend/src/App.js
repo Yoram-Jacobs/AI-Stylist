@@ -22,6 +22,7 @@ import CreateListing from '@/pages/CreateListing';
 import ListingDetail from '@/pages/ListingDetail';
 import Profile from '@/pages/Profile';
 import Transactions from '@/pages/Transactions';
+import TransactionLanding from '@/pages/TransactionLanding';
 import Admin from '@/pages/Admin';
 import ExpertsDirectory from '@/pages/ExpertsDirectory';
 import AdsManager from '@/pages/AdsManager';
@@ -59,6 +60,7 @@ function App() {
               <Route path="/market/create" element={<CreateListing />} />
               <Route path="/market/:id" element={<ListingDetail />} />
               <Route path="/transactions" element={<Transactions />} />
+              <Route path="/transactions/:id/landing" element={<TransactionLanding />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/experts" element={<ExpertsDirectory />} />
               <Route path="/ads" element={<AdsManager />} />

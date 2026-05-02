@@ -7,7 +7,17 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AspectRatio } from '@/components/ui/aspect-ratio';
 import { Badge } from '@/components/ui/badge';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
-import { ArrowLeft, Eye, Loader2, Sparkles, MapPin, Store } from 'lucide-react';
+import { SwapPickerModal } from '@/components/SwapPickerModal';
+import {
+  ArrowLeft,
+  Eye,
+  Loader2,
+  Sparkles,
+  MapPin,
+  Store,
+  Repeat,
+  HeartHandshake,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -26,6 +36,8 @@ export default function ListingDetail() {
   const [similar, setSimilar] = useState([]);
   const [similarMode, setSimilarMode] = useState(null);
   const [similarLoading, setSimilarLoading] = useState(true);
+  const [swapOpen, setSwapOpen] = useState(false);
+  const [donateSubmitting, setDonateSubmitting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -104,7 +116,47 @@ export default function ListingDetail() {
                 <SourceTagBadge source={listing.source} />
               </div>
               <div className="mt-3 font-display text-3xl" data-testid="listing-detail-price">{fmt(fm.list_price_cents, fm.currency)}</div>
-              {listing.description && <p className="text-sm text-muted-foreground mt-3">{listing.description}</p>}
+
+              {/* Meta badges — always visible so swap/donate listings
+                  (which don't surface a price) still convey size and
+                  condition at a glance. */}
+              <div
+                className="flex flex-wrap gap-2 mt-3"
+                data-testid="listing-detail-meta"
+              >
+                {listing.size && (
+                  <Badge variant="outline" data-testid="listing-detail-size">
+                    {t('market.sizeLabel', { defaultValue: 'Size' })}: {listing.size}
+                  </Badge>
+                )}
+                {listing.condition && (
+                  <Badge variant="outline" data-testid="listing-detail-condition">
+                    {t('market.conditionLabel', { defaultValue: 'Condition' })}:{' '}
+                    {String(listing.condition).replace('_', ' ')}
+                  </Badge>
+                )}
+                {listing.category && (
+                  <Badge variant="secondary">{listing.category}</Badge>
+                )}
+                {listing.mode && listing.mode !== 'sell' && (
+                  <Badge
+                    className="capitalize"
+                    variant="outline"
+                    data-testid="listing-detail-mode"
+                  >
+                    {listing.mode}
+                  </Badge>
+                )}
+              </div>
+
+              {listing.description && (
+                <p
+                  className="text-sm text-muted-foreground mt-3 leading-relaxed"
+                  data-testid="listing-detail-description"
+                >
+                  {listing.description}
+                </p>
+              )}
               {/* Seller card — name + public location only. Email /
                   phone are deliberately hidden until after a
                   successful transaction (they're sent in the
@@ -171,21 +223,87 @@ export default function ListingDetail() {
               <Link to={`/market`}>{t('market.manageInMine')}</Link>
             </Button>
           ) : listing.status === 'active' ? (
-            <div data-testid="listing-buy-wrapper">
-              <PayPalCheckoutButton
-                createOrder={createOrder}
-                captureOrder={captureOrder}
-                onSuccess={onBuySuccess}
-                onError={onBuyError}
-                amountLabel={t('market.buyFor', {
-                  price: fmt(fm.list_price_cents, fm.currency),
-                })}
-                className="w-full"
-                testId="listing-buy-button"
-              />
-              <div className="text-[10px] text-muted-foreground mt-2 text-center">
-                {t('credits.paypalDisclosure')}
-              </div>
+            <div data-testid="listing-cta-wrapper" className="space-y-3">
+              {/* Mode-aware primary CTA:
+                    • sell    → PayPal checkout
+                    • swap    → SwapPicker modal
+                    • donate  → one-click claim (+ optional handling fee
+                                hinted in helper text; PayPal-fee branch
+                                ships post-MVP). */}
+              {listing.mode === 'swap' ? (
+                <>
+                  <Button
+                    className="w-full rounded-xl"
+                    onClick={() => setSwapOpen(true)}
+                    data-testid="listing-swap-button"
+                  >
+                    <Repeat className="h-4 w-4 mr-2" />
+                    Propose a swap
+                  </Button>
+                  <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
+                    We'll email the lister a secure accept / decline link. No
+                    charges — items ship directly between you.
+                  </div>
+                </>
+              ) : listing.mode === 'donate' ? (
+                <>
+                  <Button
+                    className="w-full rounded-xl"
+                    disabled={donateSubmitting}
+                    onClick={async () => {
+                      setDonateSubmitting(true);
+                      try {
+                        const tx = await api.claimDonation(id, 0);
+                        toast.success(
+                          'Request sent. The donor will get an email to confirm.',
+                        );
+                        nav(`/transactions#tx-${tx.id}`);
+                      } catch (err) {
+                        toast.error(
+                          err?.response?.data?.detail
+                            || 'Could not send donation request.',
+                        );
+                      } finally {
+                        setDonateSubmitting(false);
+                      }
+                    }}
+                    data-testid="listing-donate-button"
+                  >
+                    {donateSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Sending…
+                      </>
+                    ) : (
+                      <>
+                        <HeartHandshake className="h-4 w-4 mr-2" />
+                        Claim this donation
+                      </>
+                    )}
+                  </Button>
+                  <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
+                    Donations are free. The donor may request a small handling
+                    fee once they reach out.
+                  </div>
+                </>
+              ) : (
+                <div data-testid="listing-buy-wrapper">
+                  <PayPalCheckoutButton
+                    createOrder={createOrder}
+                    captureOrder={captureOrder}
+                    onSuccess={onBuySuccess}
+                    onError={onBuyError}
+                    amountLabel={t('market.buyFor', {
+                      price: fmt(fm.list_price_cents, fm.currency),
+                    })}
+                    className="w-full"
+                    testId="listing-buy-button"
+                  />
+                  <div className="text-[10px] text-muted-foreground mt-2 text-center">
+                    {t('credits.paypalDisclosure')}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-xl border border-border bg-secondary/60 p-4 text-sm text-muted-foreground" data-testid="listing-status-notice">
@@ -254,6 +372,22 @@ export default function ListingDetail() {
           )}
         </section>
       )}
+
+      {/* Swap picker modal — mounted once at the tree root so state is
+          preserved while the user browses similar listings. */}
+      <SwapPickerModal
+        open={swapOpen}
+        onOpenChange={setSwapOpen}
+        listingId={id}
+        listingTitle={listing?.title}
+        onSwapCreated={(tx) => {
+          if (tx?.id) {
+            nav(`/transactions#tx-${tx.id}`);
+          } else {
+            nav('/transactions');
+          }
+        }}
+      />
     </div>
   );
 }
