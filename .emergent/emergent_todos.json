@@ -1,46 +1,30 @@
 [
   {
-    "content": "Add Listing.shipping_fee_cents schema + Create/Update DTOs",
+    "content": "Add DASHSCOPE_API_KEY + STYLIST_PROVIDER to backend/.env + config.py",
     "status": "completed"
   },
   {
-    "content": "SELL flow: include shipping in PayPal order gross (payments.py listing_buy_create)",
+    "content": "Create app/services/qwen_client.py",
     "status": "completed"
   },
   {
-    "content": "DONATE flow: PayPal order when shipping_fee > 0 + capture endpoint + JWT email after capture",
+    "content": "Create app/services/stylist_brain.py (Qwen primary, Gemini fallback, future Gemma slot)",
     "status": "completed"
   },
   {
-    "content": "Backend: APP_PUBLIC_URL auto-derive from Request (refactor _action_url + _landing_redirect)",
+    "content": "Swap /api/v1/stylist to use stylist_brain factory",
     "status": "completed"
   },
   {
-    "content": ".env.example: document APP_PUBLIC_URL",
+    "content": "Backend E2E smoke test — Qwen working (1 outfit, 19.5s brain + 42s endpoint total)",
     "status": "completed"
   },
   {
-    "content": "Frontend: CreateListing form input for shipping fee + community pickup nudge",
+    "content": "Factory verification: qwen+fallback, gemini-only, missing-key promotion — all pass",
     "status": "completed"
   },
   {
-    "content": "Frontend: ListingDetail shows shipping fee + community pickup nudge",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Donate claim — handle PayPal redirect when shipping_fee > 0",
-    "status": "completed"
-  },
-  {
-    "content": "Transactions page: tabs + multi-select status chips + confirm-receipt CTA",
-    "status": "completed"
-  },
-  {
-    "content": "Backend curl (Wave 3) + testing_agent E2E (backend 91%, frontend code-verified in bundle)",
-    "status": "completed"
-  },
-  {
-    "content": "Update CHANGELOG.md with Wave 3 entries",
+    "content": "Update CHANGELOG.md + .env.example for Phase O Wave 1",
     "status": "completed"
   }
 ]

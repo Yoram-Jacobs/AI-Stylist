@@ -222,11 +222,37 @@ with Atlas M10. Contest-ready build.
 
 ## [Unreleased]
 
-Next up: **Phase O — Stylist provider migration**.
-- Wave O.1: Replace Gemini chat with Qwen-VL-Max via DashScope on
-  `/api/v1/stylist`. New `app/services/qwen_client.py` + provider
-  abstraction in `stylist_brain.py`. `STYLIST_PROVIDER=qwen|gemini` env
-  toggle, Gemini retained as fallback.
-- Wave O.2 (later): swap `garment_vision` Eyes + Brain calls to
-  Qwen-VL-Plus + Qwen-VL-Max. Fine-tuned Gemma4-E4B plugs in once 24/7
-  hosting is ready.
+### Added — Phase O Wave 1: Stylist brain swap (Gemini → Qwen-VL-Max)
+- New `app/services/qwen_client.py` — async `httpx`-based client for
+  Alibaba DashScope's multimodal generation API. Handles base64 image
+  data URIs, JSON response mode, connection retry/backoff, and a
+  hard timeout that stays inside the preview gateway ceiling.
+- New `app/services/stylist_brain.py` — provider abstraction with
+  `QwenStylistBrain` (primary), `GeminiStylistBrain` (fallback adapter
+  around the legacy service), and a `FallbackBrain` wrapper that
+  silently falls back to the secondary provider on `QwenError` /
+  `RuntimeError` / `TimeoutError`. A future `GemmaStylistBrain` will
+  plug in here without touching callers.
+- New env vars (see `backend/.env.example`):
+  - `STYLIST_PROVIDER` (default `qwen`) — primary brain
+  - `STYLIST_FALLBACK` (default `gemini`) — secondary brain
+  - `DASHSCOPE_API_KEY` — Singapore/International console key
+  - `DASHSCOPE_BASE_URL` — defaults to `https://dashscope-intl.aliyuncs.com/api/v1`
+  - `QWEN_BRAIN_MODEL` (default `qwen-vl-max-latest`)
+  - `QWEN_EYES_MODEL` (default `qwen-vl-plus`, reserved for Wave O.2)
+
+### Changed
+- `services/logic.py::build_stylist_reply` now resolves the brain
+  through `stylist_brain_service()` instead of calling
+  `gemini_stylist_service` directly. Behaviour is identical when
+  `STYLIST_PROVIDER=gemini`, so rollback is a one-line env change.
+- Metric naming: `latency["gemini_ms"]` retained for dashboard
+  compatibility — represents "time spent in the stylist brain", not
+  necessarily Gemini.
+
+### Upcoming (Wave O.2)
+- Migrate `garment_vision` Eyes + Brain calls to Qwen-VL-Plus +
+  Qwen-VL-Max-Latest.
+- Slot the fine-tuned `Gemma4-E4B` model into the provider chain once
+  a 24/7 host is available (HF Inference Endpoints / Modal / Runpod).
+

@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped: Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene)**
+# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped + Phase O Wave 1 shipped: Stylist Brain migrated to Qwen-VL w/ Gemini fallback)**
 
 ## 1) Objectives
 
@@ -53,6 +53,15 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 - ✅ UI nudges local pickup and community connection:
   - “🌱 Prefer local pickup”
   - “Meet locally to skip the fee 🌱”
+
+### ✅ Phase O — Stylist Provider Migration — Wave O.1 — **SHIPPED (v1.1.1 candidate)**
+**Primary objective achieved:** The stylist “Brain” no longer relies on Google Gemini as the default provider.
+
+- ✅ Primary stylist brain swapped from **Google Gemini 2.5 Pro** → **Alibaba Qwen-VL-Max-Latest** via DashScope (international endpoint).
+- ✅ Provider abstraction introduced so future model swaps are config-driven (env var) rather than deep code surgery.
+- ✅ End-to-end verified:
+  - Qwen brain completion observed at ~**19.5s**
+  - Full `/api/v1/stylist` call observed at ~**42s** total in preview environment
 
 ---
 
@@ -214,25 +223,84 @@ Delivered previously; unchanged.
 
 ---
 
+### Phase O — Stylist Provider Migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
+
+#### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
+
+**What shipped**
+- ✅ Primary stylist brain swapped from Google Gemini → DashScope Qwen-VL-Max-Latest (international endpoint).
+- ✅ New `app/backend/app/services/qwen_client.py`:
+  - async `httpx` client
+  - base64 image support via data URIs
+  - JSON response mode via `response_format={type:"json_object"}`
+  - connect-only retries/backoff
+  - 60s read timeout (no retry on read timeouts to stay inside gateway limits)
+- ✅ New `app/backend/app/services/stylist_brain.py`:
+  - `QwenStylistBrain` (primary)
+  - `GeminiStylistBrain` (adapter)
+  - `FallbackBrain` (silent fallback on Qwen failures)
+  - future slot reserved for `GemmaStylistBrain`
+- ✅ New env vars (documented in `backend/.env.example` and wired in `config.py`):
+  - `STYLIST_PROVIDER` (default `qwen`)
+  - `STYLIST_FALLBACK` (default `gemini`)
+  - `DASHSCOPE_API_KEY`
+  - `DASHSCOPE_BASE_URL` (default `https://dashscope-intl.aliyuncs.com/api/v1`)
+  - `QWEN_BRAIN_MODEL` (default `qwen-vl-max-latest`)
+  - `QWEN_EYES_MODEL` (default `qwen-vl-plus`)
+- ✅ Integration points updated:
+  - `services/logic.py` now resolves stylist brain via `stylist_brain_service()`
+  - the old hard error “Gemini not configured” is removed; provider factory selects available providers
+  - provider name is stored as `advice._meta.stylist_brain` (string) rather than inside latency dict (which is typed as ints)
+
+**Verification (observed in preview)**
+- ✅ Direct DashScope smoke test succeeded
+- ✅ `stylist_brain_service().advise(...)` returns clean JSON with 2 outfit options
+- ✅ `/api/v1/stylist` endpoint returns valid advice JSON
+
+**Known notes**
+- Qwen responses are slower than Gemini in some cases; timeouts are handled by fallback provider when configured.
+
+#### Wave O.2 — Migrate garment_vision Eyes + Brain to Qwen-VL — **NEXT**
+- Migrate `garment_vision.py` (1246 lines; feeds AddItem) to call:
+  - Eyes tier: `qwen-vl-plus`
+  - Brain tier: `qwen-vl-max-latest`
+- Maintain JSON output contract compatibility with:
+  - segmentation/background-removal pipeline
+  - closet item card parsing
+  - duplicate detection pre-flight pipeline
+- Add careful validation:
+  - golden image fixtures
+  - prompt hardening + schema validation
+  - regression tests via curl/scripts
+
+#### Wave O.3 — Add Gemma4-E4B fine-tune into provider chain — **LATER (blocked on hosting)**
+- Host the fine-tuned Gemma4-E4B on a 24/7 inference platform (HF Inference Endpoints / Modal / Runpod).
+- Add `GemmaStylistBrain` implementation and set:
+  - `STYLIST_PROVIDER=gemma`
+  - `STYLIST_FALLBACK=qwen`
+
+---
+
 ## 3) Next Actions (immediate)
 
 ### P0 — Next wave candidates
-1. Swap payment support (optional): PayPal capture for swap shipping (only if community requests).
+1. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
 2. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
+3. Swap payment support (optional): PayPal capture for swap shipping (only if community requests).
 
 ### P1
-3. Transactions page quality-of-life:
+4. Transactions page quality-of-life:
    - search by listing title
    - per-kind empty states and summaries
 
 ### P2
-4. Object storage migration (Mongo base64 bloat → R2/S3).
-5. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
+5. Object storage migration (Mongo base64 bloat → R2/S3).
+6. Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.
 
 ### P3
-6. Refactor `AddItem.jsx` into modules.
+7. Refactor `AddItem.jsx` into modules.
 
 ---
 
@@ -262,6 +330,16 @@ Delivered previously; unchanged.
 - ✅ Environment URLs:
   - Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
   - Explicit `APP_PUBLIC_URL` overrides derivation (prod lock).
+
+### Phase O — Stylist provider migration
+- ✅ Wave O.1:
+  - `/api/v1/stylist` uses Qwen-VL-Max-Latest by default.
+  - Gemini remains available as fallback.
+  - Provider selection controlled by env vars (`STYLIST_PROVIDER`, `STYLIST_FALLBACK`).
+- ⏳ Wave O.2:
+  - AddItem pipeline (`garment_vision`) produces the same closet item cards using Qwen.
+- ⏳ Wave O.3:
+  - Fine-tuned Gemma4-E4B can be toggled in as primary once hosted.
 
 ---
 
