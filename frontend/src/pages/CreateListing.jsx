@@ -82,6 +82,12 @@ export default function CreateListing() {
     // input preserves what the user actually typed (e.g. "12.5") instead
     // of reformatting on every keystroke.
     list_price_input: '25',
+    // Wave 3 — optional shipping fee. 0 = "local pickup only" (which
+    // is the default and what DressApp's environmental ethos nudges
+    // toward). Users can opt in to a fee when posting something that
+    // must be shipped (e.g. across continents).
+    shipping_fee_cents: 0,
+    shipping_fee_input: '',
   });
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -144,6 +150,7 @@ export default function CreateListing() {
         condition: form.condition,
         images: [],
         list_price_cents: Number(form.list_price_cents) || 0,
+        shipping_fee_cents: Number(form.shipping_fee_cents) || 0,
         currency: 'USD',
       };
       const linked = closet.find((c) => c.id === form.closet_item_id);
@@ -305,6 +312,46 @@ export default function CreateListing() {
                   className="rounded-xl"
                   data-testid="listing-price-input"
                 />
+              </div>
+
+              {/* Wave 3 — optional shipping fee. We lead with the
+                  community-first ethos so the default (0) feels
+                  intentional, not lazy. */}
+              <div data-testid="listing-shipping-block">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="listing-shipping-input">
+                    Shipping fee (optional)
+                  </Label>
+                  <span className="text-[11px] text-[hsl(var(--accent))]">
+                    🌱 Prefer local pickup
+                  </span>
+                </div>
+                <Input
+                  id="listing-shipping-input"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  value={form.shipping_fee_input}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw && !/^\d*([.,]\d{0,2})?$/.test(raw)) return;
+                    const normalised = raw.replace(',', '.');
+                    const cents =
+                      normalised && !isNaN(parseFloat(normalised))
+                        ? Math.max(0, Math.round(parseFloat(normalised) * 100))
+                        : 0;
+                    setForm({ ...form, shipping_fee_input: raw, shipping_fee_cents: cents });
+                  }}
+                  placeholder="0.00"
+                  className="rounded-xl"
+                  data-testid="listing-shipping-input"
+                />
+                <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                  Leave at <strong>0</strong> to encourage neighbours to meet
+                  you — zero packaging, zero emissions, plus you might make a
+                  friend with great style. Add a fee only if shipping is
+                  unavoidable.
+                </p>
               </div>
               <Button type="submit" disabled={busy || !form.title} className="w-full rounded-xl" data-testid="listing-publish-button">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t('createListing.publish')}

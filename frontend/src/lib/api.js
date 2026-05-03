@@ -118,6 +118,42 @@ export const api = {
   getTransaction: (id) =>
     client.get(`/transactions/${id}`).then((r) => r.data),
 
+  // Wave 2 — swap + donate marketplace flows
+  proposeSwap: (listingId, offeredItemId) =>
+    client
+      .post('/transactions/swap', {
+        listing_id: listingId,
+        offered_item_id: offeredItemId,
+      })
+      .then((r) => r.data),
+  claimDonation: (listingId, handlingFeeCents = 0) =>
+    client
+      .post('/transactions/donate', {
+        listing_id: listingId,
+        handling_fee_cents: handlingFeeCents,
+      })
+      .then((r) => r.data),
+  // Wave 3 — capture PayPal shipping fee for a donation claim. Called
+  // by the frontend right after the PayPal popup/button confirms the
+  // order. On success the donor gets their accept/deny email.
+  captureDonationShipping: (txId, orderId) =>
+    client
+      .post(`/transactions/donate/${txId}/capture`, null, {
+        params: { order_id: orderId },
+      })
+      .then((r) => r.data),
+  confirmReceipt: (txId) =>
+    client
+      .post(`/transactions/${txId}/confirm-receipt`)
+      .then((r) => r.data),
+  // Public (no auth) — used by the email-landing page so users who
+  // click accept/deny from a logged-out browser can still see the
+  // listing summary + status banner.
+  getLandingSummary: (txId) =>
+    client
+      .get(`/transactions/${txId}/landing-summary`)
+      .then((r) => r.data),
+
   // stylist — returns raw axios promise for multipart
   stylist: (formData) =>
     client.post('/stylist', formData, {

@@ -24,7 +24,15 @@ Source = Literal["Private", "Shared", "Retail"]
 ListingSource = Literal["Shared", "Retail"]
 ListingMode = Literal["sell", "swap", "donate"]
 ListingStatus = Literal["draft", "active", "reserved", "sold", "removed"]
-TxStatus = Literal["pending", "paid", "refunded", "failed", "disputed"]
+# Transaction lifecycle covers buy + swap + donate. Older clients only
+# read pending/paid/refunded/failed/disputed; the new "accepted",
+# "denied", "shipped", "completed" states are produced by the swap +
+# donate pipelines and never appear on classic /buy transactions.
+TxStatus = Literal[
+    "pending", "paid", "refunded", "failed", "disputed",
+    "accepted", "denied", "shipped", "completed",
+]
+TxKind = Literal["buy", "swap", "donate"]
 Formality = Literal["casual", "smart-casual", "business", "formal"]
 Condition = Literal["new", "like_new", "good", "fair"]
 # Rich closet-item enums (used by AddItem flow + The Eyes analyzer)
@@ -94,6 +102,12 @@ class User(BaseDoc):
     # first Google connect, editable afterwards.
     first_name: str | None = None
     last_name: str | None = None
+    # Optional brand / company name — sellers running their listings as a
+    # boutique can set this and it'll appear instead of their personal
+    # name on the marketplace listing detail page. Distinct from
+    # display_name so power-users can have a casual handle plus a
+    # business-facing brand simultaneously.
+    company_name: str | None = None
     phone: str | None = None
     date_of_birth: str | None = None  # ISO YYYY-MM-DD
     sex: Literal["male", "female"] | None = None
@@ -283,6 +297,17 @@ class Listing(BaseDoc):
     location: dict[str, Any] | None = None
     ships_to: list[str] = Field(default_factory=list)
     financial_metadata: FinancialMetadata
+    # Optional shipping fee (Wave 3) — charged on top of the listing's
+    # mode-specific flow:
+    #   * ``sell``    → added to the buyer's PayPal order.
+    #   * ``donate``  → recipient pays *only* this on claim; otherwise
+    #                   the donation is free end-to-end.
+    #   * ``swap``    → display-only for now; parties coordinate directly.
+    # Defaults to 0 so every existing row stays valid without migration.
+    # DressApp's environmental ethos: we nudge users toward local pickup
+    # with "Meet locally to skip the fee 🌱" — sellers are encouraged to
+    # keep this at 0 whenever possible.
+    shipping_fee_cents: int = 0
     status: ListingStatus = "active"
     views: int = 0
     favorites: int = 0
@@ -328,14 +353,61 @@ class PayPalPointer(BaseModel):
     captured_at: str | None = None
 
 
+# --------- Wave 2: swap + donate sub-pointers on Transaction ---------
+class SwapPointer(BaseModel):
+    """Nested state for swap-kind transactions.
+
+    The lister keeps the listing; the swapper offers ``offered_item_id``
+    from their own closet. Email accept/deny links carry a JWT whose
+    ``jti`` is persisted on ``action_token_jti`` to enforce single-use.
+    Both parties confirm receipt independently; once both timestamps
+    are set the swap is marked completed and ownership flips.
+    """
+
+    offered_item_id: str | None = None
+    accepted_at: str | None = None
+    denied_at: str | None = None
+    lister_received_at: str | None = None
+    swapper_received_at: str | None = None
+    completed_at: str | None = None
+    # Single-use accept/deny JWT id (rotated on each new email).
+    action_token_jti: str | None = None
+    # When True the action token has already been spent; subsequent
+    # clicks redirect to the landing page with the recorded status
+    # rather than re-applying the decision.
+    action_token_used: bool = False
+
+
+class DonatePointer(BaseModel):
+    """Nested state for donate-kind transactions.
+
+    Optional handling fee paid via PayPal — when ``handling_fee_cents``
+    is 0 the flow falls back to a JWT-signed accept/deny email exactly
+    like swap. ``action_token_jti`` and ``action_token_used`` mirror
+    the swap semantics.
+    """
+
+    handling_fee_cents: int = 0
+    accepted_at: str | None = None
+    denied_at: str | None = None
+    completed_at: str | None = None
+    action_token_jti: str | None = None
+    action_token_used: bool = False
+
+
 class Transaction(BaseDoc):
     listing_id: str
     buyer_id: str
     seller_id: str
+    # ``kind`` lets old buy transactions stay untouched (default "buy")
+    # while swap + donate transactions opt into their own state machine.
+    kind: TxKind = "buy"
     currency: str = "USD"
     financial: TransactionFinancial
     stripe: StripePointer = Field(default_factory=StripePointer)
     paypal: PayPalPointer = Field(default_factory=PayPalPointer)
+    swap: SwapPointer = Field(default_factory=SwapPointer)
+    donate: DonatePointer = Field(default_factory=DonatePointer)
     status: TxStatus = "pending"
     paid_at: str | None = None
     refunded_at: str | None = None

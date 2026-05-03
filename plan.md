@@ -1,69 +1,58 @@
-# DressApp — Development Plan (Core-first) **UPDATED (post-production stabilisation + Stylist Power-Up + Google Sign-in + UX Polish + Dual-Deploy + Pre-deploy Audit)**
+# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped: Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene)**
 
 ## 1) Objectives
 
 ### ✅ Production stabilisation (dressapp.co) — **SHIPPED & VERIFIED**
-- ✅ **Google OAuth redirect mismatch** fixed in production env.
-- ✅ **Ad-blocker hardening**: renamed all `/ads` endpoints → `/promotions` (backend + frontend).
-- ✅ **Add Item UX upgrades**:
-  - Sticky “Save all” action bar.
-  - Background batch upload (>5 items) with progress UI.
-- ✅ **Demo seeding**: `backend/scripts/seed_demo.py` added + tested.
-- ✅ **Docker build hardening**:
-  - Backend dependencies stabilized.
-- ✅ **Hetzner VPS access**: passwordless SSH (ED25519) configured.
-- ✅ **Closet crash + slowness fixed on production**:
-  - Root cause #1: MongoDB Atlas M0 32MB sort cap → added `allow_disk_use(True)` + compound index `(user_id, created_at -1)`.
-  - Root cause #2: `/api/v1/closet` payload massive due to base64 `*_image_url` blobs.
-    - Added thumbnailing + response stripping + frontend cache (stale-while-revalidate).
-  - Result: closet loads reliably + fast.
-- ✅ **Frontend API base URL fix**: ensured `DOMAIN` is set so `REACT_APP_BACKEND_URL` bakes correctly.
-- ✅ **Stylist production 500 fixed**:
-  - Root cause: `repos.find_one()` lacked `sort` kwarg → crashed `get_or_create_active_session`.
-  - Added `sort=` support.
-- ✅ **Direct Gemini (production)**:
-  - `GEMINI_API_KEY` supported; chat calls route directly to Google (no Emergent proxy).
-  - Model split: **Pro for Stylist**, **Flash for The Eyes/Trend-Scout**.
-  - Nano Banana (`gemini-2.5-flash-image`) integrated for reconstruction when direct key present.
-- ✅ **Stylist Phase R + Phase S implementation complete (deployment pending)**:
-  - Phase R: multi-image upload + outfit compose pipeline + rich `OutfitCanvas`.
-  - Phase S: stylist can “search wider” (Marketplace/Fashion Scout) using user profile preferences.
+- ✅ **Hetzner build fix**: pinned `protobuf==5.29.6` to resolve dependency conflict.
+- ✅ Removed legacy post-analysis duplicate detection (`find_potential_duplicate`) to reduce ML spend.
+- ✅ Atlas upgrade: production DB moved to **10GB Atlas M10**.
+- ✅ Duplicate-system UX: pre-flight hash duplicate detection only; star auto-demotion when original deleted.
 
-### ✅ UX Polish (post-listing/auth fixes) — **SHIPPED IN CODE — DEPLOYMENT PENDING**
-Small high-impact UX fixes to eliminate “did it save?” ambiguity and missing visual feedback.
-- ✅ **Create Listing**
-  - Show thumbnail preview for linked closet item (uses `thumbnail_data_url`).
-  - Post-publish redirect: **/market**.
-- ✅ **Item Detail (Edit item)**
-  - Post-save redirect: **/closet**.
-  - “Clean background” action uses real **shadcn Progress** bar:
-    - animated, asymptotic ramp to **92%**, snap to **100%** on completion.
-- ✅ **Settings / Profile**
-  - Post-save redirect: **/home**.
+### ✅ UX polish (Wave 1) — **SHIPPED**
+- ✅ Brand logo lockups (`BrandLogo.jsx`) added to Login + TopNav.
+- ✅ Closet search bar polish:
+  - debounced live search
+  - clear button
+  - active-state ring
+- ✅ Category filter improvements:
+  - case-insensitive
+  - synonym mapping (e.g. `Footwear` → `shoes`)
+- ✅ PWA/favicon/manifest icons wired.
+- ✅ `CHANGELOG.md` drafted; guidance to tag `v1.0-stable`.
 
-### 🎯 Current product direction — **Stylist Power-Up (Outfit Composer) + Widened Search**
-Make the Stylist uniquely valuable by enabling:
-1. Multi-image upload in Stylist chat and a dedicated Compose Outfit page.
-2. Outfit construction with dedupe, cohesion scoring, rationale.
-3. Marketplace gap-fill suggestions.
-4. Pro referral (heuristics).
-5. Search wider beyond closet using preferences + marketplace/scout.
-6. Model-agnostic LLM shim for future Gemma swap.
+### ✅ Marketplace Wave 1 — **SHIPPED**
+- ✅ Auto-retire linked marketplace listings when closet item is deleted.
+- ✅ Auto-list closet items to marketplace when item `source` flips to **Shared**.
+- ✅ Merchant card hydration on listing detail:
+  - **PII-safe name fallback**: `display_name → company_name → first_name → (hide)`
+  - location fallback: `listing.location → seller.home_location → seller.address`.
+- ✅ Resend transactional email integration wired end-to-end.
+  - Templates in `services/email_service.py`:
+    - `sale_seller`, `sale_buyer`
+    - `swap_request`, `swap_success`, `swap_denied`
+    - `donation_both`
+  - Sale emails triggered from PayPal capture flow.
 
-### 🔐 Must-have direction — **Phase T-Auth: Google Sign-in / Google Login**
-Add Sign in with Google / Log in with Google to:
-- validate Calendar silent-fail cause using real Google identity
-- reduce password friction
-- unify identity between OAuth and Calendar connect
+### ✅ Marketplace Wave 2 — Swap + Donate pipelines (JWT-signed email actions) — **SHIPPED**
+Wave 2 shipped the first complete “non-buy” marketplace transaction flows:
+1. ✅ **Swap pipeline**: propose → email accept/deny (JWT-signed) → confirm receipt → complete.
+2. ✅ **Donation pipeline (MVP)**: claim donation → donor accept/deny via JWT email → confirmation email.
+3. ✅ **Transaction landing page**: minimal status UI after accept/deny clicks (auth-optional).
+4. ✅ **Listing detail enrichment**: shows **size, description, condition** + mode-aware CTAs.
 
-**Decisions locked (user):**
-- **1c Hybrid:** Google sign-in default + “Also connect my calendar” checkbox.
-- **2a Auto-link by email:** merge into existing password account if emails match.
-- **3a UI placement:** Google button on Login + Register.
-- **4a Keep dev-bypass** for backwards compatibility.
-- **Admin access:** `ADMIN_EMAILS` allow-list; `grant_admin.py` as fallback.
+**Decisions implemented (locked):**
+- ✅ **JWT action links** signed using `JWT_SECRET` with a dedicated `aud`.
+- ✅ **Swap UX**: modal closet picker (single item offer).
+- ✅ **Self actions**: hide Swap/Donate on own listings.
 
-> **Operational note:** Production no longer depends on Emergent universal key for core LLM. `GEMINI_API_KEY` is primary; `EMERGENT_LLM_KEY` is dev fallback.
+### ✅ Marketplace Wave 3 — Shipping Fee + Transactions UI + APP_PUBLIC_URL hygiene — **SHIPPED**
+Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPal capture for donation shipping, and a polished transactions hub.
+
+**Ethos enforcement (implemented):**
+- ✅ **No handling fees for donations** (donations remain free; only optional shipping reimbursement).
+- ✅ UI nudges local pickup and community connection:
+  - “🌱 Prefer local pickup”
+  - “Meet locally to skip the fee 🌱”
 
 ---
 
@@ -79,293 +68,204 @@ Delivered previously; unchanged.
 
 ---
 
-### Phase 3 — Frontend V1 (React) **(COMPLETE + Add Item upgraded)**
+### Phase 3 — Frontend V1 (React) **(COMPLETE)**
 Delivered previously; unchanged.
 
 ---
 
-### Phase 4 — Context + Autonomy + Payments (PayPal) **(SHIPPED 🎉)**
+### Phase 4 — Payments (PayPal) **(SHIPPED)**
 Delivered previously; unchanged.
 
 ---
 
-### Phase 5 — Admin + Hardening + Comprehensive E2E **(COMPLETE)**
-Delivered previously; unchanged.
+### Phase Z2 — Duplicate detection (pre-flight only) + cleanup **(SHIPPED)**
+- ✅ Deterministic pre-flight duplicate detection using `source_sha256` and fallback `source_phash`.
+- ✅ Removed legacy expensive post-analysis duplicate detector.
+- ✅ Auto-demote duplicate ⭐ when the canonical/original item is deleted.
 
 ---
 
-### Phase 6 / N — Fine-tuned Gemma 4 E2B Merge + GGUF Export + Hosting **(P0 / BLOCKED OFF-POD)**
-Goal: replace Gemini for “The Eyes” with the user’s fine-tuned Gemma model.
-
-Status unchanged: blocked due to off-pod merge/hosting.
-
----
-
-### Phase R — **Stylist Power-Up: Outfit Composer** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-This phase extends the multi-session Stylist by adding a composer pipeline and rich outfit canvas.
-
-#### R.0 — Finalise UX + schema contract **(DONE)**
-- Multi-image upload in Stylist chat + Compose Outfit page.
-- Output: chat bubble summary + tap-to-expand canvas.
-- Marketplace search live; retail feeds deferred but architecture-ready.
-- Pro referral heuristic-triggered.
-
-#### R.1 — Backend pipeline **(DONE)**
-- `POST /api/v1/stylist/compose-outfit` (multipart)
-- Services:
-  - `app/services/outfit_composer.py`
-  - `app/services/marketplace_search.py`
-  - `app/services/professional_matcher.py`
-- Persistence: composer outputs stored in stylist session messages.
-- Reliability: provider failures return empty canvas + retry hints (no 500).
-
-#### R.2 — Frontend integration **(DONE)**
-- `Stylist.jsx` upgraded: multi-image attachments + previews + compose flow.
-- `OutfitCanvas.jsx` added.
-
-#### R.3 — Polish + Testing **(DONE: local smoke)**
-- Backend smoke tests passed.
-- Frontend compiles.
-- Pending: user deploy + real browser verification on VPS.
+### Marketplace Wave 1 — Auto-publish + Merchant Card + Email wiring **(SHIPPED)**
+- ✅ Auto-created listings (`Listing.auto_created`) when closet item is Shared.
+- ✅ Auto-retire listing when linked closet item is deleted.
+- ✅ Listing detail merchant card:
+  - name fallback chain: `display_name → company_name → first_name → hide`
+  - location fallback chain: `listing.location → home_location → address`
+- ✅ Resend integration with templates + sale email dispatch on PayPal capture.
 
 ---
 
-### Phase S — **Stylist Widen Search + User Preferences** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-#### S.1 — Backend **(DONE)**
-- Services:
-  - `app/services/user_preferences.py`
-  - `app/services/stylist_widen.py`
-- Schema: `StylistAdvice` supports marketplace/scout suggestions.
-- Prompting injects preferences (gender/age/body/region/style profile).
+### Marketplace Wave 2 — Swap + Donate + Email landing **(SHIPPED)**
 
-#### S.2 — Frontend **(DONE)**
-- “Search wider” toggle + rendering of marketplace/scout suggestions.
+#### W2.0 — Goals + constraints (implemented)
+- ✅ No PII exposure on public listing page.
+- ✅ Email action links are safe:
+  - JWT signed with `JWT_SECRET`
+  - dedicated audience claim `aud="dressapp.tx_action"`
+  - expiry (implemented at 7 days for usability)
+  - single-use protection with persisted `jti` + `action_token_used`
 
-#### S.3 — Known limitations
-- Marketplace/Fashion Scout may return 0 results when DB is unseeded.
+#### W2.1 — Backend schema updates (transactions) — **SHIPPED**
+**File:** `app/backend/app/models/schemas.py`
+- ✅ Added `Transaction.kind: "buy" | "swap" | "donate"` (default `"buy"`).
+- ✅ Added nested `swap` + `donate` sub-documents.
+- ✅ Extended `TxStatus` with `accepted`, `denied`, `shipped`, `completed`.
 
----
+#### W2.2 — Backend service: JWT action tokens — **SHIPPED**
+**File:** `app/backend/app/services/action_tokens.py`
+- ✅ `mint(...) → (token, jti)` and `verify(token, expected_decision=...)`.
+- ✅ Dedicated audience: `aud="dressapp.tx_action"`.
 
-### Phase T-Auth — **Google Sign-in / Log in with Google** **(P0 / SHIPPED IN CODE — DEPLOYMENT PENDING)**
-Implement unauthenticated Google OAuth to create/login users, optionally connect Calendar.
+#### W2.3 — Backend endpoints (Swap/Donate/Action/Landing) — **SHIPPED**
+**File:** `app/backend/app/api/v1/transactions.py`
+- ✅ `POST /api/v1/transactions/swap`
+- ✅ `POST /api/v1/transactions/donate` (Wave 2: email-only accept/deny)
+- ✅ `GET /api/v1/transactions/action` (public)
+- ✅ `POST /api/v1/transactions/{tx_id}/confirm-receipt`
+- ✅ `GET /api/v1/transactions/{tx_id}/landing-summary` (public)
 
-(Implementation details unchanged from prior plan; still needs VPS deploy + real account verification.)
+#### W2.4 — DB index fix (PayPal order id uniqueness) — **SHIPPED**
+**File:** `app/backend/app/db/database.py`
+- ✅ Migrated `transactions.paypal.order_id` unique index from `sparse=True` to a `partialFilterExpression` (string only).
 
----
-
-### Phase Z — **Pre-deployment audit (current)** **(SHIPPED IN CODE — DEPLOYMENT PENDING)**
-A consolidation phase capturing the work shipped in this session, plus the repo-wide lint + documentation audit required before deployment.
-
-#### Z.1 — UX polish pack **(DONE)**
-- Create Listing: linked-item thumbnail preview + redirect to `/market`.
-- Item Detail: redirect to `/closet` after save.
-- Profile: redirect to `/home` after save.
-- Clean background progress: shimmer replaced with `Progress` component + simulated progress ramp.
-
-#### Z.2 — Batch upload pipeline reliability **(DONE)**
-- Frontend: `handleBatchBackground` now sequential (no parallelism on small VPS), retry-with-backoff; surfaces `analyzeFailed` counts in final toast.
-- Backend: added process-wide `_ANALYZE_LOCK = asyncio.Semaphore(1)`; applied to `analyze_outfit`, `analyze`, and new `reanalyze`.
-
-#### Z.3 — Edit page regression fix: restore weighted taxonomy **(DONE)**
-- Extracted `WeightedList` from `AddItem.jsx` → `frontend/src/components/WeightedList.jsx`.
-- `ItemDetail.jsx` now exposes and edits:
-  - `colors[]` (weighted, percentage)
-  - `fabric_materials[]` (weighted, percentage)
-- `diffPatch` upgraded with deep-compare for object arrays (fixes perpetual dirty state).
-
-#### Z.4 — Re-analyse + replace-photo UX **(DONE)**
-- Backend: `POST /api/v1/closet/{id}/reanalyze`
-  - re-runs The Eyes on stored image (segmented → reconstructed → original)
-  - overwrites analyser-owned fields only; preserves user-managed metadata
-  - mirrors dominant weighted `colors/fabric_materials` into legacy `color/material`
-- Frontend: Item Detail now has **Analyze** button + progress.
-- Replace photo now uses `autoSegment:false` so user explicitly triggers Clean Background / Analyze.
-
-#### Z.5 — Over-cropping regression fix (graphic-print shredding) **(DONE)**
-- `clothing_parser._split_instances` now treats single-garment classes as non-splittable:
-  - `Upper-clothes`, `Dress`, `Skirt`, `Pants`
-- Prevents shredding into multiple instances when prints break SegFormer mask continuity.
-- Marker: `single_instance_classes_v1=true`.
-
-#### Z.6 — Size auto-derivation from user preferences **(DONE)**
-- New `frontend/src/lib/size_preferences.js` deriving size from `user.body_measurements`:
-  - Top/Outerwear → `shirt_size`
-  - Bottom → `pants_size`
-  - Footwear → `shoe_size`
-  - Full-body/Dress → `dress_size` (fallback `shirt_size`)
-  - Underwear/bra → `bra_size` (as applicable)
-- Wired into AddItem `hydrate()` and ItemDetail `toFormState()` symmetrically (prevents `isDirty` flapping).
-
-#### Z.7 — Dual-deploy support for Emergent host **(DONE)**
-Goal: make `https://ai-stylist-api.emergent.host` function with equivalent user-facing behaviour despite low pod resources.
-
-- Split dependencies:
-  - `backend/requirements.txt` — lightweight deps (installed by Emergent host)
-  - `backend/requirements-ml.txt` — heavy ML (torch/transformers/rembg/scipy/onnxruntime/etc.)
-- Updated `deploy/Dockerfile.backend` to install both files for Hetzner.
-- Removed unused `cuda-*` packages from default deps.
-- Added runtime auto-detection in `app/config.py`:
-  - probes `torch`, `transformers`, `rembg` via `find_spec`
-  - defaults `USE_LOCAL_CLOTHING_PARSER` and `AUTO_MATTE_CROPS` based on installed modules
-- Updated default CORS origins to include `https://ai-stylist-api.emergent.host`.
-- Added live markers on `GET /api/v1/closet/analyze/version`:
-  - `torch_installed`, `rembg_installed`, `use_local_clothing_parser`, `auto_matte_crops`
-
-#### Z.8 — Pre-deploy audit + docs refresh **(DONE)**
-- Backend lint: ruff clean.
-- Frontend lint: ESLint clean.
-- esbuild: bundle compiles.
-- Locales: all 12 JSON-valid.
-- `server.py` cold-imports cleanly; routes registered.
-- Docs updated:
-  - README: dual-deploy story + requirements split.
-  - ARCHITECTURE.md: updated deployment modes, `_ANALYZE_LOCK`, `/reanalyze`, dual-deploy.
-
-#### Z.9 — Address autocomplete (Settings → Contact) **(DONE & VISUALLY VERIFIED)**
-- New `frontend/src/components/CountryCombobox.jsx`
-  - cmdk-powered Popover; flag emoji + localised name (Intl.DisplayNames) + ISO-2 fallback search.
-  - Free-text country still allowed (backend stores name as text).
-- New `frontend/src/components/AddressAutocomplete.jsx`
-  - Debounced (400 ms) calls to public Nominatim `/search` (no API key).
-  - `kind="city" | "street"`, country-biased, auto-cancels in-flight requests on each keystroke.
-  - Picking a suggestion fires structured `{line1,city,region,postal_code,country,country_code}` patch.
-- `ProfileDetailsCard.jsx` Contact accordion now uses both, with
-  resolved-country code piped from CountryCombobox into both
-  AddressAutocomplete instances.
-- Verified live in preview pod (3 screenshots): country search "germ"
-  → 🇩🇪 Germany; street "Brandenburger T" → 2 real OSM hits with
-  city/region in secondary line.
-
-#### Z.10 — `dressapp.co` production triage **(DONE — handed off to user)**
-- Diagnosed `dressapp.co` 405 / 404 responses on `/api/*` as a DNS-layer
-  issue — domain still points at AWS infra (which 301-redirects `/` to
-  the now-deprecated `ai-stylist-api.emergent.host` and rejects every
-  `/api/*` POST).
-- Confirmed Hetzner-side code is correct (`POST /auth/dev-bypass`
-  registered; preview pod login succeeds).
-- Wrote `/app/HETZNER_RECOVERY.md` — exact 10-step DNS + redeploy
-  checklist for the user to execute on their VPS.
-
-#### Z.11 — Batch upload duplicate-detection regression fix **(DONE)**
-- **Symptom:** uploading >5 photos via background batch silently saved
-  every analysed result — including items the analyzer flagged as
-  potential duplicates of existing closet entries — because
-  `handleBatchBackground` never read `it.potential_duplicate`.
-  Interactive (≤5 photo) path was unaffected: the `DuplicateConfirmDialog`
-  is wired only off the foreground `cards` array.
-- **Backend was already correct:** `find_potential_duplicate` matches on
-  case-insensitive `item_type` + `sub_category` + dominant colour (and
-  brand when both items carry one); `/closet/analyze` attaches the
-  result onto each returned item.
-- **Frontend fix** (`pages/AddItem.jsx`):
-  - `handleBatchBackground` now checks `it.potential_duplicate`. When
-    set, it pushes the analysed crop into the interactive `cards` array
-    (with a new `pendingBatchSave` flag) instead of auto-saving, and
-    increments a new `bgBatch.pendingDuplicates` counter.
-  - `DuplicateConfirmDialog`'s `onConfirm` upgraded: for cards with
-    `pendingBatchSave: true`, it immediately POSTs `/closet`, removes
-    the card from state, and bumps `bgBatch.saved` — preserving the
-    original "fire-and-forget" feel of the batch flow. Foreground
-    cards still just stamp `duplicateConfirmed: true` and wait for
-    Save All.
-  - Final-toast nav logic now suppresses the auto-redirect to `/closet`
-    when `pendingDuplicates > 0`, so the user can review the dialog
-    queue first.
-  - Inline amber-text counter on the batch progress card surfaces how
-    many duplicates are awaiting confirmation.
-- **i18n:** added `addItem.bgUpload.duplicatesPending`,
-  `addItem.bgUpload.duplicatesInline`,
-  `addItem.bgUpload.partialAnalyze` and `addItem.duplicate.saveFailed`
-  to `en.json`; other locales fall back to their inline `defaultValue`
-  via i18next's standard fallback.
-- **Verification:** ESLint clean, `en.json` valid JSON, esbuild bundle
-  compiles, `/closet/add` renders cleanly in preview pod (the
-  pre-existing third-party `Unexpected token '}'` pageerror is
-  unrelated and present on every route including `/login` even with
-  this change stashed).
+#### W2.5 — Frontend Wave 2 components — **SHIPPED**
+- ✅ `ListingDetail.jsx` mode-aware CTA (Buy/Swap/Donate) + meta badges + description.
+- ✅ `SwapPickerModal.jsx` (closet picker).
+- ✅ `TransactionLanding.jsx` + route `/transactions/:id/landing` (auth-optional).
+- ✅ `api.js` additions: `proposeSwap`, `claimDonation`, `confirmReceipt`, `getLandingSummary`.
 
 ---
 
-### Phase Q+ — Wardrobe Reconstructor migration note **(SHIPPED)**
-- Production prefers Nano Banana when `GEMINI_API_KEY` present.
-- HF FLUX remains dev fallback.
+### Marketplace Wave 3 — **Shipping Fee (listing-level) + Transactions UI polish + APP_PUBLIC_URL hygiene** — **SHIPPED**
+
+**Wave 3 scope (user-confirmed & implemented):**
+- ✅ **No “handling fee” concept for donations**. Donations remain free.
+- ✅ Introduce **listing-level optional shipping fee**.
+- ✅ Add community nudge: encourage local pickup / relationship-building.
+- ✅ Transactions UI: tabs + multi-select status chips.
+- ✅ APP_PUBLIC_URL: auto-derive when unset + explicit override when set.
+
+#### W3A — Listing-level Shipping Fee + PayPal hookup — **SHIPPED**
+
+**Goal achieved:** Shipping is a first-class, optional listing attribute. For donations, the *only* money component is optional shipping reimbursement.
+
+**Backend (shipped)**
+- ✅ **Schema:** `Listing.shipping_fee_cents: int = 0` (default 0, no cap)
+- ✅ **DTOs:** added to `CreateListingIn` + `UpdateListingIn`
+- ✅ **SELL flow (PayPal):**
+  - PayPal `create_order` gross now includes shipping:
+    - `amount = list_price_cents + shipping_fee_cents`
+  - Returns line-item breakdown to frontend:
+    - `list_price_cents`, `shipping_fee_cents`, `amount_cents`
+- ✅ **DONATE flow:**
+  - If `listing.shipping_fee_cents > 0`:
+    - claim creates PayPal order for shipping reimbursement
+    - capture required before donor is emailed
+    - new endpoint: `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=...`
+  - If `listing.shipping_fee_cents == 0`:
+    - keep email-only flow (no payment)
+- ✅ **Deprecation / compatibility:**
+  - `DonateClaimIn.handling_fee_cents` retained for backward compatibility but ignored for business logic.
+
+**Frontend (shipped)**
+- ✅ Create Listing form:
+  - new shipping fee input (`shipping_fee_cents`) with community-first helper copy
+  - “🌱 Prefer local pickup” nudges default to 0
+- ✅ Listing detail:
+  - shows shipping line if shipping_fee > 0
+  - shows “🌱 Local pickup preferred — no shipping fee” when 0
+- ✅ Donation claim UI:
+  - shipping_fee == 0 → one-click claim (email donor)
+  - shipping_fee > 0 → PayPal flow (pay shipping → capture → donor emailed accept/deny)
+- ✅ Frontend API: `captureDonationShipping(txId, orderId)` added.
+
+---
+
+#### W3B — Transactions Page Polish — **SHIPPED**
+
+**Goal achieved:** Transactions page works across buy/swap/donate and supports fast filtering.
+
+**Frontend (shipped):** `app/frontend/src/pages/Transactions.jsx`
+- ✅ Tabs by kind with counts:
+  - `All / Buying / Selling / Swaps / Donations`
+- ✅ Multi-select status chips:
+  - `pending / accepted / denied / shipped / completed / paid / refunded`
+- ✅ Row affordances:
+  - kind-appropriate icon + label
+  - status tone
+  - inline **Confirm receipt** CTA on accepted swap/donate rows where the current user hasn’t confirmed
+
+---
+
+#### W3C — APP_PUBLIC_URL Hygiene — **SHIPPED**
+
+**Goal achieved:** Email links + redirects resolve correctly across prod and preview environments.
+
+**Backend (shipped)**
+- ✅ Auto-derive base URL when `APP_PUBLIC_URL` is unset:
+  - reads `X-Forwarded-Proto`, `X-Forwarded-Host`, `Host`
+- ✅ Preserve explicit override:
+  - if `APP_PUBLIC_URL` is set → always use it (prod lock)
+- ✅ Refactor link builders:
+  - `_action_url()` and `_landing_redirect()` accept FastAPI `Request`
+
+**Docs (shipped)**
+- ✅ Added `backend/.env.example` documenting env vars and precedence rules.
 
 ---
 
 ## 3) Next Actions (immediate)
 
-### P0 (now)
-1. **Deploy Phase Z bundle to Hetzner**
-   - On VPS: `git pull` + rebuild: `docker compose up -d --build`
-   - Verify in real browser:
-     - Create Listing shows linked-item thumbnail preview
-     - Create Listing publish redirects to `/market`
-     - Item Detail save redirects to `/closet`
-     - Clean background shows Progress bar + completes
-     - Profile save redirects to `/home`
-     - Replace Photo stores raw photo (no auto-segmentation)
-     - Analyze button re-fills colors/materials with percentages
-     - Batch upload >5 items: each item is analysed (no “first item ok, rest blank”) and final toast reports any `analyzeFailed` items
-     - Graphic-print tees no longer shred into multiple cropped fragments
-     - Size defaults to user preference when analyzer cannot infer it
-
-2. **Redeploy Emergent host (`ai-stylist-api.emergent.host`)**
-   - Confirm deploy no longer 520.
-   - Probe `GET /api/v1/closet/analyze/version`:
-     - Expect `torch_installed:false`, `rembg_installed:false`, `use_local_clothing_parser:false`, `auto_matte_crops:false`.
-   - Validate core flows still work (with fallback ML path): Add Item, Analyze, Stylist, Marketplace.
-
-3. **Deploy Phase R + Phase S to VPS**
-   - Pull + rebuild.
-   - Verify stylist multi-image compose and “Search wider”.
-
-4. **Phase T-Auth verification on VPS (real Google account)**
-   - Verify login, account-linking by email, optional calendar connect.
-   - Validate calendar endpoints and error surfacing.
+### P0 — Next wave candidates
+1. Swap payment support (optional): PayPal capture for swap shipping (only if community requests).
+2. Swap reservation semantics hardening:
+   - reserved vs removed policy on accept
+   - timeout/release logic for stale accepted swaps
 
 ### P1
-5. **Calendar sync deep-dive (silent fail)**
-   - After Phase T-Auth ships, debug with real identity.
-   - Validate token persistence, scopes, refresh behaviour, and Calendar API calls.
+3. Transactions page quality-of-life:
+   - search by listing title
+   - per-kind empty states and summaries
 
-### P2 (blocked)
-6. Phase 6/N: merge and host fine-tuned Gemma 4 E2B (The Eyes).
-7. Phase O: Gemma 4 E4B Stylist brain swap.
+### P2
+4. Object storage migration (Mongo base64 bloat → R2/S3).
+5. Phase O: Swap Stylist Brain to fine-tuned Gemma 4 E2B (blocked on fine-tuning + hosting).
+
+### P3
+6. Refactor `AddItem.jsx` into modules.
 
 ---
 
 ## 4) Success Criteria
 
-### Production health
-- ✅ Closet loads quickly (no Mongo sort memory failure, no multi-MB payload, cache works).
-- ✅ Stylist endpoint stable (no `repos.find_one(sort=...)` crash).
-- ✅ Frontend bundle has correct API base URL.
+### Marketplace Wave 1 (already)
+- ✅ Shared items auto-publish.
+- ✅ Deleting closet item retires linked listing.
+- ✅ Seller card shows only safe merchant info with correct fallback chain.
+- ✅ Resend sale emails trigger on PayPal capture.
 
-### Phase Z (pre-deploy audit) bundle
-- ✅ UX polish behaviour present (previews + redirects + progress).
-- ✅ Batch upload does not skip analysis after first item; `_ANALYZE_LOCK` prevents concurrent OOM.
-- ✅ Edit page shows weighted `colors[]` and `fabric_materials[]` with percentages.
-- ✅ Replace photo is raw; user triggers background removal + analyze explicitly.
-- ✅ `POST /closet/{id}/reanalyze` works, preserves user fields.
-- ✅ Graphic-print tees do not shred.
-- ✅ Size defaults from user body measurements when missing.
-- ✅ Emergent host deploy works without torch/rembg (fallback path), and `analyze/version` markers reflect mode.
+### Marketplace Wave 2 (shipped)
+- ✅ Swap: propose → JWT accept/deny → landing → confirm receipt → completion.
+- ✅ Donate (MVP): claim → donor accept/deny email → confirmation email.
+- ✅ UI: listing detail shows size/description/condition; CTAs hidden on own listings; landing page works logged-out.
 
-### Phase R + S — Stylist Power-Up + Widen Search
-- Multi-image upload in chat and compose page.
-- Outfit constructed with visible slots and rationale.
-- Marketplace gap-fill suggestions appear when outfit incomplete.
-- “Search wider” uses user preferences and can suggest out-of-closet items.
+### Marketplace Wave 3 (shipped)
+- ✅ Shipping fee:
+  - `Listing.shipping_fee_cents` exists, is editable, and defaults to 0.
+  - Sell PayPal charges include shipping and return a line-item breakdown.
+  - Donate claim requires PayPal shipping reimbursement **only** when shipping fee > 0.
+  - UI nudges local pickup: “🌱 Prefer local pickup” / “Meet locally to skip the fee 🌱”.
+  - Donations remain free (no handling fee concept; backward-compat stub deprecated).
+- ✅ Transactions UI:
+  - Tabs + multi-select status chips.
+  - Confirm receipt CTA appears appropriately for accepted swap/donate rows.
+- ✅ Environment URLs:
+  - Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
+  - Explicit `APP_PUBLIC_URL` overrides derivation (prod lock).
 
-### Phase T-Auth — Google Sign-in
-- Users can:
-  - create an account via Google
-  - log in via Google
-  - optionally connect Calendar during login
-  - auto-link to existing password account by email
-- Admin access:
-  - only `ADMIN_EMAILS` get `admin` role
-  - `grant_admin.py` fallback works
-- Calendar validation:
-  - events sync for real Google identities
-  - failures are surfaced and diagnosable (logs + status endpoint)
+---
+
+## Out of scope (deferred)
+- Swap PayPal capture at propose-time (Wave 4+ if community requests it)
+- Refund policy for captured donation shipping
+- Transactions search by listing title (future QoL)

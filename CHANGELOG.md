@@ -8,6 +8,155 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
+## [v1.1.0] — 2026-05-02
+
+Marketplace Wave 2 (Swap + Donate pipelines) and Wave 3 (listing-level
+shipping fee, transactions UI, APP_PUBLIC_URL hygiene) rolled up into a
+single stable release. No breaking changes vs `v1.0-stable`; every new
+field defaults to zero/false so existing rows remain valid without
+migration. This tag is also the pre-swap checkpoint before the upcoming
+Phase O Stylist provider migration (Gemini → Qwen-VL → Gemma4-E4B).
+
+Highlights:
+- **Wave 2** — Swap + Donate pipelines with JWT-signed email accept/deny,
+  confirm-receipt flow, auth-optional transaction landing page, and
+  mode-aware listing detail CTAs.
+- **Wave 3** — Optional `Listing.shipping_fee_cents` (free by default)
+  with community-pickup nudges baked into the UI copy, PayPal capture
+  for donation shipping reimbursement, full Transactions page rewrite
+  (kind tabs + status chips + inline confirm-receipt), and auto-derived
+  `APP_PUBLIC_URL` for preview/staging pods.
+
+Full details in the two sections below.
+
+---
+
+## [v1.1.0 changes, part 1] — Marketplace Wave 3
+
+### Added
+- **Listing-level shipping fee** (`Listing.shipping_fee_cents`). Optional,
+  defaults to 0 (local-pickup only), and applies uniformly across sell,
+  swap, and donate modes. DressApp's environmental ethos is expressed
+  directly in the UI: listings without a shipping fee advertise
+  "🌱 Local pickup preferred — no shipping fee", and listings with a
+  fee pair it with "Or meet locally to skip the fee 🌱" messaging.
+- **PayPal capture for donation shipping**. When a donate listing sets
+  `shipping_fee_cents > 0`, claimers pay that amount via PayPal:
+  - `POST /api/v1/transactions/donate` creates a PayPal order instead
+    of emailing the donor.
+  - `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=…`
+    finalises the capture and only then fires the donor's JWT-signed
+    accept/deny email.
+  - Frontend reuses `PayPalCheckoutButton` for consistent checkout UX
+    across buy and donation-shipping flows.
+- **Transactions page rewrite**. `/transactions` now features:
+  - Primary tabs by transaction kind (All / Buying / Selling / Swaps /
+    Donations), each with a live count badge.
+  - Secondary multi-select status chips (pending / accepted / denied /
+    shipped / completed / paid / refunded).
+  - Per-row kind-appropriate icons, status tone, and an inline
+    "Confirm receipt" button for accepted swap + donate rows belonging
+    to the current user.
+- **Create Listing form** adds a shipping-fee input with community-first
+  helper copy pushing users toward local pickup.
+- **`APP_PUBLIC_URL` auto-derive**. When the env var is unset, the
+  backend now derives the public origin from `X-Forwarded-Proto` +
+  `X-Forwarded-Host` (or `Host`) on the inbound request, so preview
+  and staging pods build correct email links without per-env
+  configuration. Explicit `APP_PUBLIC_URL` still wins when set. A new
+  `backend/.env.example` documents every environment variable the
+  backend reads, including the precedence rules for this one.
+
+### Changed
+- `payments.py::listing_buy_create` now adds `listing.shipping_fee_cents`
+  on top of `list_price_cents` when creating the PayPal order. The
+  returned payload breaks `list_price_cents`, `shipping_fee_cents`,
+  and `amount_cents` apart so the frontend can render a clean line-
+  item preview. Seller-side fee math remains computed on the item
+  price only (shipping is pass-through).
+- `transactions.py` endpoints that emit outbound URLs (`/action`,
+  `/swap`, `/donate`, `/donate/{id}/capture`) now accept the FastAPI
+  `Request` so `_action_url` and `_landing_redirect` can auto-derive
+  the correct origin.
+
+### Deprecated
+- `DonateClaimIn.handling_fee_cents` — donations are always free per
+  DressApp's environmental ethos. The field is still accepted by the
+  endpoint for backwards compatibility but is ignored server-side;
+  shipping fees are now driven by `listing.shipping_fee_cents`.
+
+### API / endpoints added
+- `POST /api/v1/transactions/donate/{tx_id}/capture?order_id=…`
+
+### Frontend api.js additions
+- `api.captureDonationShipping(txId, orderId)`
+
+---
+
+## [v1.1.0 changes, part 2] — Marketplace Wave 2
+
+### Added
+- **Swap pipeline**. Users can propose a swap directly from a listing:
+  - New `POST /api/v1/transactions/swap` creates a zero-cash transaction
+    linking the swapper's offered closet item to the lister's listing.
+  - `SwapPickerModal` frontend component (Shadcn Dialog) lets the user
+    browse their own closet and pick one item to offer.
+- **Donation flow**. New `POST /api/v1/transactions/donate` endpoint plus
+  one-click "Claim this donation" CTA on `mode=donate` listings. Handling
+  fee is sent to the backend as metadata; PayPal handling-fee capture is
+  deferred to a follow-up iteration.
+- **JWT-signed email accept/deny**. New `services/action_tokens.py` mints
+  short-lived JWTs (7-day expiry) with a dedicated `aud="dressapp.tx_action"`
+  claim so they cannot be replayed against auth endpoints. Each token
+  carries a random `jti` that is persisted on the transaction and spent
+  exactly once — reuse and tampering both fail gracefully.
+- **Public action endpoint** `GET /api/v1/transactions/action?token=…&decision=…`
+  verifies the JWT, applies accept/deny idempotently, fires follow-up
+  emails (`swap_success` / `swap_denied` / `donation_both`), and 303-
+  redirects the browser to the transaction landing page.
+- **Transaction landing page** at `/transactions/:id/landing` (auth-optional
+  so email clicks from logged-out browsers still work). Renders a status
+  banner (Accepted / Declined / Pending / Expired), listing summary with
+  size + condition + description, and a Back-to-Marketplace CTA. Backed
+  by a minimal public projection via `GET /transactions/:id/landing-summary`.
+- **Confirm-receipt endpoint** `POST /api/v1/transactions/:id/confirm-receipt`.
+  Both parties can mark the incoming item as received; when both have
+  confirmed, the swap completes, closet ownership flips, and listings
+  close.
+- **Listing detail enrichment** on `/market/:id`:
+  - Always-visible badges for Size, Condition, Category, and Mode.
+  - Always-visible Description block.
+  - Mode-aware primary CTA — Buy / Swap / Donate — with self-swap and
+    self-donate hidden when the listing is owned by the viewer.
+
+### Changed
+- `Transaction` schema gained a `kind` discriminator ("buy" | "swap" |
+  "donate") plus nested `swap` and `donate` sub-documents. Legacy `buy`
+  transactions are untouched (default remains `kind="buy"`).
+- `TxStatus` literal extended with `accepted`, `denied`, `shipped`,
+  `completed` — drives the new swap + donate state machine without
+  breaking reads of older buy ledger rows.
+- `transactions.paypal.order_id` index migrated from `sparse=True` (which
+  still indexes explicit nulls) to a `partialFilterExpression` that only
+  covers string values. Prevents duplicate-key 500s when swap/donate
+  transactions — which never touch PayPal — insert with a null
+  `paypal.order_id`.
+
+### API / endpoints added
+- `POST /api/v1/transactions/swap`
+- `POST /api/v1/transactions/donate`
+- `GET  /api/v1/transactions/action`
+- `POST /api/v1/transactions/:id/confirm-receipt`
+- `GET  /api/v1/transactions/:id/landing-summary` (public)
+
+### Frontend api.js additions
+- `api.proposeSwap(listingId, offeredItemId)`
+- `api.claimDonation(listingId, handlingFeeCents)`
+- `api.confirmReceipt(txId)`
+- `api.getLandingSummary(txId)` (unauthenticated)
+
+---
+
 ## [v1.0-stable] — 2026-05-01
 
 First stable milestone shipped to production (https://dressapp.co) on Hetzner
@@ -73,4 +222,11 @@ with Atlas M10. Contest-ready build.
 
 ## [Unreleased]
 
-Work staged for v1.1.x (none yet — next feature branch starts here).
+Next up: **Phase O — Stylist provider migration**.
+- Wave O.1: Replace Gemini chat with Qwen-VL-Max via DashScope on
+  `/api/v1/stylist`. New `app/services/qwen_client.py` + provider
+  abstraction in `stylist_brain.py`. `STYLIST_PROVIDER=qwen|gemini` env
+  toggle, Gemini retained as fallback.
+- Wave O.2 (later): swap `garment_vision` Eyes + Brain calls to
+  Qwen-VL-Plus + Qwen-VL-Max. Fine-tuned Gemma4-E4B plugs in once 24/7
+  hosting is ready.

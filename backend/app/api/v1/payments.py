@@ -398,11 +398,17 @@ async def listing_buy_create(
     if listing.get("status") != "active":
         raise HTTPException(400, "Listing is not active")
 
-    price_cents = int(listing["financial_metadata"]["list_price_cents"])
+    # Wave 3: buyer pays list price PLUS any optional shipping fee on
+    # the listing. Shipping is kept as a separate display line in the
+    # transaction ledger so post-sale analytics stay clean (fees math
+    # is computed on the list price only; shipping is pass-through).
+    list_price_cents = int(listing["financial_metadata"]["list_price_cents"])
+    shipping_cents = int(listing.get("shipping_fee_cents") or 0)
+    total_cents = list_price_cents + shipping_cents
     currency = listing["financial_metadata"].get("currency", "USD").upper()
     try:
         order = await paypal_client.create_order(
-            amount_cents=price_cents,
+            amount_cents=total_cents,
             currency=currency,
             reference_id=f"listing:{listing_id}",
             description=f"{listing.get('title','DressApp item')}"[:127],
@@ -411,8 +417,11 @@ async def listing_buy_create(
     except paypal_client.PayPalError as exc:
         raise HTTPException(502, {"paypal_error": str(exc.body)}) from exc
 
-    # Create pending transaction tied to the order
-    financial = _platform_fee_math(price_cents)
+    # Create pending transaction tied to the order. We compute fees on
+    # the item price only — shipping is reported as a separate field so
+    # payouts/refunds can reason about the two amounts independently.
+    financial = _platform_fee_math(list_price_cents)
+    financial.gross_cents = total_cents  # bookkeeping: total charged to buyer
     tx = Transaction(
         listing_id=listing_id,
         buyer_id=user["id"],
@@ -423,11 +432,17 @@ async def listing_buy_create(
         status="pending",
     )
     tx_doc = tx.model_dump()
+    # Persist shipping separately so the frontend can render a clean
+    # line item and the seller payout can include shipping on top of
+    # the seller_net_cents amount.
+    tx_doc["shipping_fee_cents"] = shipping_cents
     await db.transactions.insert_one(tx_doc)
     return {
         "order_id": order["id"],
         "transaction_id": tx.id,
-        "amount_cents": price_cents,
+        "amount_cents": total_cents,
+        "list_price_cents": list_price_cents,
+        "shipping_fee_cents": shipping_cents,
         "currency": currency,
     }
 

@@ -125,8 +125,21 @@ async def ensure_indexes() -> None:
     await db.credit_topups.create_index(
         [("paypal_order_id", 1)], unique=True, sparse=True
     )
+    # Wave 2: swap + donate transactions never touch PayPal, so
+    # ``paypal.order_id`` is explicitly null for them. ``sparse=True``
+    # alone doesn't skip null values (only missing fields), so we use a
+    # partialFilterExpression restricted to string values. Older
+    # deployments may have the legacy sparse index — drop it defensively
+    # first so the create_index call doesn't 85-error on a conflicting
+    # definition.
+    try:
+        await db.transactions.drop_index("paypal.order_id_1")
+    except Exception:  # noqa: BLE001
+        pass  # first boot or already migrated
     await db.transactions.create_index(
-        [("paypal.order_id", 1)], unique=True, sparse=True
+        [("paypal.order_id", 1)],
+        unique=True,
+        partialFilterExpression={"paypal.order_id": {"$type": "string"}},
     )
     await db.transactions.create_index(
         [("paypal.payout_item_id", 1)], sparse=True

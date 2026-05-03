@@ -1,30 +1,46 @@
 [
   {
-    "content": "Install resend lib + add RESEND_API_KEY/SENDER_EMAIL to backend/.env",
+    "content": "Add Listing.shipping_fee_cents schema + Create/Update DTOs",
     "status": "completed"
   },
   {
-    "content": "Create app/services/email_service.py with helpers + 6 HTML templates",
+    "content": "SELL flow: include shipping in PayPal order gross (payments.py listing_buy_create)",
     "status": "completed"
   },
   {
-    "content": "Auto-list on Share toggle: backend hook in closet update endpoint",
+    "content": "DONATE flow: PayPal order when shipping_fee > 0 + capture endpoint + JWT email after capture",
     "status": "completed"
   },
   {
-    "content": "Listing detail enriched with seller country/city (fallback to home_location)",
+    "content": "Backend: APP_PUBLIC_URL auto-derive from Request (refactor _action_url + _landing_redirect)",
     "status": "completed"
   },
   {
-    "content": "Wire sale-completion emails to PayPal capture/webhook handler",
+    "content": ".env.example: document APP_PUBLIC_URL",
     "status": "completed"
   },
   {
-    "content": "Frontend: 'Complete listing' CTA on closet card for auto-created listings",
+    "content": "Frontend: CreateListing form input for shipping fee + community pickup nudge",
     "status": "completed"
   },
   {
-    "content": "Lint + smoke test wave 1; add /analyze/version markers",
+    "content": "Frontend: ListingDetail shows shipping fee + community pickup nudge",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Donate claim — handle PayPal redirect when shipping_fee > 0",
+    "status": "completed"
+  },
+  {
+    "content": "Transactions page: tabs + multi-select status chips + confirm-receipt CTA",
+    "status": "completed"
+  },
+  {
+    "content": "Backend curl (Wave 3) + testing_agent E2E (backend 91%, frontend code-verified in bundle)",
+    "status": "completed"
+  },
+  {
+    "content": "Update CHANGELOG.md with Wave 3 entries",
     "status": "completed"
   }
 ]

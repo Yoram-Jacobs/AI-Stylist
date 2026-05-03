@@ -41,6 +41,10 @@ class CreateListingIn(BaseModel):
     ships_to: list[str] = Field(default_factory=list)
     list_price_cents: int = Field(ge=0)
     currency: str = "USD"
+    # Wave 3 — optional shipping fee attached to this listing. 0 means
+    # "free / local pickup only". Capped nowhere on the backend;
+    # product copy nudges users toward 0 for donations.
+    shipping_fee_cents: int = Field(default=0, ge=0)
 
 
 class UpdateListingIn(BaseModel):
@@ -54,6 +58,7 @@ class UpdateListingIn(BaseModel):
     location: dict[str, Any] | None = None
     ships_to: list[str] | None = None
     list_price_cents: int | None = None
+    shipping_fee_cents: int | None = Field(default=None, ge=0)
     status: ListingStatus | None = None
 
 
@@ -120,6 +125,7 @@ async def create_listing(
         location=payload.location,
         ships_to=payload.ships_to,
         financial_metadata=financial,
+        shipping_fee_cents=payload.shipping_fee_cents,
     )
     doc = listing.model_dump()
     await repos.insert(db.listings, doc)
@@ -219,15 +225,18 @@ async def get_listing(listing_id: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
-    # Hydrate the seller's public-facing city/country so the listing
-    # detail UI can render "From Lisbon, Portugal" without a second
-    # round-trip. Order of preference:
-    #   1. The listing's own `location` dict (set when the listing was
-    #      created — most specific, e.g. a pop-up sale at a different
-    #      address than the seller's home).
-    #   2. The seller's `home_location` (broader fallback).
-    #   3. The seller's `address` city/country (last resort, used
-    #      only for older accounts that pre-date `home_location`).
+    # Hydrate the seller's public-facing display name + city/country
+    # so the listing detail UI can render "From Lisbon, Portugal" without
+    # a second round-trip. Order of preference for the name:
+    #   1. ``display_name`` — the user's explicit handle.
+    #   2. ``company_name`` — for sellers running a brand / boutique.
+    #   3. ``first_name``  — friendly fallback before any "anon".
+    #   4. (no merchant-name line at all — never an email prefix.)
+    # Order of preference for the location:
+    #   1. The listing's own ``location`` dict (most specific, e.g. a
+    #      pop-up sale at a different address).
+    #   2. The seller's ``home_location`` (broader fallback).
+    #   3. The seller's ``address`` city/country (last resort).
     # Email/phone are deliberately NOT exposed here — buyers learn
     # those after a successful transaction via the post-sale email.
     seller_pub: dict[str, Any] = {}
@@ -238,13 +247,20 @@ async def get_listing(listing_id: str) -> dict[str, Any]:
                 "_id": 0,
                 "id": 1,
                 "display_name": 1,
+                "company_name": 1,
+                "first_name": 1,
                 "home_location": 1,
                 "address": 1,
             },
         )
         if seller:
             seller_pub["id"] = seller.get("id")
-            seller_pub["display_name"] = seller.get("display_name")
+            seller_pub["display_name"] = (
+                seller.get("display_name")
+                or seller.get("company_name")
+                or seller.get("first_name")
+                or None
+            )
             loc = (
                 listing.get("location")
                 or seller.get("home_location")

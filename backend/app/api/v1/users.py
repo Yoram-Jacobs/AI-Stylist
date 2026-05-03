@@ -28,6 +28,7 @@ class UpdateUserIn(BaseModel):
     # --- Extended profile (Phase T) ---
     first_name: str | None = None
     last_name: str | None = None
+    company_name: str | None = None
     phone: str | None = None
     date_of_birth: str | None = None
     sex: str | None = None
