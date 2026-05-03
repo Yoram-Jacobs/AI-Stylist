@@ -8,7 +8,30 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
-## [Unreleased] — Marketplace Wave 3
+## [v1.1.0] — 2026-05-02
+
+Marketplace Wave 2 (Swap + Donate pipelines) and Wave 3 (listing-level
+shipping fee, transactions UI, APP_PUBLIC_URL hygiene) rolled up into a
+single stable release. No breaking changes vs `v1.0-stable`; every new
+field defaults to zero/false so existing rows remain valid without
+migration. This tag is also the pre-swap checkpoint before the upcoming
+Phase O Stylist provider migration (Gemini → Qwen-VL → Gemma4-E4B).
+
+Highlights:
+- **Wave 2** — Swap + Donate pipelines with JWT-signed email accept/deny,
+  confirm-receipt flow, auth-optional transaction landing page, and
+  mode-aware listing detail CTAs.
+- **Wave 3** — Optional `Listing.shipping_fee_cents` (free by default)
+  with community-pickup nudges baked into the UI copy, PayPal capture
+  for donation shipping reimbursement, full Transactions page rewrite
+  (kind tabs + status chips + inline confirm-receipt), and auto-derived
+  `APP_PUBLIC_URL` for preview/staging pods.
+
+Full details in the two sections below.
+
+---
+
+## [v1.1.0 changes, part 1] — Marketplace Wave 3
 
 ### Added
 - **Listing-level shipping fee** (`Listing.shipping_fee_cents`). Optional,
@@ -70,7 +93,7 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
-## [Unreleased] — Marketplace Wave 2
+## [v1.1.0 changes, part 2] — Marketplace Wave 2
 
 ### Added
 - **Swap pipeline**. Users can propose a swap directly from a listing:
@@ -199,4 +222,11 @@ with Atlas M10. Contest-ready build.
 
 ## [Unreleased]
 
-Work staged for v1.1.x (none yet — next feature branch starts here).
+Next up: **Phase O — Stylist provider migration**.
+- Wave O.1: Replace Gemini chat with Qwen-VL-Max via DashScope on
+  `/api/v1/stylist`. New `app/services/qwen_client.py` + provider
+  abstraction in `stylist_brain.py`. `STYLIST_PROVIDER=qwen|gemini` env
+  toggle, Gemini retained as fallback.
+- Wave O.2 (later): swap `garment_vision` Eyes + Brain calls to
+  Qwen-VL-Plus + Qwen-VL-Max. Fine-tuned Gemma4-E4B plugs in once 24/7
+  hosting is ready.
