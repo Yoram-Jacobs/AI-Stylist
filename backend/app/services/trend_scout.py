@@ -26,11 +26,12 @@ gracefully falls back to a gradient tile.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -264,8 +265,79 @@ async def run_trend_scout(*, force: bool = False) -> dict[str, Any]:
     }
 
 
+_REFRESH_LOCK: asyncio.Lock | None = None
+_LAST_AUTO_REFRESH: datetime | None = None
+
+
+def _stale_threshold() -> int:
+    """Hours after which `/trends/latest` reads opportunistically
+    schedule a background refresh. Never fewer than 1 hour to keep the
+    refresh fire-rate sane even if mis-configured.
+    """
+    try:
+        return max(1, int(getattr(settings, "TREND_SCOUT_STALE_AFTER_HOURS", 24) or 24))
+    except (TypeError, ValueError):
+        return 24
+
+
+async def _maybe_background_refresh(cards: list[dict[str, Any]]) -> None:
+    """If the newest card is older than the configured stale window,
+    fire a background `run_trend_scout` so the next visit gets fresh
+    data. Throttled to at most one auto-refresh per stale window to
+    avoid hammering the LLM on a busy home page.
+
+    NOTE: we look at ``created_at`` (a real ISO timestamp), not
+    ``date`` (a YYYY-MM-DD string) — ``date`` resolution would force a
+    refresh as soon as the clock crossed midnight UTC even when fresh
+    data from 23:59 had just been written.
+    """
+    global _LAST_AUTO_REFRESH, _REFRESH_LOCK
+    if not getattr(settings, "TREND_SCOUT_ENABLED", True):
+        return
+    threshold = timedelta(hours=_stale_threshold())
+    now = datetime.now(timezone.utc)
+    if _LAST_AUTO_REFRESH and (now - _LAST_AUTO_REFRESH) < threshold:
+        return  # already auto-refreshed within this stale window
+    if not cards:
+        # Nothing to compare against — let on-startup / cron handle it.
+        return
+    newest_iso = max(
+        (c.get("created_at") or c.get("updated_at") or "") for c in cards
+    )
+    try:
+        newest = datetime.fromisoformat(newest_iso.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=timezone.utc)
+    if (now - newest) < threshold:
+        return  # still fresh
+    if _REFRESH_LOCK is None:
+        _REFRESH_LOCK = asyncio.Lock()
+    if _REFRESH_LOCK.locked():
+        return  # someone already kicked off a refresh
+
+    async def _go() -> None:
+        global _LAST_AUTO_REFRESH
+        async with _REFRESH_LOCK:
+            try:
+                _LAST_AUTO_REFRESH = datetime.now(timezone.utc)
+                logger.info(
+                    "Trend-Scout auto-refresh kicked off (newest card was %s)",
+                    newest.isoformat(),
+                )
+                await run_trend_scout()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Trend-Scout auto-refresh failed: %s", exc)
+
+    asyncio.create_task(_go())
+
+
 async def latest_trend_cards(limit_per_bucket: int = 1) -> list[dict[str, Any]]:
-    """Return the most recent English card for each bucket, newest first (legacy feed)."""
+    """Return the most recent English card for each bucket, newest first
+    (legacy feed). Opportunistically schedules a background refresh
+    when the newest card is older than ``TREND_SCOUT_STALE_AFTER_HOURS``.
+    """
     db = get_db()
     out: list[dict[str, Any]] = []
     for bucket in BUCKETS:
@@ -279,6 +351,11 @@ async def latest_trend_cards(limit_per_bucket: int = 1) -> list[dict[str, Any]]:
         )
         async for doc in cursor:
             out.append(doc)
+    # Best-effort auto-refresh — never blocks the response.
+    try:
+        await _maybe_background_refresh(out)
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
