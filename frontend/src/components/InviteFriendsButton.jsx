@@ -56,11 +56,11 @@ export function InviteFriendsButton() {
       data-testid="invite-friends-card"
     >
       <CardContent className="p-6">
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col sm:flex-row items-start gap-4">
           <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
             <Users className="h-5 w-5" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 w-full">
             <div className="caps-label text-muted-foreground">
               {t('profile.inviteFriends')}
             </div>
@@ -71,11 +71,11 @@ export function InviteFriendsButton() {
               {t('profile.inviteBody')}
             </p>
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 w-full sm:w-auto">
             <Button
               onClick={share}
               disabled={busy}
-              className="rounded-xl"
+              className="rounded-xl w-full sm:w-auto"
               data-testid="invite-friends-btn"
             >
               {busy ? (
