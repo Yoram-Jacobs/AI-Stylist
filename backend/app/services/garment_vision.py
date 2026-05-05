@@ -505,74 +505,99 @@ def _norm_str(v: Any) -> str | None:
     return v.strip().lower().replace("_", "-")
 
 
+def _coerce_enum_field(
+    parsed: dict[str, Any],
+    key: str,
+    valid: set[str],
+    *,
+    aliases: dict[str, str] | None = None,
+    default: str | None = None,
+) -> None:
+    """Normalise ``parsed[key]`` to a value in ``valid`` (or ``None``).
+
+    Steps: strip → lower via ``_norm_str`` → remap via ``aliases`` →
+    accept only if in ``valid``. When the coerced value is invalid the
+    field is set to ``default`` (typically ``None``) so Pydantic's
+    optional-enum validators stay happy.
+    """
+    value = _norm_str(parsed.get(key))
+    if value and aliases:
+        value = aliases.get(value, value)
+    parsed[key] = value if value in valid else default
+
+
+def _coerce_seasons(parsed: dict[str, Any]) -> None:
+    """Coerce ``parsed['season']`` to a validated list (may be empty)."""
+    allowed = {"spring", "summer", "fall", "autumn", "winter", "all"}
+    raw = parsed.get("season") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    seasons: list[str] = []
+    for entry in raw:
+        tok = _norm_str(entry)
+        if tok == "autumn":
+            tok = "fall"
+        if tok in allowed:
+            seasons.append(tok)
+    parsed["season"] = seasons
+
+
+# Alias tables for the model's common off-spec echoes. Keeping these at
+# module scope lets us unit-test them directly without instantiating the
+# vision service.
+_GENDER_ALIASES = {
+    "male": "men", "female": "women", "uni": "unisex", "kid": "kids",
+}
+_CONDITION_ALIASES = {"poor": "bad", "very-good": "excellent"}
+_QUALITY_ALIASES = {
+    "cheap": "budget", "entry": "budget", "basic": "budget",
+    "mid-range": "mid", "standard": "mid",
+    "high": "premium", "high-end": "premium",
+}
+
+
+def _normalise_dress_code(raw: str | None) -> str | None:
+    """Return the dress-code token after space→hyphen + common renames."""
+    value = _norm_str(raw)
+    if not value:
+        return None
+    value = value.replace(" ", "-")
+    if value == "athleisure":
+        value = "athletic"
+    if value == "lounge":
+        value = "loungewear"
+    return value
+
+
 def _coerce_enums(parsed: dict[str, Any]) -> dict[str, Any]:
     """Best-effort coercion of AI-returned enum values.
 
     * Unknown / empty values are dropped rather than kept, so Pydantic's
       optional-enum fields stay valid (None instead of an unknown literal).
     * ``state`` is the main hazard: the model sometimes echoes the
-      ``condition`` value there. We infer ``used`` by default, but flip
-      to ``new`` if the item is also labelled ``excellent`` and looks
-      brand-new.
+      ``condition`` value there. We default to ``used``; the user can
+      flip to ``new`` in the form.
     """
-    # gender
-    g = _norm_str(parsed.get("gender"))
-    if g and g not in _VALID_GENDER:
-        g = {"male": "men", "female": "women", "uni": "unisex", "kid": "kids"}.get(g)
-    parsed["gender"] = g if g in _VALID_GENDER else None
-
-    # dress_code
-    dc = _norm_str(parsed.get("dress_code"))
-    if dc:
-        dc = dc.replace(" ", "-")
-        if dc == "athleisure":
-            dc = "athletic"
-        if dc == "lounge":
-            dc = "loungewear"
-    parsed["dress_code"] = dc if dc in _VALID_DRESS_CODE else None
-
-    # condition
-    c = _norm_str(parsed.get("condition"))
-    if c == "poor":
-        c = "bad"
-    if c == "very-good":
-        c = "excellent"
-    parsed["condition"] = c if c in _VALID_CONDITION else None
-
-    # state \u2014 coerce unknowns based on other signals
+    _coerce_enum_field(
+        parsed, "gender", _VALID_GENDER, aliases=_GENDER_ALIASES,
+    )
+    parsed["dress_code"] = (
+        _normalise_dress_code(parsed.get("dress_code"))
+        if _normalise_dress_code(parsed.get("dress_code")) in _VALID_DRESS_CODE
+        else None
+    )
+    _coerce_enum_field(
+        parsed, "condition", _VALID_CONDITION, aliases=_CONDITION_ALIASES,
+    )
+    # ``state`` has a sensible default unlike the other enums — the form
+    # can round-trip "used" without surprising the user.
     s = _norm_str(parsed.get("state"))
-    if s not in _VALID_STATE:
-        s = "used"  # sensible default; user can flip to "new" in the form
-    parsed["state"] = s
-
-    # quality
-    q = _norm_str(parsed.get("quality"))
-    q_map = {
-        "cheap": "budget", "entry": "budget", "basic": "budget",
-        "mid-range": "mid", "standard": "mid",
-        "high": "premium", "high-end": "premium",
-    }
-    q = q_map.get(q, q)
-    parsed["quality"] = q if q in _VALID_QUALITY else None
-
-    # pattern
-    p = _norm_str(parsed.get("pattern"))
-    parsed["pattern"] = p if p in _VALID_PATTERN else None
-
-    # season \u2014 must be a list of known tokens
-    allowed_seasons = {"spring", "summer", "fall", "autumn", "winter", "all"}
-    raw_seasons = parsed.get("season") or []
-    if isinstance(raw_seasons, str):
-        raw_seasons = [raw_seasons]
-    seasons: list[str] = []
-    for s2 in raw_seasons:
-        tok = _norm_str(s2)
-        if tok == "autumn":
-            tok = "fall"
-        if tok in allowed_seasons:
-            seasons.append(tok)
-    parsed["season"] = seasons
-
+    parsed["state"] = s if s in _VALID_STATE else "used"
+    _coerce_enum_field(
+        parsed, "quality", _VALID_QUALITY, aliases=_QUALITY_ALIASES,
+    )
+    _coerce_enum_field(parsed, "pattern", _VALID_PATTERN)
+    _coerce_seasons(parsed)
     return parsed
 
 
@@ -644,46 +669,54 @@ class GarmentVisionService:
             )
 
     # -------------------- public API --------------------
-    async def detect_items(self, image_bytes: bytes) -> list[dict[str, Any]]:
-        """Return a list of ``{label, kind, bbox}`` entries.
-
-        Phase V: try the commercial-safe clothing parser first
-        (sayeed99/segformer_b3_clothes, MIT). If it returns at least one
-        garment we use those — they're pixel-accurate per-class and split
-        outfits reliably. Otherwise fall back to the Gemini bbox detector.
+    async def _detect_via_clothing_parser(
+        self, image_bytes: bytes,
+    ) -> list[dict[str, Any]] | None:
+        """Try the local SegFormer-based parser. Returns the normalised
+        detection list on success, or ``None`` to let the caller fall
+        back to Gemini. A parser exception is logged and treated as a
+        soft miss — we don't want a SegFormer hiccup to mask bad photos.
         """
-        if settings.USE_CLOTHING_PARSER:
-            try:
-                from app.services import clothing_parser
+        if not settings.USE_CLOTHING_PARSER:
+            return None
+        try:
+            from app.services import clothing_parser
 
-                parser_items = await clothing_parser.parse_garments(image_bytes)
-                if parser_items:
-                    logger.info(
-                        "detect_items: clothing_parser succeeded with %d items",
-                        len(parser_items),
-                    )
-                    return [
-                        {
-                            "label": p["label"].lower().replace("-", "_"),
-                            "kind": p["category"],  # top / bottom / dress / ...
-                            "bbox": p["bbox"],  # [ymin,xmin,ymax,xmax] 0-1000
-                            "score": p["score"],
-                            # Preserve full-res mask so analyze_outfit can
-                            # build semantic PNG cutouts instead of bbox
-                            # rectangles. Not serialised to JSON anywhere.
-                            "mask": p.get("mask"),
-                            "source": "clothing_parser",
-                        }
-                        for p in parser_items
-                    ]
-            except Exception as exc:  # noqa: BLE001
-                logger.info(
-                    "detect_items: clothing_parser path failed (%s), falling back",
-                    exc,
-                )
+            parser_items = await clothing_parser.parse_garments(image_bytes)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "detect_items: clothing_parser path failed (%s), falling back",
+                exc,
+            )
+            return None
+        if not parser_items:
+            return None
+        logger.info(
+            "detect_items: clothing_parser succeeded with %d items",
+            len(parser_items),
+        )
+        return [
+            {
+                "label": p["label"].lower().replace("-", "_"),
+                "kind": p["category"],
+                "bbox": p["bbox"],
+                "score": p["score"],
+                # Preserve full-res mask so analyze_outfit can build
+                # semantic PNG cutouts instead of bbox rectangles. Not
+                # serialised to JSON anywhere.
+                "mask": p.get("mask"),
+                "source": "clothing_parser",
+            }
+            for p in parser_items
+        ]
+
+    async def _detect_via_gemini(
+        self, image_bytes: bytes,
+    ) -> list[dict[str, Any]]:
+        """Gemini bbox-detection fallback. Returns a pre-NMS list of
+        ``{label, kind, bbox}`` dicts (the caller applies NMS +
+        validation)."""
         if self.detect_provider != "gemini":
-            # Other detectors will be added later; for now only Gemini
-            # gives reliable bounding boxes.
             logger.warning(
                 "Unsupported detect provider %s; returning empty detections.",
                 self.detect_provider,
@@ -692,6 +725,7 @@ class GarmentVisionService:
         if not self.api_key:
             logger.warning("No Gemini chat key; skipping detection.")
             return []
+
         shrunk = _shrink_for_vision(image_bytes, max_side=1024, q=80)
         b64 = base64.b64encode(shrunk).decode("ascii")
         chat = LlmChat(
@@ -728,7 +762,7 @@ class GarmentVisionService:
         items = parsed.get("items") or []
         if not isinstance(items, list):
             items = []
-        # Minimal validation + normalisation first.
+
         clean: list[dict[str, Any]] = []
         for it in items:
             if not isinstance(it, dict):
@@ -745,6 +779,22 @@ class GarmentVisionService:
             clean.append(
                 {"label": label, "kind": kind, "bbox": [int(v) for v in bbox]}
             )
+        return clean
+
+    async def detect_items(self, image_bytes: bytes) -> list[dict[str, Any]]:
+        """Return a list of ``{label, kind, bbox}`` entries.
+
+        Phase V: try the commercial-safe clothing parser first
+        (sayeed99/segformer_b3_clothes, MIT). If it returns at least one
+        garment we use those — they're pixel-accurate per-class and split
+        outfits reliably. Otherwise fall back to the Gemini bbox detector
+        and apply non-maximum suppression to collapse overlapping boxes.
+        """
+        parser_hits = await self._detect_via_clothing_parser(image_bytes)
+        if parser_hits:
+            return parser_hits
+
+        clean = await self._detect_via_gemini(image_bytes)
         # Non-maximum suppression: collapse overlapping detections that
         # describe the same physical item (IoU >= 0.35 OR one box nested
         # inside the other with compatible kind).
@@ -843,6 +893,327 @@ class GarmentVisionService:
         return parsed
 
     # -------------------- multi-item outfit pipeline --------------------
+    # -----------------------------------------------------------------
+    # analyze_outfit helpers — extracted during Wave O.2 prep to drop
+    # the parent function's cyclomatic complexity from 34 down to ~6.
+    # Every helper is a thin, testable slice of a single lifecycle
+    # phase (detect → short-circuit → filter → crop → matte → analyse).
+    # -----------------------------------------------------------------
+    @staticmethod
+    def _build_fullframe_item(
+        analysis: dict[str, Any],
+        crop_bytes: bytes,
+        *,
+        label_hint: str | None = None,
+        kind_hint: str | None = None,
+        crop_mime: str = "image/jpeg",
+    ) -> dict[str, Any]:
+        """Shape a single-item result dict covering the whole frame.
+
+        Used by every fallback branch in :meth:`analyze_outfit` (photo
+        looks already-cropped, no useful detections, every crop was
+        rejected, every per-crop analysis failed) so the response
+        contract stays identical no matter which path we took.
+        """
+        label = (
+            label_hint
+            or analysis.get("item_type")
+            or analysis.get("sub_category")
+            or "garment"
+        )
+        return {
+            "label": label,
+            "kind": kind_hint or "garment",
+            "bbox": [0, 0, 1000, 1000],
+            "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+            "crop_mime": crop_mime,
+            "analysis": analysis,
+        }
+
+    async def _whole_image_matte(self, image_bytes: bytes) -> bytes | None:
+        """rembg the full frame so already-cropped product photos save
+        with a clean alpha channel instead of the raw upload.
+
+        Returns ``None`` when ``AUTO_MATTE_CROPS`` is disabled or rembg
+        errors out; callers fall back to the original JPEG bytes in
+        that case.
+        """
+        if not settings.AUTO_MATTE_CROPS:
+            logger.info("already-cropped matte: AUTO_MATTE_CROPS=False, skipping")
+            return None
+        try:
+            from app.services import background_matting
+            import time as _t
+
+            t0 = _t.time()
+            logger.info(
+                "already-cropped matte: starting rembg on %d-byte image",
+                len(image_bytes),
+            )
+            result = await background_matting.matte_crop(image_bytes)
+            dt = _t.time() - t0
+            if result:
+                logger.info(
+                    "already-cropped matte: SUCCESS in %.1fs (output %d bytes)",
+                    dt,
+                    len(result),
+                )
+            else:
+                logger.warning(
+                    "already-cropped matte: rembg returned None after %.1fs "
+                    "(input %d bytes) — keeping original",
+                    dt,
+                    len(image_bytes),
+                )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "already-cropped matte: rembg raised %s — keeping original",
+                repr(exc)[:200],
+            )
+            return None
+
+    async def _handle_already_cropped(
+        self,
+        image_bytes: bytes,
+        detections: list[dict[str, Any]],
+        language: str | None,
+    ) -> list[dict[str, Any]]:
+        """Short-circuit for photos that are already tightly cropped.
+
+        Runs matting and the single-image analyser SERIALLY (not
+        ``asyncio.gather``) — concurrent rembg + Gemini on the
+        3GB-container prod box has been observed silently OOM-killing
+        the onnxruntime session. Latency cost is minimal; correctness
+        matters more.
+        """
+        logger.info(
+            "analyze_outfit: photo looks already-cropped "
+            "(detections=%d); skipping crop pipeline",
+            len(detections),
+        )
+        matted = await self._whole_image_matte(image_bytes)
+        single = await self.analyze(image_bytes, language=language)
+
+        if matted:
+            crop_bytes = matted
+            crop_mime = "image/png"
+        else:
+            crop_bytes = image_bytes
+            crop_mime = "image/jpeg"
+
+        # Pick the LLM's classification first (most reliable on novelty
+        # patterns / unusual fabrics). Fall back to the dominant
+        # SegFormer detection if the analysis didn't yield a label.
+        best_det: dict[str, Any] | None = None
+        if detections:
+            best_det = max(
+                detections,
+                key=lambda d: (
+                    max(0, d["bbox"][2] - d["bbox"][0])
+                    * max(0, d["bbox"][3] - d["bbox"][1])
+                ),
+            )
+        label = (
+            single.get("item_type")
+            or single.get("sub_category")
+            or (best_det.get("label") if best_det else None)
+            or "garment"
+        )
+        kind = (best_det.get("kind") if best_det else None) or "garment"
+        return [
+            self._build_fullframe_item(
+                single, crop_bytes,
+                label_hint=label, kind_hint=kind, crop_mime=crop_mime,
+            )
+        ]
+
+    @staticmethod
+    def _filter_useful_detections(
+        detections: list[dict[str, Any]], cap: int,
+    ) -> list[dict[str, Any]]:
+        """Drop near-full-frame detections and cap to ``max_items``.
+
+        A single detection that covers ≥90% of the frame is treated as
+        "analyse the whole photo" so we don't pay for an identical LLM
+        call on a bbox-cropped copy.
+        """
+        useful: list[dict[str, Any]] = []
+        for det in detections:
+            bbox = det.get("bbox")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            ymin, xmin, ymax, xmax = bbox
+            area = max(0, (ymax - ymin)) * max(0, (xmax - xmin))
+            if area >= 1000 * 1000 * 0.9:
+                continue
+            useful.append(det)
+        return useful[:cap]
+
+    @staticmethod
+    def _bbox_crop_useful(
+        image_bytes: bytes, useful: list[dict[str, Any]],
+    ) -> list[tuple[dict[str, Any], bytes, str]]:
+        """CPU-bound JPEG crop pass. Runs on a thread via
+        :func:`asyncio.to_thread` from the caller.
+
+        Also slices any SegFormer mask to the bbox and stashes it on
+        the detection dict (``_mask_bbox``) so the matting step can
+        intersect rembg's alpha with the per-class mask for cleaner
+        garment separation.
+        """
+        from app.services import clothing_parser
+
+        out: list[tuple[dict[str, Any], bytes, str]] = []
+        try:
+            from PIL import Image as _PILImage
+            import io as _io
+
+            _img = _PILImage.open(_io.BytesIO(image_bytes))
+            img_size = _img.size  # (W, H)
+        except Exception:  # noqa: BLE001
+            img_size = None
+
+        for det in useful:
+            box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
+            if not box_px:
+                continue
+            result = _crop_to_bbox(image_bytes, det["bbox"])
+            if not result:
+                continue
+            crop_bytes, _xy = result
+            mask = det.get("mask")
+            if mask is not None and img_size is not None:
+                mask_bbox = clothing_parser.slice_mask_to_bbox(
+                    mask, img_size, box_px
+                )
+                if mask_bbox is not None:
+                    det["_mask_bbox"] = mask_bbox
+                    det["mask"] = None
+            out.append((det, crop_bytes, "image/jpeg"))
+        return out
+
+    async def _matte_crops(
+        self, raw_crops: list[tuple[dict[str, Any], bytes, str]],
+    ) -> list[tuple[dict[str, Any], bytes, str]]:
+        """Pipe each JPEG crop through rembg, optionally intersecting
+        with the SegFormer per-class mask for sharper edges.
+
+        Serialised because each rembg call holds the onnxruntime
+        session — parallel invocations have been seen causing silent
+        OOM kills in 3GB containers.
+        """
+        from app.services import background_matting
+        from app.services import clothing_parser as _cp
+
+        matted_crops: list[tuple[dict[str, Any], bytes, str]] = []
+        for det, cbytes, mime in raw_crops:
+            try:
+                matted = await background_matting.matte_crop(cbytes)
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "auto-matte failed for %s: %s — keeping bbox crop",
+                    det.get("label"),
+                    repr(exc)[:120],
+                )
+                matted = None
+            if not matted:
+                matted_crops.append((det, cbytes, mime))
+                continue
+            seg_mask_bbox = det.get("_mask_bbox")
+            if seg_mask_bbox is not None:
+                try:
+                    refined = _cp.apply_alpha_intersection(
+                        matted, seg_mask_bbox
+                    )
+                    if refined:
+                        matted = refined
+                except Exception as exc:  # noqa: BLE001
+                    logger.info(
+                        "alpha intersection skipped for %s: %s",
+                        det.get("label"),
+                        repr(exc)[:120],
+                    )
+            det.pop("_mask_bbox", None)
+            matted_crops.append((det, matted, "image/png"))
+        return matted_crops
+
+    async def _analyse_one_crop(
+        self,
+        det: dict[str, Any],
+        crop_bytes: bytes,
+        crop_mime: str,
+        language: str | None,
+        sem: asyncio.Semaphore,
+    ) -> dict[str, Any] | None:
+        """Analyse a single crop + (optionally) reconstruct.
+
+        Returns ``None`` when the per-crop analyse call fails so the
+        caller can drop it silently — one bad crop shouldn't kill the
+        whole outfit response.
+        """
+        async with sem:
+            try:
+                analysis = await self.analyze(
+                    crop_bytes, model=self.crop_model, language=language,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "crop analyze failed for label=%s: %s",
+                    det.get("label"),
+                    repr(exc)[:1500],
+                )
+                return None
+
+            reconstruction_payload: dict[str, Any] | None = None
+            try:
+                from app.services.reconstruction import (
+                    reconstruct,
+                    should_reconstruct,
+                )
+
+                needs, reasons = should_reconstruct(analysis, det.get("bbox"))
+                if needs:
+                    reconstruction_payload = await reconstruct(
+                        crop_bytes, analysis, reasons=reasons,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "reconstruction pipeline failed for label=%s: %s",
+                    det.get("label"),
+                    repr(exc)[:160],
+                )
+            return {
+                "label": det.get("label") or "garment",
+                "kind": det.get("kind") or "garment",
+                "bbox": det.get("bbox"),
+                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+                "crop_mime": crop_mime,
+                "analysis": analysis,
+                "reconstruction": reconstruction_payload,
+            }
+
+    async def _analyse_crops(
+        self,
+        crops: list[tuple[dict[str, Any], bytes, str]],
+        language: str | None,
+    ) -> list[dict[str, Any]]:
+        """Run :meth:`_analyse_one_crop` over every crop with bounded
+        concurrency, then strip unidentifiable results."""
+        sem = asyncio.Semaphore(6)
+        results = await asyncio.gather(
+            *[self._analyse_one_crop(d, b, m, language, sem) for d, b, m in crops]
+        )
+        items = [r for r in results if r]
+        before_drop = len(items)
+        items = [r for r in items if not _is_unidentifiable(r.get("analysis"))]
+        if len(items) < before_drop:
+            logger.info(
+                "analyze_outfit: dropped %d unidentifiable item(s)",
+                before_drop - len(items),
+            )
+        return items
+
     async def analyze_outfit(
         self, image_bytes: bytes, *, max_items: int | None = None,
         language: str | None = None,
@@ -873,8 +1244,7 @@ class GarmentVisionService:
         When detection fails or yields nothing usable, we gracefully
         degrade to a single-item analysis of the original image.
         """
-        # 1) Detect every visible item. Soft-fail to whole-frame analysis
-        #    if the detector errors or is unavailable.
+        # 1) Detect. Soft-fail to single-image analysis on error.
         try:
             detections = await self.detect_items(image_bytes)
         except Exception as exc:  # noqa: BLE001
@@ -884,334 +1254,43 @@ class GarmentVisionService:
             )
             detections = []
 
-        # 1b) Short-circuit: if the photo is already a tight single-item
-        #     shot (one dominant detection, or a cluster of same-kind
-        #     sub-parts), skip cropping entirely and analyse the whole
-        #     frame as one item. This prevents the model from shredding
-        #     already-clean product photos.
+        # 2) Fast-path: already-cropped product photo.
         if _looks_already_cropped(detections):
-            logger.info(
-                "analyze_outfit: photo looks already-cropped "
-                "(detections=%d); skipping crop pipeline",
-                len(detections),
+            return await self._handle_already_cropped(
+                image_bytes, detections, language,
             )
-            # Run rembg on the whole image *and* analyse it as a single
-            # garment in parallel — gives the user a clean cutout (no
-            # background) instead of the raw upload, which is what
-            # already-cropped product photos deserve.
-            async def _whole_image_matte() -> bytes | None:
-                if not settings.AUTO_MATTE_CROPS:
-                    logger.info("already-cropped matte: AUTO_MATTE_CROPS=False, skipping")
-                    return None
-                try:
-                    from app.services import background_matting
-                    import time as _t
 
-                    t0 = _t.time()
-                    logger.info(
-                        "already-cropped matte: starting rembg on %d-byte image",
-                        len(image_bytes),
-                    )
-                    result = await background_matting.matte_crop(image_bytes)
-                    dt = _t.time() - t0
-                    if result:
-                        logger.info(
-                            "already-cropped matte: SUCCESS in %.1fs (output %d bytes)",
-                            dt,
-                            len(result),
-                        )
-                    else:
-                        logger.warning(
-                            "already-cropped matte: rembg returned None after %.1fs "
-                            "(input %d bytes) — keeping original",
-                            dt,
-                            len(image_bytes),
-                        )
-                    return result
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "already-cropped matte: rembg raised %s — keeping original",
-                        repr(exc)[:200],
-                    )
-                    return None
-
-            # Serialise rembg → Gemini instead of running them in
-            # parallel via asyncio.gather. Concurrent execution on
-            # memory-constrained boxes (3 GB containers) can cause
-            # silent OOM kills of rembg's onnxruntime session that
-            # show up in the closet as "background not removed". The
-            # latency cost is small (~17 s rembg + ~5 s Gemini) and
-            # correctness > a few seconds.
-            matted = await _whole_image_matte()
-            single = await self.analyze(image_bytes, language=language)
-            if matted:
-                crop_b64 = base64.b64encode(matted).decode("ascii")
-                crop_mime = "image/png"
-            else:
-                crop_b64 = base64.b64encode(image_bytes).decode("ascii")
-                crop_mime = "image/jpeg"
-            # Pick the LLM's classification first (most reliable on novelty
-            # patterns / unusual fabrics). Fall back to the dominant
-            # SegFormer detection if the analysis didn't yield a label.
-            best_det = None
-            if detections:
-                best_det = max(
-                    detections,
-                    key=lambda d: (
-                        max(0, d["bbox"][2] - d["bbox"][0])
-                        * max(0, d["bbox"][3] - d["bbox"][1])
-                    ),
-                )
-            label = (
-                single.get("item_type")
-                or single.get("sub_category")
-                or (best_det.get("label") if best_det else None)
-                or "garment"
-            )
-            kind = (best_det.get("kind") if best_det else None) or "garment"
-            return [
-                {
-                    "label": label,
-                    "kind": kind,
-                    "bbox": [0, 0, 1000, 1000],
-                    "crop_base64": crop_b64,
-                    "crop_mime": crop_mime,
-                    "analysis": single,
-                }
-            ]
-
-        # Soft-normalise: if the detector saw one giant box that covers
-        # the frame, treat it as a single-item analysis (no point paying
-        # for an extra LLM call on the identical image).
-        useful: list[dict[str, Any]] = []
-        for det in detections:
-            bbox = det.get("bbox")
-            if not isinstance(bbox, list) or len(bbox) != 4:
-                continue
-            ymin, xmin, ymax, xmax = bbox
-            area = max(0, (ymax - ymin)) * max(0, (xmax - xmin))
-            if area >= 1000 * 1000 * 0.9:
-                # near-full-frame box; skip, the analyze call will cover it
-                continue
-            useful.append(det)
-        # Cap work to avoid runaway cost / latency on very busy photos.
+        # 3) Filter + cap detections.
         cap = max_items if max_items is not None else self.max_items
-        useful = useful[:cap]
-
+        useful = self._filter_useful_detections(detections, cap)
         if not useful:
             single = await self.analyze(image_bytes, language=language)
-            crop_b64 = base64.b64encode(image_bytes).decode("ascii")
-            return [
-                {
-                    "label": single.get("item_type") or single.get("sub_category") or "garment",
-                    "kind": "garment",
-                    "bbox": [0, 0, 1000, 1000],
-                    "crop_base64": crop_b64,
-                    "crop_mime": "image/jpeg",
-                    "analysis": single,
-                }
-            ]
+            return [self._build_fullframe_item(single, image_bytes)]
 
-        # 2) Crop each bbox on a thread-pool (Pillow work is CPU-bound).
-        # We use two strategies in order of fidelity:
-        #   (a) When the detection came from the local SegFormer parser
-        #       (rare — only when the self-hosted box is configured) we
-        #       have a pixel-perfect mask; produce a PNG cutout directly.
-        #   (b) Otherwise we bbox-crop first, then — if AUTO_MATTE_CROPS
-        #       is enabled — pipe the JPEG through rembg to strip the
-        #       background. This turns Gemini's rough rectangles into
-        #       clean per-item cards and directly fixes the "crops look
-        #       like the full outfit" regression users reported.
-        crops: list[tuple[dict[str, Any], bytes, str]] = []
+        # 4) Crop (CPU-bound; run on a worker thread).
+        raw_crops = await asyncio.to_thread(
+            self._bbox_crop_useful, image_bytes, useful,
+        )
 
-        def _bbox_crop_all() -> list[tuple[dict[str, Any], bytes, str]]:
-            from app.services import clothing_parser
-
-            out: list[tuple[dict[str, Any], bytes, str]] = []
-            # Open once to read image size for mask slicing.
-            try:
-                from PIL import Image as _PILImage
-                import io as _io
-
-                _img = _PILImage.open(_io.BytesIO(image_bytes))
-                img_size = _img.size  # (W, H)
-            except Exception:  # noqa: BLE001
-                img_size = None
-
-            for det in useful:
-                # Always produce a JPEG bbox crop. The fine-grained alpha
-                # comes from rembg in the matting step (it's purpose-built
-                # for figure-ground separation and produces noticeably
-                # cleaner silhouettes than SegFormer's per-pixel argmax).
-                # The SegFormer mask, when available, is sliced to the
-                # bbox and stashed on the detection so the matting step
-                # can intersect it with rembg's alpha — that filters out
-                # adjacent garments while preserving rembg's smooth edges.
-                box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
-                if not box_px:
-                    continue
-                result = _crop_to_bbox(image_bytes, det["bbox"])
-                if not result:
-                    continue
-                crop_bytes, _xy = result
-                mask = det.get("mask")
-                if mask is not None and img_size is not None:
-                    mask_bbox = clothing_parser.slice_mask_to_bbox(
-                        mask, img_size, box_px
-                    )
-                    if mask_bbox is not None:
-                        # Stash for the matting step. Drop the full-res
-                        # mask to free memory now that we have the slice
-                        # we actually need.
-                        det["_mask_bbox"] = mask_bbox
-                        det["mask"] = None
-                out.append((det, crop_bytes, "image/jpeg"))
-            return out
-
-        raw_crops = await asyncio.to_thread(_bbox_crop_all)
-
+        # 5) Matte if enabled; otherwise keep raw JPEG crops.
         if settings.AUTO_MATTE_CROPS and raw_crops:
-            # Pipe each JPEG crop through rembg to get a clean alpha
-            # (rembg's u2netp is purpose-built for figure-ground
-            # separation; its silhouette quality on garment crops is
-            # noticeably better than SegFormer's per-pixel argmax).
-            # When a SegFormer per-class mask is available we then
-            # intersect rembg's alpha with that mask — gives us
-            # rembg-smooth edges *and* SegFormer-precise garment
-            # selection (filters out e.g. pants visible underneath a
-            # dress). Serialised because each rembg call holds the
-            # onnxruntime session.
-            from app.services import background_matting
-            from app.services import clothing_parser as _cp
-
-            matted_crops: list[tuple[dict[str, Any], bytes, str]] = []
-            for det, cbytes, mime in raw_crops:
-                try:
-                    matted = await background_matting.matte_crop(cbytes)
-                except Exception as exc:  # noqa: BLE001
-                    logger.info(
-                        "auto-matte failed for %s: %s — keeping bbox crop",
-                        det.get("label"),
-                        repr(exc)[:120],
-                    )
-                    matted = None
-                if not matted:
-                    matted_crops.append((det, cbytes, mime))
-                    continue
-                seg_mask_bbox = det.get("_mask_bbox")
-                if seg_mask_bbox is not None:
-                    try:
-                        refined = _cp.apply_alpha_intersection(
-                            matted, seg_mask_bbox
-                        )
-                        if refined:
-                            matted = refined
-                    except Exception as exc:  # noqa: BLE001
-                        logger.info(
-                            "alpha intersection skipped for %s: %s",
-                            det.get("label"),
-                            repr(exc)[:120],
-                        )
-                # Free the bulky bbox-mask now that we've consumed it.
-                det.pop("_mask_bbox", None)
-                matted_crops.append((det, matted, "image/png"))
-            crops = matted_crops
+            crops = await self._matte_crops(raw_crops)
         else:
             crops = raw_crops
 
         if not crops:
-            # Every crop was rejected (tiny / invalid bbox). Degrade gracefully.
+            # Every crop was rejected (tiny / invalid bbox).
             single = await self.analyze(image_bytes, language=language)
-            crop_b64 = base64.b64encode(image_bytes).decode("ascii")
-            return [
-                {
-                    "label": single.get("item_type") or single.get("sub_category") or "garment",
-                    "kind": "garment",
-                    "bbox": [0, 0, 1000, 1000],
-                    "crop_base64": crop_b64,
-                    "crop_mime": "image/jpeg",
-                    "analysis": single,
-                }
-            ]
+            return [self._build_fullframe_item(single, image_bytes)]
 
-        # 3) Parallel analysis with bounded concurrency. We use Flash
-        #    for per-crop calls to stay inside the ingress timeout budget;
-        #    crops are small and structurally simple, so Flash quality is
-        #    ample. Pro remains the default for single-image analysis.
-        sem = asyncio.Semaphore(6)
+        # 6) Analyse each crop in parallel.
+        items = await self._analyse_crops(crops, language)
 
-        async def _one(
-            det: dict[str, Any], crop_bytes: bytes, crop_mime: str
-        ) -> dict[str, Any] | None:
-            async with sem:
-                try:
-                    analysis = await self.analyze(
-                        crop_bytes, model=self.crop_model, language=language,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # Capture the full provider error (Gemini's 403 messages
-                    # are wrapped multiple layers deep and the previous
-                    # ``[:160]`` truncation chopped them at "Req..." — which
-                    # is exactly the diagnostic signal we need).
-                    logger.warning(
-                        "crop analyze failed for label=%s: %s",
-                        det.get("label"),
-                        repr(exc)[:1500],
-                    )
-                    return None
-                # -------- Phase Q: optional auto-reconstruction --------
-                reconstruction_payload: dict[str, Any] | None = None
-                try:
-                    from app.services.reconstruction import (
-                        reconstruct,
-                        should_reconstruct,
-                    )
-                    needs, reasons = should_reconstruct(analysis, det.get("bbox"))
-                    if needs:
-                        reconstruction_payload = await reconstruct(
-                            crop_bytes, analysis, reasons=reasons,
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "reconstruction pipeline failed for label=%s: %s",
-                        det.get("label"),
-                        repr(exc)[:160],
-                    )
-                return {
-                    "label": det.get("label") or "garment",
-                    "kind": det.get("kind") or "garment",
-                    "bbox": det.get("bbox"),
-                    "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                    "crop_mime": crop_mime,
-                    "analysis": analysis,
-                    "reconstruction": reconstruction_payload,
-                }
-
-        results = await asyncio.gather(*[_one(d, b, m) for d, b, m in crops])
-        items = [r for r in results if r]
-        # Drop crops the LLM couldn't identify \u2014 they save as useless
-        # "Unidentifiable Garment" cards in the closet otherwise.
-        before_drop = len(items)
-        items = [r for r in items if not _is_unidentifiable(r.get("analysis"))]
-        if len(items) < before_drop:
-            logger.info(
-                "analyze_outfit: dropped %d unidentifiable item(s)",
-                before_drop - len(items),
-            )
-        # If every parallel call failed, fall back once.
+        # 7) If every parallel call failed, fall back once.
         if not items:
             single = await self.analyze(image_bytes)
-            crop_b64 = base64.b64encode(image_bytes).decode("ascii")
-            return [
-                {
-                    "label": single.get("item_type") or "garment",
-                    "kind": "garment",
-                    "bbox": [0, 0, 1000, 1000],
-                    "crop_base64": crop_b64,
-                    "crop_mime": "image/jpeg",
-                    "analysis": single,
-                }
-            ]
+            return [self._build_fullframe_item(single, image_bytes)]
+
         logger.info(
             "analyze_outfit OK detected=%d analysed=%d labels=%s",
             len(useful),

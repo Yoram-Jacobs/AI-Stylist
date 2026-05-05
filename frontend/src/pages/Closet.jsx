@@ -80,7 +80,14 @@ export default function Closet() {
     if (!cached) setLoading(true);
     setSemanticActive(false);
     try {
-      const params = {};
+      // Explicitly request a high limit so power users with large
+      // closets (>100 items) always get the full set on a single
+      // round-trip. The backend caps at 2000; we ask for the full
+      // headroom so we don't rely on the default-on-the-server
+      // contract — this protects us from any older bundle that
+      // happened to default to 100 still floating around in a CDN
+      // edge cache.
+      const params = { limit: 2000 };
       if (filters.category !== 'all') params.category = filters.category;
       if (filters.source !== 'all') params.source = filters.source;
       if (filters.search) params.search = filters.search;

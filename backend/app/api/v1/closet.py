@@ -316,10 +316,18 @@ async def create_item(
             images=[cover_image] if cover_image else [],
             financial_metadata=financial,
             status="active",
+            auto_created=True,
         )
         await repos.insert(db.listings, listing.model_dump())
         listing_id = listing.id
-        doc["listing_id"] = listing_id
+        # Use the canonical field names that the rest of the codebase
+        # (closet card "Complete listing" CTA, marketplace auto-retire
+        # on delete, /admin diag) all key on. Older builds wrote
+        # ``listing_id`` here, which the UI never read — those items
+        # appeared "stuck on Private" because the auto_listing_id
+        # field was missing.
+        doc["auto_listing_id"] = listing_id
+        doc["auto_listing_needs_completion"] = True
         # Lift privacy so the stylist engine also sees it as Shared.
         doc["source"] = "Shared"
 
@@ -1078,7 +1086,13 @@ async def list_items(
     source: Source | None = Query(default=None),
     category: str | None = Query(default=None),
     search: str | None = Query(default=None),
-    limit: int = Query(default=100, le=500),
+    # Default raised from 100 → 500 → 2000 because mid/large closets
+    # (300+ items) would silently truncate to the previous default
+    # whenever an older frontend bundle was served from cache without
+    # an explicit ``limit`` query param. ``le=2000`` is the absolute
+    # cap to bound payload size — closets bigger than that should
+    # paginate via ``skip``.
+    limit: int = Query(default=2000, le=2000),
     skip: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     db = get_db()
@@ -1164,7 +1178,172 @@ async def list_items(
             it.pop("segmented_image_url", None)
             it.pop("reconstructed_image_url", None)
     total = await repos.count(db.closet_items, query)
+    # Surface the response shape in logs so deployment/cache issues are
+    # immediately diagnosable. If a user reports "I have 311 items but
+    # see only 100", we can grep this line to confirm whether the
+    # backend ACTUALLY returned 100 (cap somewhere upstream) vs
+    # returned 311 (frontend / browser cache problem).
+    logger.info(
+        "GET /closet user=%s returning items=%d total=%d limit=%d skip=%d "
+        "filters={source=%s category=%s search=%s}",
+        user["id"], len(items), total, limit, skip,
+        source or "-", category or "-", search or "-",
+    )
     return {"items": items, "total": total, "limit": limit, "skip": skip}
+
+
+@router.post("/marketplace/backfill")
+async def backfill_marketplace_listings(
+    user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """One-shot helper that auto-creates listings for closet items the
+    user already marked as ``for_sale`` / ``swap`` / ``donate`` BEFORE
+    the marketplace pipeline started honouring ``marketplace_intent``
+    transitions on update.
+
+    Idempotent — safe to call repeatedly. Items that already have an
+    active listing are skipped silently. Items whose intent is
+    ``own`` (or unset) are ignored.
+
+    Returns a summary so the caller can render a confirmation toast.
+    """
+    from app.models.schemas import FinancialMetadata, Listing
+
+    db = get_db()
+    INTENT_TO_MODE = {"for_sale": "sell", "swap": "swap", "donate": "donate"}
+    candidates_cursor = db.closet_items.find(
+        {
+            "user_id": user["id"],
+            "marketplace_intent": {"$in": list(INTENT_TO_MODE.keys())},
+        },
+        {
+            "_id": 0,
+            "id": 1, "title": 1, "description": 1, "category": 1,
+            "size": 1, "condition": 1, "state": 1, "location": 1,
+            "marketplace_intent": 1, "price_cents": 1,
+            "thumbnail_data_url": 1, "segmented_image_url": 1,
+            "reconstructed_image_url": 1, "original_image_url": 1,
+            "auto_listing_id": 1, "source": 1,
+        },
+    )
+    candidates = await candidates_cursor.to_list(length=None)
+
+    created = 0
+    updated_source = 0
+    skipped_existing = 0
+    failed = 0
+
+    for item in candidates:
+        existing = await db.listings.find_one(
+            {
+                "closet_item_id": item["id"],
+                "seller_id": user["id"],
+                "status": {"$in": ["draft", "active", "reserved"]},
+            },
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            skipped_existing += 1
+            # Make sure the source flag stays consistent so the closet
+            # filters and feeds keep showing the item under "Shared".
+            if item.get("source") != "Shared":
+                await db.closet_items.update_one(
+                    {"id": item["id"], "user_id": user["id"]},
+                    {"$set": {"source": "Shared",
+                              "auto_listing_id": existing["id"]}},
+                )
+                updated_source += 1
+            continue
+
+        try:
+            images: list[str] = []
+            for fld in (
+                "thumbnail_data_url",
+                "segmented_image_url",
+                "reconstructed_image_url",
+                "original_image_url",
+            ):
+                url = item.get(fld)
+                if isinstance(url, str) and url:
+                    images.append(url)
+                    break
+
+            mode = INTENT_TO_MODE[item["marketplace_intent"]]
+            price_cents = (
+                int(item.get("price_cents") or 0)
+                if mode == "sell"
+                else 0
+            )
+            # Map our fine-grained GarmentCondition values
+            # ({excellent, good, fair, bad}) to the smaller Listing
+            # condition vocab ({new, like_new, good, fair}). Without
+            # this mapping items stored as e.g. ``excellent`` blew up
+            # the Pydantic validation and the backfill silently
+            # skipped them with a `failed` count — which is exactly
+            # what was happening in production.
+            _COND_MAP = {
+                "excellent": "like_new",
+                "like_new": "like_new",
+                "new": "new",
+                "good": "good",
+                "fair": "fair",
+                "bad": "fair",
+            }
+            raw_cond = (
+                item.get("condition") or item.get("state") or "good"
+            )
+            listing_condition = _COND_MAP.get(raw_cond, "good")
+            listing = Listing(
+                closet_item_id=item["id"],
+                seller_id=user["id"],
+                source="Shared",
+                mode=mode,
+                title=item.get("title") or "Untitled",
+                description=item.get("description"),
+                category=item.get("category") or "Top",
+                size=item.get("size"),
+                condition=listing_condition,
+                images=images,
+                location=item.get("location"),
+                financial_metadata=FinancialMetadata(
+                    list_price_cents=price_cents,
+                    currency="USD",
+                    platform_fee_percent=0.0,
+                    estimated_seller_net_cents=0,
+                ),
+                auto_created=True,
+                status="active",
+            )
+            await repos.insert(db.listings, listing.model_dump())
+            await db.closet_items.update_one(
+                {"id": item["id"], "user_id": user["id"]},
+                {"$set": {
+                    "source": "Shared",
+                    "auto_listing_id": listing.id,
+                    "auto_listing_needs_completion": True,
+                }},
+            )
+            created += 1
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            logger.warning(
+                "backfill: listing creation failed for closet %s: %s",
+                item["id"], exc,
+            )
+
+    logger.info(
+        "marketplace backfill user=%s created=%d source_synced=%d "
+        "skipped=%d failed=%d candidates=%d",
+        user["id"], created, updated_source, skipped_existing, failed,
+        len(candidates),
+    )
+    return {
+        "candidates": len(candidates),
+        "created": created,
+        "skipped_existing": skipped_existing,
+        "source_synced": updated_source,
+        "failed": failed,
+    }
 
 
 class SearchIn(BaseModel):
@@ -2020,11 +2199,15 @@ async def update_item(
         patch["reconstruction_metadata"] = None
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
     db = get_db()
-    # Snapshot the prior source so we can detect the Private→Shared
-    # transition AFTER the update commits.
+    # Snapshot prior values so we can detect transitions AFTER the update
+    # commits. We snapshot both ``source`` AND ``marketplace_intent`` —
+    # the marketplace pipeline can be triggered by either flipping (the
+    # closet card "Share" toggle hits ``source``; the item-detail
+    # marketplace dropdown hits ``marketplace_intent``), and we need to
+    # honour both entry points.
     prior = await db.closet_items.find_one(
         {"id": item_id, "user_id": user["id"]},
-        {"_id": 0, "source": 1},
+        {"_id": 0, "source": 1, "marketplace_intent": 1},
     )
     updated = await repos.update(
         db.closet_items, {"id": item_id, "user_id": user["id"]}, patch
@@ -2032,25 +2215,87 @@ async def update_item(
     if not updated:
         raise HTTPException(404, "Item not found")
 
-    # Marketplace auto-list: when a closet item flips from Private to
-    # Shared, spin up an *active* listing on the marketplace so the
-    # item is immediately visible. The listing is created with sane
-    # defaults (mode='swap', list_price_cents=0) and an
-    # ``auto_created=True`` flag so the closet card can show a
-    # "Complete listing" CTA inviting the seller to refine price /
-    # mode / description before serious browsing happens. We never
-    # create more than one auto-listing per closet item.
+    # ---------------------------------------------------------------
+    # Marketplace auto-list / auto-retire pipeline.
+    #
+    # Two trigger paths land here:
+    #
+    #   1. ``source`` flips Private → Shared (the closet card "Share"
+    #      toggle). Mode defaults to ``swap`` because the toggle has
+    #      no other signal — the user can refine via the listing's
+    #      "Complete listing" CTA.
+    #
+    #   2. ``marketplace_intent`` flips ``own`` → one of
+    #      ``for_sale`` / ``swap`` / ``donate`` (the item-detail page
+    #      dropdown). This is the path users actually take, and the
+    #      previous code missed it because it gated on ``source``
+    #      alone — leaving items stuck as Private despite the user
+    #      explicitly asking to sell/swap/donate.
+    #
+    # When the user reverses either flip (Shared → Private, OR
+    # marketplace_intent → ``own``) we retire the auto-created listing
+    # so the item disappears from the marketplace.
+    # ---------------------------------------------------------------
     new_source = patch.get("source")
     prior_source = (prior or {}).get("source")
+    new_intent = patch.get("marketplace_intent")
+    prior_intent = (prior or {}).get("marketplace_intent") or "own"
+
+    _MARKETPLACE_INTENTS = {"for_sale", "swap", "donate"}
+    _INTENT_TO_MODE = {"for_sale": "sell", "swap": "swap", "donate": "donate"}
+
+    # Should we OPEN a listing on this update?
+    # Triggered when EITHER signal newly indicates marketplace participation.
+    open_listing = False
+    chosen_mode = "swap"  # safe default for the source-only path
+    chosen_price_cents = 0
     if new_source == "Shared" and prior_source != "Shared":
+        open_listing = True
+    if new_intent in _MARKETPLACE_INTENTS and prior_intent not in _MARKETPLACE_INTENTS:
+        open_listing = True
+        chosen_mode = _INTENT_TO_MODE[new_intent]
+        # Carry the user's listed price across when they set one.
+        if new_intent == "for_sale":
+            chosen_price_cents = int(
+                patch.get("price_cents") or updated.get("price_cents") or 0
+            )
+
+    # Should we CLOSE the auto-created listing on this update?
+    close_listing = False
+    if new_source == "Private" and prior_source == "Shared":
+        close_listing = True
+    if (
+        new_intent is not None
+        and new_intent not in _MARKETPLACE_INTENTS
+        and prior_intent in _MARKETPLACE_INTENTS
+    ):
+        close_listing = True
+
+    if open_listing:
         try:
             existing = await db.listings.find_one(
                 {"closet_item_id": item_id, "seller_id": user["id"]},
-                {"_id": 0, "id": 1, "status": 1},
+                {"_id": 0, "id": 1, "status": 1, "mode": 1, "auto_created": 1},
             )
             if existing and existing.get("status") in ("draft", "active", "reserved"):
-                # Already has a live listing — don't double-list.
-                pass
+                # Already has a live listing. If we know the desired
+                # mode (intent path), patch the mode on the existing
+                # auto-created listing so a user who originally hit
+                # "Share" then later picks "For Sale" sees the right
+                # CTA on the marketplace card. Never modify a
+                # human-curated listing (auto_created=False).
+                if (
+                    existing.get("auto_created")
+                    and chosen_mode != existing.get("mode")
+                ):
+                    await db.listings.update_one(
+                        {"id": existing["id"]},
+                        {"$set": {
+                            "mode": chosen_mode,
+                            "financial_metadata.list_price_cents": chosen_price_cents,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }},
+                    )
             else:
                 # Build a minimal listing using info already on the
                 # closet item. We import lazily so closet.py doesn't
@@ -2070,22 +2315,38 @@ async def update_item(
                     if isinstance(url, str) and url:
                         images.append(url)
                         break
+                # Same condition vocab mapping as in create_item /
+                # backfill: GarmentCondition (excellent/good/fair/bad)
+                # → Listing condition (new/like_new/good/fair).
+                # Without it items with condition='excellent' blew up
+                # Pydantic validation and the auto-list silently
+                # failed.
+                _COND_MAP = {
+                    "excellent": "like_new",
+                    "like_new": "like_new",
+                    "new": "new",
+                    "good": "good",
+                    "fair": "fair",
+                    "bad": "fair",
+                }
+                raw_cond = (
+                    updated.get("condition") or updated.get("state") or "good"
+                )
+                listing_condition = _COND_MAP.get(raw_cond, "good")
                 listing = Listing(
                     closet_item_id=item_id,
                     seller_id=user["id"],
                     source="Shared",
-                    mode="swap",
+                    mode=chosen_mode,
                     title=updated.get("title") or "Untitled",
                     description=updated.get("description"),
                     category=updated.get("category") or "Top",
                     size=updated.get("size"),
-                    condition=(
-                        updated.get("condition") or updated.get("state") or "good"
-                    ),
+                    condition=listing_condition,
                     images=images,
                     location=updated.get("location"),
                     financial_metadata=FinancialMetadata(
-                        list_price_cents=0,
+                        list_price_cents=chosen_price_cents,
                         currency="USD",
                         platform_fee_percent=0.0,
                         estimated_seller_net_cents=0,
@@ -2094,27 +2355,86 @@ async def update_item(
                     status="active",
                 )
                 await repos.insert(db.listings, listing.model_dump())
-                # Stamp the new listing id back on the closet item so
-                # the closet card UI can render a "Complete listing"
-                # CTA without a second round-trip.
+                # Also flip ``source`` to Shared so downstream code
+                # (filters, feeds) sees the item as published. We do
+                # this even when the trigger was ``marketplace_intent``
+                # alone, so the two flags stay consistent.
+                source_patch: dict[str, Any] = {
+                    "auto_listing_id": listing.id,
+                    "auto_listing_needs_completion": True,
+                }
+                if updated.get("source") != "Shared":
+                    source_patch["source"] = "Shared"
                 await db.closet_items.update_one(
                     {"id": item_id, "user_id": user["id"]},
-                    {"$set": {
-                        "auto_listing_id": listing.id,
-                        "auto_listing_needs_completion": True,
-                    }},
+                    {"$set": source_patch},
                 )
-                # Refresh in-memory copy so the response carries the
-                # new fields too.
                 updated["auto_listing_id"] = listing.id
                 updated["auto_listing_needs_completion"] = True
+                if "source" in source_patch:
+                    updated["source"] = "Shared"
                 logger.info(
-                    "auto-listed closet item %s as listing %s", item_id, listing.id
+                    "auto-listed closet item %s as listing %s mode=%s "
+                    "trigger=%s",
+                    item_id, listing.id, chosen_mode,
+                    "intent" if new_intent in _MARKETPLACE_INTENTS else "source",
                 )
         except Exception as exc:  # noqa: BLE001
             # Auto-list is a UX nicety — never block the underlying
             # closet update if it fails.
             logger.warning("auto-list failed for %s: %s", item_id, exc)
+
+    elif close_listing:
+        # User reversed the marketplace decision — retire any
+        # auto-created listing(s) we previously spawned. We never
+        # touch listings the user curated by hand (auto_created
+        # missing or False). We also flip the closet item's surface
+        # flags (``source``, ``auto_listing_id``,
+        # ``auto_listing_needs_completion``) back to "Private" so the
+        # closet card reflects the revert immediately — without this
+        # secondary patch the badge would still show "Shared" because
+        # only the listing changed.
+        try:
+            retire_res = await db.listings.update_many(
+                {
+                    "closet_item_id": item_id,
+                    "seller_id": user["id"],
+                    "auto_created": True,
+                    "status": {"$in": ["draft", "active", "reserved"]},
+                },
+                {"$set": {
+                    "status": "removed",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+            if retire_res.modified_count:
+                logger.info(
+                    "auto-retired %d listing(s) for closet item %s "
+                    "(intent reverted to %s)",
+                    retire_res.modified_count, item_id, new_intent or "private",
+                )
+            # Always reset the closet item's surface flags on revert,
+            # even if no listing was active (defensive: covers items
+            # that were partially backfilled or where the listing was
+            # already retired through another path).
+            revert_patch: dict[str, Any] = {
+                "auto_listing_id": None,
+                "auto_listing_needs_completion": False,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            # Only flip source if the user didn't explicitly pass a
+            # source in this same PATCH — respect their choice.
+            if new_source is None:
+                revert_patch["source"] = "Private"
+            await db.closet_items.update_one(
+                {"id": item_id, "user_id": user["id"]},
+                {"$set": revert_patch},
+            )
+            updated.update(revert_patch)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "auto-retire failed for closet item %s: %s", item_id, exc,
+            )
 
     return updated
 

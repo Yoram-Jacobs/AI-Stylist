@@ -14,7 +14,8 @@ from typing import Any
 import httpx
 
 from app.services.deepgram_service import deepgram_service
-from app.services.gemini_stylist import gemini_stylist_service, image_bytes_to_base64
+from app.services.gemini_stylist import image_bytes_to_base64
+from app.services.stylist_brain import stylist_brain_service
 from app.services.groq_service import groq_whisper_service
 from app.services.hf_image_service import hf_image_service
 from app.services.hf_segmentation import hf_segmentation_service
@@ -57,11 +58,16 @@ async def get_styling_advice(
     """Run the full multimodal stylist pipeline and return a combined payload."""
     if not (user_text or voice_audio):
         raise ValueError("user_text or voice_audio is required")
-    if gemini_stylist_service is None:
+    # Resolve the brain LAZILY — the factory honors STYLIST_PROVIDER /
+    # STYLIST_FALLBACK and can pick between Qwen (DashScope) and the
+    # legacy Gemini adapter. If neither is configured, ``RuntimeError``
+    # bubbles up and the endpoint turns it into a 503.
+    try:
+        brain = stylist_brain_service()
+    except RuntimeError as exc:
         raise RuntimeError(
-            "Gemini stylist service not configured. Set GEMINI_API_KEY "
-            "(production) or EMERGENT_LLM_KEY (dev) in /app/backend/.env."
-        )
+            f"Stylist brain is not configured: {exc}"
+        ) from exc
 
     latency: dict[str, int] = {}
     result: dict[str, Any] = {
@@ -157,10 +163,10 @@ async def get_styling_advice(
             f"{e.get('title')} [{e.get('formality_hint')}]" for e in calendar_events
         )
 
-    # --- 6. Gemini 2.5 Pro styling brain
+    # --- 6. Stylist brain (Qwen-VL-Max-Latest by default; Gemini fallback)
     image_b64 = image_bytes_to_base64(image_bytes) if image_bytes else None
     t0 = time.perf_counter()
-    advice = await gemini_stylist_service.advise(
+    advice = await brain.advise(
         session_id=session_id,
         user_text=final_user_text,
         image_base64=image_b64,
@@ -172,7 +178,17 @@ async def get_styling_advice(
         closet_summary=closet_summary,
         user_preferences_block=user_preferences_block,
     )
+    # Metric key is intentionally kept as ``gemini_ms`` for backwards
+    # compatibility with existing dashboards. Which provider actually
+    # handled the request is logged by ``provider_activity`` + the
+    # stylist_brain module; not stuffed into ``latency`` because the
+    # StylistMessage schema types every latency value as ``int``.
     latency["gemini_ms"] = int((time.perf_counter() - t0) * 1000)
+    # Stash the provider name on a SEPARATE string map so admin UIs
+    # can surface it without breaking latency typing.
+    advice.setdefault("_meta", {})["stylist_brain"] = getattr(
+        brain, "provider_name", "unknown"
+    )
 
     result["outfit_recommendations"] = advice.get("outfit_recommendations", [])
     result["reasoning_summary"] = advice.get("reasoning_summary", "")

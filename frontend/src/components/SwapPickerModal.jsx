@@ -46,7 +46,7 @@ export function SwapPickerModal({
     setSelected(null);
     setLoading(true);
     api
-      .listCloset({ limit: 100 })
+      .listCloset({ limit: 2000 })
       .then((res) => {
         // Endpoint returns either { items: [...] } or a raw array.
         const list = Array.isArray(res) ? res : res?.items || [];

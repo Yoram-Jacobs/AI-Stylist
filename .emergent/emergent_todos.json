@@ -1,46 +1,38 @@
 [
   {
-    "content": "Add Listing.shipping_fee_cents schema + Create/Update DTOs",
+    "content": "Investigate backfill: confirmed working correctly with synthetic data",
     "status": "completed"
   },
   {
-    "content": "SELL flow: include shipping in PayPal order gross (payments.py listing_buy_create)",
+    "content": "Fix DELETE /listings/{id} to also clean up closet item link",
     "status": "completed"
   },
   {
-    "content": "DONATE flow: PayPal order when shipping_fee > 0 + capture endpoint + JWT email after capture",
+    "content": "Fix update_item: reset source/auto_listing_id when intent reverts to 'own'",
     "status": "completed"
   },
   {
-    "content": "Backend: APP_PUBLIC_URL auto-derive from Request (refactor _action_url + _landing_redirect)",
+    "content": "Add api.backfillMarketplaceListings to frontend api lib",
     "status": "completed"
   },
   {
-    "content": ".env.example: document APP_PUBLIC_URL",
+    "content": "Add 'Sync marketplace' button + 'Remove listing' button in MyListings",
     "status": "completed"
   },
   {
-    "content": "Frontend: CreateListing form input for shipping fee + community pickup nudge",
+    "content": "Add 'Remove listing' button in ListingDetail (owner view)",
     "status": "completed"
   },
   {
-    "content": "Frontend: ListingDetail shows shipping fee + community pickup nudge",
+    "content": "Backend testing agent — 100% pass on marketplace sync flows (iteration_18)",
     "status": "completed"
   },
   {
-    "content": "Frontend: Donate claim — handle PayPal redirect when shipping_fee > 0",
+    "content": "Apply testing-agent fix: auto_created=True on listings created in POST /closet",
     "status": "completed"
   },
   {
-    "content": "Transactions page: tabs + multi-select status chips + confirm-receipt CTA",
-    "status": "completed"
-  },
-  {
-    "content": "Backend curl (Wave 3) + testing_agent E2E (backend 91%, frontend code-verified in bundle)",
-    "status": "completed"
-  },
-  {
-    "content": "Update CHANGELOG.md with Wave 3 entries",
+    "content": "Fix condition vocab mapping (excellent → like_new) in backfill + auto-list paths",
     "status": "completed"
   }
 ]
