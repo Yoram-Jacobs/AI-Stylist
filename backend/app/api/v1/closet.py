@@ -1261,6 +1261,25 @@ async def backfill_marketplace_listings(
                 if mode == "sell"
                 else 0
             )
+            # Map our fine-grained GarmentCondition values
+            # ({excellent, good, fair, bad}) to the smaller Listing
+            # condition vocab ({new, like_new, good, fair}). Without
+            # this mapping items stored as e.g. ``excellent`` blew up
+            # the Pydantic validation and the backfill silently
+            # skipped them with a `failed` count — which is exactly
+            # what was happening in production.
+            _COND_MAP = {
+                "excellent": "like_new",
+                "like_new": "like_new",
+                "new": "new",
+                "good": "good",
+                "fair": "fair",
+                "bad": "fair",
+            }
+            raw_cond = (
+                item.get("condition") or item.get("state") or "good"
+            )
+            listing_condition = _COND_MAP.get(raw_cond, "good")
             listing = Listing(
                 closet_item_id=item["id"],
                 seller_id=user["id"],
@@ -1270,9 +1289,7 @@ async def backfill_marketplace_listings(
                 description=item.get("description"),
                 category=item.get("category") or "Top",
                 size=item.get("size"),
-                condition=(
-                    item.get("condition") or item.get("state") or "good"
-                ),
+                condition=listing_condition,
                 images=images,
                 location=item.get("location"),
                 financial_metadata=FinancialMetadata(
@@ -2285,6 +2302,24 @@ async def update_item(
                     if isinstance(url, str) and url:
                         images.append(url)
                         break
+                # Same condition vocab mapping as in create_item /
+                # backfill: GarmentCondition (excellent/good/fair/bad)
+                # → Listing condition (new/like_new/good/fair).
+                # Without it items with condition='excellent' blew up
+                # Pydantic validation and the auto-list silently
+                # failed.
+                _COND_MAP = {
+                    "excellent": "like_new",
+                    "like_new": "like_new",
+                    "new": "new",
+                    "good": "good",
+                    "fair": "fair",
+                    "bad": "fair",
+                }
+                raw_cond = (
+                    updated.get("condition") or updated.get("state") or "good"
+                )
+                listing_condition = _COND_MAP.get(raw_cond, "good")
                 listing = Listing(
                     closet_item_id=item_id,
                     seller_id=user["id"],
@@ -2294,9 +2329,7 @@ async def update_item(
                     description=updated.get("description"),
                     category=updated.get("category") or "Top",
                     size=updated.get("size"),
-                    condition=(
-                        updated.get("condition") or updated.get("state") or "good"
-                    ),
+                    condition=listing_condition,
                     images=images,
                     location=updated.get("location"),
                     financial_metadata=FinancialMetadata(

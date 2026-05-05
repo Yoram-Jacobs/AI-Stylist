@@ -24,7 +24,15 @@
     "status": "completed"
   },
   {
-    "content": "Run backend testing agent to validate end-to-end",
-    "status": "in_progress"
+    "content": "Backend testing agent — 100% pass on marketplace sync flows (iteration_18)",
+    "status": "completed"
+  },
+  {
+    "content": "Apply testing-agent fix: auto_created=True on listings created in POST /closet",
+    "status": "completed"
+  },
+  {
+    "content": "Fix condition vocab mapping (excellent → like_new) in backfill + auto-list paths",
+    "status": "completed"
   }
 ]

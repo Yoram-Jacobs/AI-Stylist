@@ -225,6 +225,30 @@ Delivered previously; unchanged.
 
 ### Phase O — Stylist Provider Migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
 
+#### Marketplace Stability Hotfix (v1.1.2 candidate) — **SHIPPED**
+Out-of-band hotfix wave for the user-reported "items stuck on Private / can't delete listing" regressions. All bugs reproduced via direct unit-style scripts and validated via testing-agent run iteration_18.
+
+**Backend (shipped)**
+- ✅ `DELETE /api/v1/listings/{id}` is now coordinated cleanup:
+  - hard-deletes the listing
+  - resets the linked closet item: `marketplace_intent='own'`, `source='Private'`, `auto_listing_id=null`, `auto_listing_needs_completion=false`
+  - guarded by ownership AND `closet_item.auto_listing_id == listing_id` to avoid de-linking unrelated rows
+- ✅ `update_item` (PATCH /api/v1/closet/{id}) close_listing branch now also:
+  - flips closet item `source` → `Private` on intent revert (unless caller passed an explicit `source`)
+  - clears `auto_listing_id` + `auto_listing_needs_completion`
+  - retires `reserved` listings too (was previously only `draft|active`)
+- ✅ `create_item` (POST /api/v1/closet) now writes `auto_created=True` on the auto-created listing (was missing — caused intent-revert teardown to silently no-op for items created with intent already set, since the retire query filters on `auto_created=True`).
+- ✅ Backfill + auto-list paths now map garment condition (`excellent` / `bad`) to listing condition vocab (`like_new` / `fair`). Previously items with `condition='excellent'` failed Pydantic validation and were silently counted as `failed` in the backfill response.
+
+**Frontend (shipped)**
+- ✅ `Marketplace.jsx` → `MyListings`: per-card **Remove listing** button (with confirm dialog) + top-bar **Sync from closet** button that calls the backfill endpoint and surfaces `created / skipped / source_synced` counts in a toast. Cards now also show `mode · status`.
+- ✅ `ListingDetail.jsx` owner view: **Remove from marketplace** button alongside the existing "Manage in mine" CTA.
+- ✅ `lib/api.js`: new `backfillMarketplaceListings()` helper.
+
+**Verification**
+- ✅ Backend: `iteration_18` testing agent run — 100% pass on marketplace sync flows after fix.
+- ✅ Local repro scripts (intent-revert, backfill, delete-listing) all pass.
+
 #### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
 
 **What shipped**
