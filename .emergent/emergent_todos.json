@@ -1,30 +1,26 @@
 [
   {
-    "content": "Add DASHSCOPE_API_KEY + STYLIST_PROVIDER to backend/.env + config.py",
-    "status": "completed"
+    "content": "Bug 1: Bump closet list default limit so 313-item closets load in one request",
+    "status": "in_progress"
   },
   {
-    "content": "Create app/services/qwen_client.py",
-    "status": "completed"
+    "content": "Bug 3: Trigger auto-list on marketplace_intent transition (not just source) + use correct mode + retire on 'own'",
+    "status": "pending"
   },
   {
-    "content": "Create app/services/stylist_brain.py (Qwen primary, Gemini fallback, future Gemma slot)",
-    "status": "completed"
+    "content": "Verify Bug 2 resolves via Bug 3 fix (new items auto-list → delete retires correctly)",
+    "status": "pending"
   },
   {
-    "content": "Swap /api/v1/stylist to use stylist_brain factory",
-    "status": "completed"
+    "content": "Backfill: auto-list existing items where marketplace_intent is sell/swap/donate but no listing exists",
+    "status": "pending"
   },
   {
-    "content": "Backend E2E smoke test — Qwen working (1 outfit, 19.5s brain + 42s endpoint total)",
-    "status": "completed"
+    "content": "Smoke test via curl: patch item with marketplace_intent=for_sale → listing created → delete → listing retired",
+    "status": "pending"
   },
   {
-    "content": "Factory verification: qwen+fallback, gemini-only, missing-key promotion — all pass",
-    "status": "completed"
-  },
-  {
-    "content": "Update CHANGELOG.md + .env.example for Phase O Wave 1",
-    "status": "completed"
+    "content": "Update CHANGELOG.md + commit as v1.1.1 hotfix",
+    "status": "pending"
   }
 ]
