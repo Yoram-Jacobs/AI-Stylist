@@ -660,5 +660,9 @@
     "accuracyLabel": "Accuracy",
     "metersShort": "m",
     "kmShort": "km"
+  },
+  "language": {
+    "change": "言語を変更",
+    "label": "言語"
   }
 }

@@ -1115,5 +1115,9 @@
       "repairInstructions": "Repair",
       "certifications": "Certifications"
     }
+  },
+  "language": {
+    "change": "Change language",
+    "label": "Language"
   }
 }

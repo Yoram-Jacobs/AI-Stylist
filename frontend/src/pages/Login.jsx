@@ -11,6 +11,7 @@ import { Loader2, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
 import { BrandLogo } from '@/components/BrandLogo';
+import { LanguagePicker } from '@/components/LanguagePicker';
 
 export default function Login() {
   const { t } = useTranslation();
@@ -44,7 +45,17 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-[100dvh] grid md:grid-cols-2">
+    <div className="min-h-[100dvh] grid md:grid-cols-2 relative">
+      {/* Floating language "bulb" — fixed to the top-end so guests can
+          flip the UI to their language *before* signing in. ``z-20`` so
+          it stays above the editorial wash on desktop and the form
+          card on mobile. */}
+      <div className="absolute top-4 end-4 z-20">
+        <LanguagePicker
+          className="rounded-full bg-card/80 backdrop-blur-sm border-border shadow-sm hover:bg-card"
+          testIdSuffix="login"
+        />
+      </div>
       {/* Editorial panel */}
       <div className="relative hidden md:flex flex-col justify-between p-10 hero-wash-light noise">
         <div>

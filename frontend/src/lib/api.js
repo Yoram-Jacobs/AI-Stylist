@@ -258,6 +258,15 @@ export const api = {
       .then((r) => r.data),
   trendsRunNowDev: (force = true) =>
     client.post('/trends/run-now-dev', null, { params: { force } }).then((r) => r.data),
+  // Admin-only force refresh — used by the 🔄 button next to "Daily edit"
+  // on the Home page. Force=true so the run regenerates *today's* cards
+  // even if they already exist (otherwise the dedupe in
+  // ``run_trend_scout`` would skip).
+  trendsRefreshAdmin: (force = true) =>
+    client.post('/trends/run-now', null, { params: { force } }).then((r) => r.data),
+  // Public-safe diagnostics: when did each bucket last refresh?
+  trendsLastRefresh: () =>
+    client.get('/trends/last_refresh').then((r) => r.data),
 
   // share — mint a read-only snapshot link for an outfit recommendation
   createSharedOutfit: (body) =>
