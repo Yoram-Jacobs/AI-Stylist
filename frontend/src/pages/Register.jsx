@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { GoogleAuthButton } from '@/components/GoogleAuthButton';
+import { LanguagePicker } from '@/components/LanguagePicker';
 
 export default function Register() {
   const { t } = useTranslation();
@@ -34,7 +35,15 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-[100dvh] grid md:grid-cols-2">
+    <div className="min-h-[100dvh] grid md:grid-cols-2 relative">
+      {/* Same language bulb as /login — guests can flip the UI before
+          they sign up. */}
+      <div className="absolute top-4 end-4 z-20">
+        <LanguagePicker
+          className="rounded-full bg-card/80 backdrop-blur-sm border-border shadow-sm hover:bg-card"
+          testIdSuffix="register"
+        />
+      </div>
       <div className="hidden md:block relative hero-wash-light noise" />
       <div className="flex items-center justify-center p-6 md:p-16">
         <Card className="w-full max-w-md rounded-[calc(var(--radius)+6px)] shadow-editorial">
