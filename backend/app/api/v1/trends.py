@@ -1,12 +1,15 @@
 """/api/v1/trends \u2014 read + admin trigger endpoints for the Trend-Scout."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.db.database import get_db
 from app.services.auth import get_current_user, require_admin
 from app.services.trend_scout import (
+    BUCKETS,
     fashion_scout_feed,
     latest_trend_cards,
     run_trend_scout,
@@ -22,6 +25,48 @@ async def get_latest_trends(
     """Public-safe read: newest card(s) per bucket for the Home page feed."""
     cards = await latest_trend_cards(limit_per_bucket=per_bucket)
     return {"cards": cards, "count": len(cards)}
+
+
+@router.get("/last_refresh")
+async def get_last_refresh() -> dict[str, Any]:
+    """Diagnostics endpoint — when did each bucket last refresh?
+
+    Returns the newest ``created_at`` across all English Trend-Scout
+    cards plus a per-bucket map. Public-safe (the data here is the
+    same surface as ``/trends/latest``); used by the home-page admin
+    refresh button to show staleness *and* by support for triage.
+    """
+    db = get_db()
+    out_buckets: dict[str, str | None] = {}
+    newest_iso: str | None = None
+    for bucket in BUCKETS:
+        latest = await db.trend_reports.find_one(
+            {"bucket": bucket["slug"], "language": {"$in": [None, "en"]}},
+            sort=[("created_at", -1)],
+            projection={"_id": 0, "created_at": 1, "date": 1},
+        )
+        ts = (latest or {}).get("created_at")
+        out_buckets[bucket["slug"]] = ts
+        if ts and (newest_iso is None or ts > newest_iso):
+            newest_iso = ts
+    # Compute a friendly "stale_for_seconds" so the UI doesn't have to
+    # parse ISO strings.
+    stale_for_seconds: int | None = None
+    if newest_iso:
+        try:
+            newest = datetime.fromisoformat(newest_iso.replace("Z", "+00:00"))
+            if newest.tzinfo is None:
+                newest = newest.replace(tzinfo=timezone.utc)
+            stale_for_seconds = int(
+                (datetime.now(timezone.utc) - newest).total_seconds()
+            )
+        except (TypeError, ValueError):
+            stale_for_seconds = None
+    return {
+        "newest_created_at": newest_iso,
+        "stale_for_seconds": stale_for_seconds,
+        "buckets": out_buckets,
+    }
 
 
 @router.get("/fashion-scout")
