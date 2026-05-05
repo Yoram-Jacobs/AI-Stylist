@@ -22,11 +22,20 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
-import { labelForCategory, labelForSource } from '@/lib/taxonomy';
+import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
-const SOURCES = ['all', 'Private', 'Shared', 'Retail'];
+// Filter dropdown options. We replaced the catch-all "Shared" with the
+// three concrete marketplace intents so users can drill straight to
+// items by their actual marketplace decision.
+//
+// Values in {Private, Retail} key on the closet item's ``source`` field;
+// values in {for_sale, swap, donate} key on ``marketplace_intent``.
+// "all" means no filter.
+const SOURCES = ['all', 'Private', 'for_sale', 'swap', 'donate', 'Retail'];
+const _SOURCE_VALUES = new Set(['Private', 'Shared', 'Retail']);
+const _INTENT_VALUES = new Set(['for_sale', 'swap', 'donate']);
 
 // --- Module-level cache (stale-while-revalidate) -----------------------
 // Navigating away from /closet and back used to re-fetch the entire
@@ -89,7 +98,15 @@ export default function Closet() {
       // edge cache.
       const params = { limit: 2000 };
       if (filters.category !== 'all') params.category = filters.category;
-      if (filters.source !== 'all') params.source = filters.source;
+      // Source filter is now multiplexed: classic source values
+      // (Private/Retail) hit ``?source=…`` while the new intent values
+      // (for_sale/swap/donate) hit ``?marketplace_intent=…`` so the
+      // backend can filter the right field.
+      if (_SOURCE_VALUES.has(filters.source)) {
+        params.source = filters.source;
+      } else if (_INTENT_VALUES.has(filters.source)) {
+        params.marketplace_intent = filters.source;
+      }
       if (filters.search) params.search = filters.search;
       const res = await api.listCloset(params);
       const nextItems = res.items || [];
@@ -357,12 +374,17 @@ export default function Closet() {
             </SelectContent>
           </Select>
           <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
-            <SelectTrigger className="w-[120px] rounded-xl" data-testid="closet-source-select">
+            <SelectTrigger className="w-[140px] rounded-xl" data-testid="closet-source-select">
               <SelectValue placeholder={labelForSource('all', t)} />
             </SelectTrigger>
             <SelectContent>
               {SOURCES.map((s) => (
-                <SelectItem key={s} value={s}>{labelForSource(s, t)}</SelectItem>
+                <SelectItem key={s} value={s}>
+                  {/* Intent values get the marketplace-intent label
+                      (e.g. "For sale"); source values use the
+                      Private/Shared/Retail labels. */}
+                  {_INTENT_VALUES.has(s) ? labelForIntent(s, t) : labelForSource(s, t)}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>

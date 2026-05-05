@@ -1086,6 +1086,11 @@ async def list_items(
     source: Source | None = Query(default=None),
     category: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    # Optional filter by the item's ``marketplace_intent``. Powers the
+    # closet "For sale / Swap / Donate" filter chips that replaced the
+    # generic "Shared" filter — surfacing the user's actual marketplace
+    # decision instead of the catch-all source flag.
+    marketplace_intent: MarketplaceIntent | None = Query(default=None),
     # Default raised from 100 → 500 → 2000 because mid/large closets
     # (300+ items) would silently truncate to the previous default
     # whenever an older frontend bundle was served from cache without
@@ -1099,6 +1104,8 @@ async def list_items(
     query: dict[str, Any] = {"user_id": user["id"]}
     if source:
         query["source"] = source
+    if marketplace_intent:
+        query["marketplace_intent"] = marketplace_intent
     if category:
         # Category filter — case-insensitive + synonym aware. Legacy
         # rows in the DB have a mix of Title Case ("Top"), lowercase
