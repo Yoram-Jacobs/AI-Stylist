@@ -17,6 +17,7 @@ import {
   Store,
   Repeat,
   HeartHandshake,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -38,6 +39,7 @@ export default function ListingDetail() {
   const [similarLoading, setSimilarLoading] = useState(true);
   const [swapOpen, setSwapOpen] = useState(false);
   const [donateSubmitting, setDonateSubmitting] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -245,9 +247,50 @@ export default function ListingDetail() {
           </Card>
 
           {isOwner ? (
-            <Button asChild variant="secondary" className="w-full rounded-xl" data-testid="listing-edit-button">
-              <Link to={`/market`}>{t('market.manageInMine')}</Link>
-            </Button>
+            <div className="space-y-2" data-testid="listing-owner-actions">
+              <Button asChild variant="secondary" className="w-full rounded-xl" data-testid="listing-edit-button">
+                <Link to={`/market`}>{t('market.manageInMine')}</Link>
+              </Button>
+              {/* Owner-only "Remove from marketplace" CTA. Hard-deletes
+                  the listing AND resets the linked closet item back to
+                  Private/own (atomic on the backend), so the closet
+                  card flips to Private on next render. */}
+              <Button
+                variant="ghost"
+                className="w-full rounded-xl text-rose-700 hover:text-rose-800 hover:bg-rose-50"
+                disabled={removing}
+                onClick={async () => {
+                  if (!window.confirm(
+                    t('market.confirmRemoveListing', {
+                      defaultValue: `Remove "${listing.title}" from the marketplace? Your closet item stays — only the listing is removed.`,
+                    }),
+                  )) return;
+                  setRemoving(true);
+                  try {
+                    await api.deleteListing(listing.id);
+                    toast.success(t('market.listingRemoved', { defaultValue: 'Removed from marketplace' }));
+                    nav('/market');
+                  } catch (err) {
+                    toast.error(err?.response?.data?.detail || t('market.removeFailed', { defaultValue: 'Could not remove listing' }));
+                  } finally {
+                    setRemoving(false);
+                  }
+                }}
+                data-testid="listing-remove-button"
+              >
+                {removing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {t('market.removing', { defaultValue: 'Removing…' })}
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {t('market.removeListing', { defaultValue: 'Remove from marketplace' })}
+                  </>
+                )}
+              </Button>
+            </div>
           ) : listing.status === 'active' ? (
             <div data-testid="listing-cta-wrapper" className="space-y-3">
               {/* Mode-aware primary CTA:

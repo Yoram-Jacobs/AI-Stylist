@@ -395,9 +395,71 @@ async def update_listing(
 async def delete_listing(
     listing_id: str, user: dict = Depends(get_current_user)
 ) -> Response:
+    """Hard-delete a listing and reset the linked closet item back to
+    private / own.
+
+    Historically this endpoint only removed the row from
+    ``listings`` — leaving the linked closet item with a dangling
+    ``auto_listing_id`` and a ``marketplace_intent`` like
+    ``swap`` / ``donate`` / ``for_sale``. From a user's perspective
+    that meant clicking "Remove listing" did *not* take the item off
+    the marketplace next time the auto-list pipeline ran (because the
+    closet item still indicated marketplace participation).
+
+    We now do a coordinated cleanup:
+        1. Remove the listing row.
+        2. If the listing was linked to a closet item we own, reset
+           ``marketplace_intent`` to ``"own"``, ``source`` to
+           ``"Private"``, and clear ``auto_listing_id`` /
+           ``auto_listing_needs_completion``. This guarantees the
+           closet card flips back to "Private" immediately.
+    """
+    db = get_db()
+    listing = await repos.find_one(
+        db.listings, {"id": listing_id, "seller_id": user["id"]}
+    )
+    if not listing:
+        raise HTTPException(404, "Listing not found")
+
+    closet_item_id = listing.get("closet_item_id")
+
     deleted = await repos.delete(
-        get_db().listings, {"id": listing_id, "seller_id": user["id"]}
+        db.listings, {"id": listing_id, "seller_id": user["id"]}
     )
     if not deleted:
+        # Race condition — somebody else removed it between the
+        # find_one and the delete. Treat as 404 so the client can
+        # refresh.
         raise HTTPException(404, "Listing not found")
+
+    if closet_item_id:
+        try:
+            await db.closet_items.update_one(
+                {
+                    "id": closet_item_id,
+                    "user_id": user["id"],
+                    # Only reset if the closet item is still pointing
+                    # at THIS listing — guards against deleting a
+                    # listing that was already de-linked manually.
+                    "auto_listing_id": listing_id,
+                },
+                {
+                    "$set": {
+                        "marketplace_intent": "own",
+                        "source": "Private",
+                        "auto_listing_id": None,
+                        "auto_listing_needs_completion": False,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Non-fatal — the listing IS gone, the closet card may
+            # just lag for one render. Surface in logs for triage.
+            logger.warning(
+                "delete_listing: closet cleanup failed listing=%s "
+                "closet_item=%s err=%s",
+                listing_id, closet_item_id, exc,
+            )
+
     return Response(status_code=204)

@@ -180,36 +180,138 @@ function MyListings() {
   const { t } = useTranslation();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    (async () => {
-      try {
-        const me = await api.me();
-        const res = await api.listListings({ seller_id: me.id, limit: 50 });
-        setItems(res.items || []);
-      } catch { /* ignore */ }
-      finally { setLoading(false); }
-    })();
-  }, []);
+  const [removingId, setRemovingId] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const me = await api.me();
+      const res = await api.listListings({ seller_id: me.id, limit: 50 });
+      setItems(res.items || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  // Hard-delete the listing AND reset the linked closet item back to
+  // private/own (handled atomically on the backend). The closet card
+  // flips to "Private" on next render so the user gets immediate
+  // feedback that the item is no longer on the marketplace.
+  const removeListing = async (l) => {
+    if (!window.confirm(t('market.confirmRemoveListing', { defaultValue: `Remove "${l.title}" from the marketplace?` }))) return;
+    setRemovingId(l.id);
+    try {
+      await api.deleteListing(l.id);
+      toast.success(t('market.listingRemoved', { defaultValue: 'Removed from marketplace' }));
+      setItems((prev) => prev.filter((x) => x.id !== l.id));
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || t('market.removeFailed', { defaultValue: 'Could not remove listing' }));
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  // One-shot rescue for users whose closet items have a
+  // marketplace_intent set (swap/donate/for_sale) but never made it
+  // to the marketplace — typically because they pre-date the
+  // auto-list pipeline. Idempotent on the server, so re-running is
+  // safe.
+  const syncMarketplace = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.backfillMarketplaceListings();
+      const created = res?.created || 0;
+      const skipped = res?.skipped_existing || 0;
+      const synced = res?.source_synced || 0;
+      const candidates = res?.candidates || 0;
+      if (candidates === 0) {
+        toast.info(t('market.syncNoCandidates', {
+          defaultValue: 'Nothing to sync — no closet items have a marketplace intent set.',
+        }));
+      } else {
+        toast.success(t('market.syncDone', {
+          defaultValue: `Synced ${candidates} item(s): ${created} listed, ${skipped} already on marketplace${synced ? `, ${synced} re-flagged Shared` : ''}.`,
+        }));
+      }
+      await load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || t('market.syncFailed', { defaultValue: 'Could not sync marketplace' }));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   if (loading) return <div className="py-10 caps-label text-muted-foreground">{t('market.loading')}</div>;
-  if (items.length === 0) return <div className="py-10 text-sm text-muted-foreground">{t('market.noMyListings')}</div>;
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" data-testid="market-my-listings-grid">
-      {items.map((l) => (
-        <Link key={l.id} to={`/market/${l.id}`}>
-          <Card className="rounded-[calc(var(--radius)+6px)] overflow-hidden shadow-editorial">
-            <AspectRatio ratio={3 / 4} className="bg-secondary">
-              {(l.images || [])[0] ? <img src={l.images[0]} alt={l.title} className="w-full h-full object-cover" /> : null}
-            </AspectRatio>
-            <CardContent className="p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-medium text-sm truncate">{l.title}</div>
-                <SourceTagBadge source={l.source} />
+    <div className="space-y-4">
+      {/* Top bar: sync rescue button + count */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm text-muted-foreground" data-testid="my-listings-count">
+          {t('market.myListingsCount', { count: items.length, defaultValue: `${items.length} listing${items.length === 1 ? '' : 's'}` })}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="rounded-full"
+          onClick={syncMarketplace}
+          disabled={syncing}
+          data-testid="sync-marketplace-btn"
+        >
+          {syncing
+            ? t('market.syncing', { defaultValue: 'Syncing…' })
+            : t('market.syncMarketplace', { defaultValue: 'Sync from closet' })}
+        </Button>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="py-10 text-sm text-muted-foreground">{t('market.noMyListings')}</div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" data-testid="market-my-listings-grid">
+          {items.map((l) => (
+            <Card
+              key={l.id}
+              className="rounded-[calc(var(--radius)+6px)] overflow-hidden shadow-editorial group relative"
+              data-testid={`my-listing-card-${l.id}`}
+            >
+              <Link to={`/market/${l.id}`} className="block">
+                <AspectRatio ratio={3 / 4} className="bg-secondary">
+                  {(l.images || [])[0] ? <img src={l.images[0]} alt={l.title} className="w-full h-full object-cover" /> : null}
+                </AspectRatio>
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-sm truncate">{l.title}</div>
+                    <SourceTagBadge source={l.source} />
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1 capitalize">
+                    {l.mode || 'sell'} · {l.status}
+                  </div>
+                </CardContent>
+              </Link>
+              <div className="px-3 pb-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full rounded-lg text-xs h-8 text-rose-700 hover:text-rose-800 hover:bg-rose-50"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeListing(l);
+                  }}
+                  disabled={removingId === l.id}
+                  data-testid={`my-listing-remove-${l.id}`}
+                >
+                  {removingId === l.id
+                    ? t('market.removing', { defaultValue: 'Removing…' })
+                    : t('market.removeListing', { defaultValue: 'Remove listing' })}
+                </Button>
               </div>
-              <div className="text-xs text-muted-foreground mt-1">{l.status}</div>
-            </CardContent>
-          </Card>
-        </Link>
-      ))}
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

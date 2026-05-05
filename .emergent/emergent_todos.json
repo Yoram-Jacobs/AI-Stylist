@@ -1,26 +1,30 @@
 [
   {
-    "content": "Bug 1: Bump closet list default limit so 313-item closets load in one request",
+    "content": "Investigate backfill: confirmed working correctly with synthetic data",
+    "status": "completed"
+  },
+  {
+    "content": "Fix DELETE /listings/{id} to also clean up closet item link",
+    "status": "completed"
+  },
+  {
+    "content": "Fix update_item: reset source/auto_listing_id when intent reverts to 'own'",
+    "status": "completed"
+  },
+  {
+    "content": "Add api.backfillMarketplaceListings to frontend api lib",
+    "status": "completed"
+  },
+  {
+    "content": "Add 'Sync marketplace' button + 'Remove listing' button in MyListings",
+    "status": "completed"
+  },
+  {
+    "content": "Add 'Remove listing' button in ListingDetail (owner view)",
+    "status": "completed"
+  },
+  {
+    "content": "Run backend testing agent to validate end-to-end",
     "status": "in_progress"
-  },
-  {
-    "content": "Bug 3: Trigger auto-list on marketplace_intent transition (not just source) + use correct mode + retire on 'own'",
-    "status": "pending"
-  },
-  {
-    "content": "Verify Bug 2 resolves via Bug 3 fix (new items auto-list → delete retires correctly)",
-    "status": "pending"
-  },
-  {
-    "content": "Backfill: auto-list existing items where marketplace_intent is sell/swap/donate but no listing exists",
-    "status": "pending"
-  },
-  {
-    "content": "Smoke test via curl: patch item with marketplace_intent=for_sale → listing created → delete → listing retired",
-    "status": "pending"
-  },
-  {
-    "content": "Update CHANGELOG.md + commit as v1.1.1 hotfix",
-    "status": "pending"
   }
 ]

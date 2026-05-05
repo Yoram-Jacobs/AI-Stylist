@@ -316,6 +316,7 @@ async def create_item(
             images=[cover_image] if cover_image else [],
             financial_metadata=financial,
             status="active",
+            auto_created=True,
         )
         await repos.insert(db.listings, listing.model_dump())
         listing_id = listing.id
@@ -2341,14 +2342,19 @@ async def update_item(
         # User reversed the marketplace decision — retire any
         # auto-created listing(s) we previously spawned. We never
         # touch listings the user curated by hand (auto_created
-        # missing or False).
+        # missing or False). We also flip the closet item's surface
+        # flags (``source``, ``auto_listing_id``,
+        # ``auto_listing_needs_completion``) back to "Private" so the
+        # closet card reflects the revert immediately — without this
+        # secondary patch the badge would still show "Shared" because
+        # only the listing changed.
         try:
             retire_res = await db.listings.update_many(
                 {
                     "closet_item_id": item_id,
                     "seller_id": user["id"],
                     "auto_created": True,
-                    "status": {"$in": ["draft", "active"]},
+                    "status": {"$in": ["draft", "active", "reserved"]},
                 },
                 {"$set": {
                     "status": "removed",
@@ -2361,6 +2367,24 @@ async def update_item(
                     "(intent reverted to %s)",
                     retire_res.modified_count, item_id, new_intent or "private",
                 )
+            # Always reset the closet item's surface flags on revert,
+            # even if no listing was active (defensive: covers items
+            # that were partially backfilled or where the listing was
+            # already retired through another path).
+            revert_patch: dict[str, Any] = {
+                "auto_listing_id": None,
+                "auto_listing_needs_completion": False,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            # Only flip source if the user didn't explicitly pass a
+            # source in this same PATCH — respect their choice.
+            if new_source is None:
+                revert_patch["source"] = "Private"
+            await db.closet_items.update_one(
+                {"id": item_id, "user_id": user["id"]},
+                {"$set": revert_patch},
+            )
+            updated.update(revert_patch)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "auto-retire failed for closet item %s: %s", item_id, exc,

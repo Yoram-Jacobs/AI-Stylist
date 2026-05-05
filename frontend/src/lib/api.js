@@ -94,6 +94,13 @@ export const api = {
     client
       .post(`/closet/${id}/edit-image`, null, { params: { prompt } })
       .then((r) => r.data),
+  // One-shot helper that auto-creates marketplace listings for closet
+  // items that already have ``marketplace_intent`` set but never made
+  // it to the marketplace (legacy data / pre-pipeline items). Returns
+  // a {candidates, created, skipped_existing, source_synced, failed}
+  // summary so the caller can render a confirmation toast.
+  backfillMarketplaceListings: () =>
+    client.post('/closet/marketplace/backfill').then((r) => r.data),
 
   // listings
   listListings: (params = {}) =>
