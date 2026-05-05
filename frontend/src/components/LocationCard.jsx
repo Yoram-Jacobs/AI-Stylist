@@ -57,11 +57,11 @@ export const LocationCard = () => {
       data-testid="location-card"
     >
       <CardContent className="p-6">
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col sm:flex-row items-start gap-4">
           <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
             <MapPin className="h-5 w-5" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 w-full">
             <div className="flex items-center gap-2">
               <div className="caps-label text-muted-foreground">
                 {t('location.sectionTitle')}
@@ -133,7 +133,7 @@ export const LocationCard = () => {
             ) : null}
           </div>
 
-          <div className="shrink-0 flex flex-col gap-2">
+          <div className="shrink-0 flex flex-col gap-2 w-full sm:w-auto">
             {unavailable ? (
               <Badge variant="outline">{t('location.unavailable')}</Badge>
             ) : connected ? (
@@ -142,7 +142,7 @@ export const LocationCard = () => {
                   variant="outline"
                   disabled={busy}
                   onClick={request}
-                  className="rounded-xl"
+                  className="rounded-xl w-full sm:w-auto"
                   data-testid="location-refresh-btn"
                 >
                   {busy ? (
@@ -155,7 +155,7 @@ export const LocationCard = () => {
                   variant="ghost"
                   disabled={busy}
                   onClick={forget}
-                  className="rounded-xl"
+                  className="rounded-xl w-full sm:w-auto"
                   data-testid="location-forget-btn"
                 >
                   {t('location.forget')}
@@ -165,7 +165,7 @@ export const LocationCard = () => {
               <Button
                 disabled={busy || denied}
                 onClick={request}
-                className="rounded-xl"
+                className="rounded-xl w-full sm:w-auto"
                 data-testid="location-enable-btn"
               >
                 {busy ? (

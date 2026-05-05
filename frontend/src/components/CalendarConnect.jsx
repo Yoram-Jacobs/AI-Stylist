@@ -84,11 +84,11 @@ export const CalendarConnect = () => {
       data-testid="calendar-connect-card"
     >
       <CardContent className="p-6">
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col sm:flex-row items-start gap-4">
           <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
             <Calendar className="h-5 w-5" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 w-full">
             <div className="flex items-center gap-2">
               <div className="caps-label text-muted-foreground">{t('calendar.context')}</div>
               {loading ? null : status.connected ? (
@@ -122,9 +122,9 @@ export const CalendarConnect = () => {
               </div>
             ) : null}
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 w-full sm:w-auto">
             {loading ? (
-              <Button variant="secondary" disabled className="rounded-xl">
+              <Button variant="secondary" disabled className="rounded-xl w-full sm:w-auto">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </Button>
             ) : status.connected ? (
@@ -132,7 +132,7 @@ export const CalendarConnect = () => {
                 variant="outline"
                 disabled={busy}
                 onClick={disconnect}
-                className="rounded-xl"
+                className="rounded-xl w-full sm:w-auto"
                 data-testid="calendar-disconnect-button"
               >
                 {busy ? (
@@ -147,7 +147,7 @@ export const CalendarConnect = () => {
               <Button
                 disabled={busy}
                 onClick={connect}
-                className="rounded-xl"
+                className="rounded-xl w-full sm:w-auto"
                 data-testid="calendar-connect-button"
               >
                 {busy ? (
