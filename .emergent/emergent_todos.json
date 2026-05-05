@@ -1,38 +1,22 @@
 [
   {
-    "content": "Investigate backfill: confirmed working correctly with synthetic data",
+    "content": "Refactor SourceTagBadge to accept intent/mode and replace 'Shared' label with For sale / Swap / Donate",
     "status": "completed"
   },
   {
-    "content": "Fix DELETE /listings/{id} to also clean up closet item link",
+    "content": "Update Closet.jsx + ItemDetail.jsx to pass marketplace_intent",
     "status": "completed"
   },
   {
-    "content": "Fix update_item: reset source/auto_listing_id when intent reverts to 'own'",
+    "content": "Update Marketplace.jsx + ListingDetail.jsx to pass listing.mode",
     "status": "completed"
   },
   {
-    "content": "Add api.backfillMarketplaceListings to frontend api lib",
+    "content": "Verify translations for taxonomy.intent.{for_sale,swap,donate}",
     "status": "completed"
   },
   {
-    "content": "Add 'Sync marketplace' button + 'Remove listing' button in MyListings",
-    "status": "completed"
-  },
-  {
-    "content": "Add 'Remove listing' button in ListingDetail (owner view)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend testing agent — 100% pass on marketplace sync flows (iteration_18)",
-    "status": "completed"
-  },
-  {
-    "content": "Apply testing-agent fix: auto_created=True on listings created in POST /closet",
-    "status": "completed"
-  },
-  {
-    "content": "Fix condition vocab mapping (excellent → like_new) in backfill + auto-list paths",
+    "content": "Visually verify with screenshot — badges render For sale / Swap / Donate with correct colors",
     "status": "completed"
   }
 ]

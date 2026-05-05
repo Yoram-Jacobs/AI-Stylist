@@ -50,10 +50,24 @@ calendar_router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 _STATE_EXPIRES_MIN = 15  # short-lived CSRF state
 
-# Backend path used by the new sign-in flow. Kept distinct from the existing
-# ``/auth/google/callback`` so the two flows can co-exist with different
-# state purposes and different post-handshake redirects.
-LOGIN_CALLBACK_PATH = "/api/v1/auth/google/login/callback"
+# Backend path used by the new sign-in flow.
+#
+# IMPORTANT — historic note:
+#   Originally we used a *distinct* callback path
+#   ``/api/v1/auth/google/login/callback`` so the two flows could co-exist
+#   with different state purposes. That approach required users to register
+#   *two* redirect URIs in Google Cloud Console, and OAuth clients that
+#   only had the calendar URI registered started failing with
+#   ``redirect_uri_mismatch`` (Google 403 page) the moment we shipped
+#   sign-in-with-Google.
+#
+#   Both flows now share ``/api/v1/auth/google/callback`` (the URI that
+#   was already registered for calendar). Dispatch happens in the
+#   callback handler based on the JWT state's ``purpose`` claim. The
+#   legacy ``/login/callback`` route is preserved as a thin alias so any
+#   handshake mid-flight when this lands still resolves cleanly.
+LOGIN_CALLBACK_PATH = "/api/v1/auth/google/callback"
+LEGACY_LOGIN_CALLBACK_PATH = "/api/v1/auth/google/login/callback"
 
 # Frontend route that finalises the sign-in handshake (parses the hash
 # fragment, persists the DressApp JWT, redirects into the app).
@@ -117,7 +131,44 @@ async def google_oauth_callback(
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
 ) -> RedirectResponse:
-    """Handle Google's redirect for the *calendar connect* flow."""
+    """Unified callback for both Google OAuth flows.
+
+    Dispatches based on the JWT state's ``purpose`` claim:
+      * ``google-oauth-link``  → calendar connect (existing user adds Calendar)
+      * ``google-oauth-login`` → sign-in / sign-up (find-or-create user)
+
+    Sharing a single redirect URI lets the app run with **one** entry in
+    Google Cloud Console regardless of which flow the user enters.
+    """
+    # Peek at the state to decide which branch to run. We deliberately
+    # decode WITHOUT a purpose check here so a missing/malformed state
+    # is handled the same way each flow used to handle it.
+    purpose = None
+    if state:
+        try:
+            unverified = jwt.decode(
+                state,
+                settings.JWT_SECRET,
+                algorithms=[settings.JWT_ALGORITHM],
+            )
+            purpose = unverified.get("purpose")
+        except Exception:  # noqa: BLE001
+            purpose = None
+
+    if purpose == "google-oauth-login":
+        return await _handle_login_callback(request, code, state, error)
+    # Default branch: calendar-link (back-compat with any state minted
+    # by the original ``/callback`` handler).
+    return await _handle_calendar_link_callback(request, code, state, error)
+
+
+async def _handle_calendar_link_callback(
+    request: Request,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+) -> RedirectResponse:
+    """Calendar-connect branch (existing logic, extracted verbatim)."""
     redirect_base = calendar_service.resolve_post_login_redirect(request)
 
     if error:
@@ -270,11 +321,34 @@ async def google_login_diag(request: Request) -> dict[str, Any]:
 
 
 @auth_router.get("/login/callback")
-async def google_login_callback(
+async def google_login_callback_legacy(
     request: Request,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
+) -> RedirectResponse:
+    """Legacy alias kept ONLY for users mid-flow when the unified-callback
+    refactor lands. New starts always go through ``/callback``. Safe to
+    remove after one full release cycle.
+
+    Crucially, we forward the **legacy** callback path to ``exchange_code``
+    so Google's token endpoint sees the same ``redirect_uri`` the
+    authorize step used (otherwise Google rejects with
+    ``invalid_grant: redirect_uri mismatch``).
+    """
+    return await _handle_login_callback(
+        request, code, state, error,
+        callback_path=LEGACY_LOGIN_CALLBACK_PATH,
+    )
+
+
+async def _handle_login_callback(
+    request: Request,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+    *,
+    callback_path: str = LOGIN_CALLBACK_PATH,
 ) -> RedirectResponse:
     """Handle Google's redirect for the *sign-in / sign-up* flow.
 
@@ -301,7 +375,7 @@ async def google_login_callback(
     # 1) Exchange the auth code.
     try:
         tokens = await calendar_service.exchange_code(
-            code, request=request, callback_path=LOGIN_CALLBACK_PATH
+            code, request=request, callback_path=callback_path
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Google sign-in token exchange failed")

@@ -813,7 +813,7 @@ export default function ItemDetail() {
               </>
             )}
             <div className="absolute bottom-3 start-3 flex items-center gap-2">
-              <SourceTagBadge source={item.source} />
+              <SourceTagBadge source={item.source} intent={item.marketplace_intent} />
               <Badge
                 variant="outline"
                 className="rounded-full text-[10px] bg-background/90 backdrop-blur"

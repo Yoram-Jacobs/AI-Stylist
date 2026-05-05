@@ -11,14 +11,25 @@ import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { Plus, MapPin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
-import { labelForCategory, labelForSource } from '@/lib/taxonomy';
+import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useLocation as useAppLocation } from '@/lib/location';
 import { toast } from 'sonner';
 
 const fmt = (cents, cur = 'USD') =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format((cents || 0) / 100);
 
-const SOURCES = ['all', 'Shared', 'Retail'];
+// Marketplace filter dropdown.
+//
+// Replaced the catch-all "Shared" with the three concrete marketplace
+// modes so users can drill straight to "Just show me items For sale"
+// or "Just show me Donations".
+//
+// Values in {Retail} key on listing.source; values in
+// {for_sale, swap, donate} key on listing.mode (where ``for_sale`` →
+// ``mode=sell`` on the wire).
+const SOURCES = ['all', 'for_sale', 'swap', 'donate', 'Retail'];
+const _INTENT_VALUES = new Set(['for_sale', 'swap', 'donate']);
+const _INTENT_TO_MODE = { for_sale: 'sell', swap: 'swap', donate: 'donate' };
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
 const RADIUS_OPTIONS = ['any', '5', '25', '50', '200'];
 
@@ -33,7 +44,16 @@ export default function Marketplace() {
     setLoading(true);
     try {
       const params = { status: 'active' };
-      if (filters.source !== 'all') params.source = filters.source;
+      // Source filter is multiplexed on the marketplace page: classic
+      // source values (Retail) hit ``?source=…`` while the new intent
+      // values (for_sale/swap/donate) hit ``?mode=…`` (with for_sale →
+      // sell on the wire). The marketplace browse always implies
+      // source=Shared so we don't need to send it explicitly.
+      if (filters.source === 'Retail') {
+        params.source = 'Retail';
+      } else if (_INTENT_VALUES.has(filters.source)) {
+        params.mode = _INTENT_TO_MODE[filters.source];
+      }
       if (filters.category !== 'all') params.category = filters.category;
       // Attach coords whenever we have them so the server can rank results
       // by proximity; honour the user's radius filter when it's not "any".
@@ -75,7 +95,11 @@ export default function Marketplace() {
           <div className="flex flex-wrap gap-2 mb-4">
             <Select value={filters.source} onValueChange={(v) => setFilters((f) => ({ ...f, source: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-source-select"><SelectValue /></SelectTrigger>
-              <SelectContent>{SOURCES.map((s) => <SelectItem key={s} value={s}>{labelForSource(s, t)}</SelectItem>)}</SelectContent>
+              <SelectContent>{SOURCES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {_INTENT_VALUES.has(s) ? labelForIntent(s, t) : labelForSource(s, t)}
+                </SelectItem>
+              ))}</SelectContent>
             </Select>
             <Select value={filters.category} onValueChange={(v) => setFilters((f) => ({ ...f, category: v }))}>
               <SelectTrigger className="w-[140px] rounded-xl" data-testid="market-category-select"><SelectValue /></SelectTrigger>
@@ -143,7 +167,7 @@ export default function Marketplace() {
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-sm truncate">{l.title}</div>
-                        <SourceTagBadge source={l.source} />
+                        <SourceTagBadge source={l.source} mode={l.mode} />
                       </div>
                       <div className="mt-1 flex items-center justify-between">
                         <div className="font-display text-lg">{fmt(l.financial_metadata?.list_price_cents)}</div>
@@ -283,10 +307,10 @@ function MyListings() {
                 <CardContent className="p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-medium text-sm truncate">{l.title}</div>
-                    <SourceTagBadge source={l.source} />
+                    <SourceTagBadge source={l.source} mode={l.mode} />
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1 capitalize">
-                    {l.mode || 'sell'} · {l.status}
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {l.status}
                   </div>
                 </CardContent>
               </Link>
