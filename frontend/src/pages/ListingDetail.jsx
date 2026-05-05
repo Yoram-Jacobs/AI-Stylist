@@ -115,7 +115,7 @@ export default function ListingDetail() {
                     <Eye className="inline h-3 w-3 me-1" />{t('market.viewsCount', { count: listing.views || 0 })}
                   </div>
                 </div>
-                <SourceTagBadge source={listing.source} />
+                <SourceTagBadge source={listing.source} mode={listing.mode} />
               </div>
               <div className="mt-3 font-display text-3xl" data-testid="listing-detail-price">{fmt(fm.list_price_cents, fm.currency)}</div>
 

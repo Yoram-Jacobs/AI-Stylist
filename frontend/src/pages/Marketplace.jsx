@@ -143,7 +143,7 @@ export default function Marketplace() {
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-sm truncate">{l.title}</div>
-                        <SourceTagBadge source={l.source} />
+                        <SourceTagBadge source={l.source} mode={l.mode} />
                       </div>
                       <div className="mt-1 flex items-center justify-between">
                         <div className="font-display text-lg">{fmt(l.financial_metadata?.list_price_cents)}</div>
@@ -283,10 +283,10 @@ function MyListings() {
                 <CardContent className="p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-medium text-sm truncate">{l.title}</div>
-                    <SourceTagBadge source={l.source} />
+                    <SourceTagBadge source={l.source} mode={l.mode} />
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1 capitalize">
-                    {l.mode || 'sell'} · {l.status}
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {l.status}
                   </div>
                 </CardContent>
               </Link>
