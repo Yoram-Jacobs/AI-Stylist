@@ -93,7 +93,7 @@ export default function CreateListing() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.listCloset({ limit: 100 }).then((r) => setCloset(r.items || [])).catch(() => {});
+    api.listCloset({ limit: 2000 }).then((r) => setCloset(r.items || [])).catch(() => {});
   }, []);
 
   // ---------- derive listing fields from the linked closet item ----------

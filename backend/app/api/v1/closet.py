@@ -1086,11 +1086,13 @@ async def list_items(
     source: Source | None = Query(default=None),
     category: str | None = Query(default=None),
     search: str | None = Query(default=None),
-    # Default raised from 100 → 500 so users with mid-large closets
-    # (the design centre is ~300 items) get the full set on a single
-    # round-trip. ``le=2000`` is the absolute cap to bound payload size
-    # — closets bigger than that should paginate via ``skip``.
-    limit: int = Query(default=500, le=2000),
+    # Default raised from 100 → 500 → 2000 because mid/large closets
+    # (300+ items) would silently truncate to the previous default
+    # whenever an older frontend bundle was served from cache without
+    # an explicit ``limit`` query param. ``le=2000`` is the absolute
+    # cap to bound payload size — closets bigger than that should
+    # paginate via ``skip``.
+    limit: int = Query(default=2000, le=2000),
     skip: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
     db = get_db()
@@ -1176,6 +1178,17 @@ async def list_items(
             it.pop("segmented_image_url", None)
             it.pop("reconstructed_image_url", None)
     total = await repos.count(db.closet_items, query)
+    # Surface the response shape in logs so deployment/cache issues are
+    # immediately diagnosable. If a user reports "I have 311 items but
+    # see only 100", we can grep this line to confirm whether the
+    # backend ACTUALLY returned 100 (cap somewhere upstream) vs
+    # returned 311 (frontend / browser cache problem).
+    logger.info(
+        "GET /closet user=%s returning items=%d total=%d limit=%d skip=%d "
+        "filters={source=%s category=%s search=%s}",
+        user["id"], len(items), total, limit, skip,
+        source or "-", category or "-", search or "-",
+    )
     return {"items": items, "total": total, "limit": limit, "skip": skip}
 
 
