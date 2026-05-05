@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { AdTicker } from '@/components/AdTicker';
+import { LanguagePicker } from '@/components/LanguagePicker';
 
 // Fallback cards used only if the Trend-Scout endpoint fails or returns empty.
 const FALLBACK_TRENDS = [
@@ -53,6 +54,15 @@ export default function Home() {
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
       <section className="relative overflow-hidden rounded-[calc(var(--radius)+6px)] hero-wash-light noise border border-border p-6 md:p-10">
+        {/* Floating language picker — small "bulb" in the top-end corner
+            of the hero. RTL-safe (end inset). Blends with the hero wash
+            via a glassy backdrop. */}
+        <div className="absolute top-4 end-4 z-10">
+          <LanguagePicker
+            className="rounded-full bg-card/70 backdrop-blur-sm border-border shadow-sm hover:bg-card"
+            testIdSuffix="home"
+          />
+        </div>
         <div className="caps-label text-muted-foreground">{t('home.todayLabel')}</div>
         <h1 className="font-display text-3xl sm:text-4xl md:text-5xl leading-[1.05] mt-2" data-testid="home-greeting">
           {t('home.greeting')}<br/>{firstName || t('home.greetingFallback')}.
