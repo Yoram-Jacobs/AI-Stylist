@@ -389,24 +389,65 @@ async def fashion_scout_feed(
 
     out: list[dict[str, Any]] = []
     for card in canon:
-        cached = await db.trend_reports.find_one(
-            {
-                "origin_id": card["id"],
-                "language": language,
-                **({"country_code": country.upper()} if country else {}),
-            },
-            {"_id": 0},
-        )
-        if cached:
-            out.append(cached)
+        # Defensive: if the canon doc is missing an ``id`` (e.g. a
+        # legacy/partial document slipped into trend_reports) we
+        # cannot key the translation cache by ``origin_id`` — skip
+        # the translation step and surface the raw English card so
+        # the feed never 500s on a single bad row.
+        canon_id = card.get("id")
+        if not canon_id:
+            logger.warning(
+                "fashion_scout_feed: canon card missing 'id' (bucket=%s date=%s)",
+                card.get("bucket"),
+                card.get("date"),
+            )
+            out.append(card)
             continue
-        translated = await _translate_card(
-            card, language=language, country=country
-        )
-        if translated:
-            await db.trend_reports.insert_one({**translated, "_origin": card["id"]})
-            out.append({k: v for k, v in translated.items() if k != "_id"})
-        else:
+        try:
+            cached = await db.trend_reports.find_one(
+                {
+                    "origin_id": canon_id,
+                    "language": language,
+                    **({"country_code": country.upper()} if country else {}),
+                },
+                {"_id": 0},
+            )
+            if cached:
+                out.append(cached)
+                continue
+            translated = await _translate_card(
+                card, language=language, country=country
+            )
+            if translated:
+                # Persist for the next reader. ``insert_one`` failures
+                # here (duplicate key from a concurrent writer, write
+                # quorum hiccup, etc.) must NOT take down the whole
+                # request — we still have a perfectly good translated
+                # card to show; we just won't cache it this time.
+                try:
+                    await db.trend_reports.insert_one(
+                        {**translated, "_origin": canon_id}
+                    )
+                except Exception as cache_exc:  # noqa: BLE001
+                    logger.info(
+                        "fashion_scout_feed: cache insert skipped (%s -> %s): %s",
+                        canon_id,
+                        language,
+                        cache_exc,
+                    )
+                out.append({k: v for k, v in translated.items() if k != "_id"})
+            else:
+                out.append(card)
+        except Exception as exc:  # noqa: BLE001
+            # Last-resort: log and fall back to the English canon
+            # card so a single broken translation never 500s the
+            # whole feed for the user.
+            logger.warning(
+                "fashion_scout_feed: per-card failure (%s -> %s): %s",
+                canon_id,
+                language,
+                exc,
+            )
             out.append(card)
     return out
 

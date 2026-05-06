@@ -36,7 +36,13 @@ const FRESH_MS = 5 * 60 * 1000; // 5 minutes
 // page receives a focus event every time the address bar collapses.
 const MIN_INCREMENTAL_SYNC_INTERVAL_MS = 30 * 1000;
 
-const _state = {
+// We hold the canonical snapshot in a single mutable variable but
+// **never** mutate the object's properties in place. Every state
+// transition replaces ``_state`` with a fresh object reference so
+// ``useSyncExternalStore`` consumers (which compare snapshots via
+// ``Object.is``) see the change and re-render. Mutators below all
+// go through ``_set`` for this reason.
+let _state = {
   items: [],          // canonical list, sorted by created_at desc
   total: 0,
   lastFullSync: 0,    // epoch ms of the last full /closet fetch
@@ -50,6 +56,16 @@ function _notify() {
   _listeners.forEach((fn) => {
     try { fn(); } catch { /* ignore */ }
   });
+}
+
+/**
+ * Replace ``_state`` with a shallow-merged copy and notify
+ * subscribers. Always supply the *complete* delta you want to apply
+ * — partial keys merge into the previous snapshot.
+ */
+function _set(patch) {
+  _state = { ..._state, ...patch };
+  _notify();
 }
 
 function _byCreatedDesc(a, b) {
@@ -81,23 +97,23 @@ export const closetStore = {
     if (!force && _state.lastFullSync && Date.now() - _state.lastFullSync < FRESH_MS) {
       return _state.items;
     }
-    _state.loading = true;
-    _state.error = null;
-    _notify();
+    _set({ loading: true, error: null });
     try {
       const res = await api.listCloset({ limit: 2000 });
       const next = (res.items || []).slice().sort(_byCreatedDesc);
-      _state.items = next;
-      _state.total = res.total || next.length;
-      _state.lastFullSync = Date.now();
-      _state.lastIncSync = _state.lastFullSync;
+      const now = Date.now();
+      _set({
+        items: next,
+        total: res.total || next.length,
+        lastFullSync: now,
+        lastIncSync: now,
+      });
       return next;
     } catch (err) {
-      _state.error = err;
+      _set({ error: err });
       throw err;
     } finally {
-      _state.loading = false;
-      _notify();
+      _set({ loading: false });
     }
   },
 
@@ -126,29 +142,33 @@ export const closetStore = {
         api.listCloset({ limit: 2000, updated_after: since }),
         api.listCloset({ limit: 2000, ids_only: 1 }),
       ]);
-      _state.lastIncSync = Date.now();
 
       const changedItems = diffRes?.items || [];
       const liveIds = new Set(idsRes?.ids || []);
 
+      // Build the next items list off the current snapshot. We avoid
+      // mutating _state until we have the final shape, then publish
+      // it in a single _set() call.
+      let nextItems = _state.items;
       let mutations = 0;
-      // 1) Apply upserts.
       if (changedItems.length) {
-        const byId = new Map(_state.items.map((it) => [it.id, it]));
+        const byId = new Map(nextItems.map((it) => [it.id, it]));
         for (const it of changedItems) {
           byId.set(it.id, { ...(byId.get(it.id) || {}), ...it });
         }
-        _state.items = Array.from(byId.values()).sort(_byCreatedDesc);
+        nextItems = Array.from(byId.values()).sort(_byCreatedDesc);
         mutations += changedItems.length;
       }
-      // 2) Drop anything that disappeared remotely.
-      const before = _state.items.length;
-      _state.items = _state.items.filter((it) => liveIds.has(it.id));
-      const removed = before - _state.items.length;
+      const beforeCount = nextItems.length;
+      nextItems = nextItems.filter((it) => liveIds.has(it.id));
+      const removed = beforeCount - nextItems.length;
       mutations += removed;
-      _state.total = idsRes?.total || _state.items.length;
 
-      if (mutations) _notify();
+      _set({
+        items: mutations ? nextItems : _state.items,
+        total: idsRes?.total || nextItems.length,
+        lastIncSync: Date.now(),
+      });
       return mutations;
     } catch (err) {
       // Soft-fail — keep the cached view rather than wiping it.
@@ -163,48 +183,57 @@ export const closetStore = {
   /** Optimistic upsert. Used after a successful create/update. */
   upsert(item) {
     if (!item || !item.id) return;
-    const idx = _state.items.findIndex((it) => it.id === item.id);
+    const items = _state.items;
+    const idx = items.findIndex((it) => it.id === item.id);
+    let nextItems;
+    let nextTotal = _state.total;
     if (idx >= 0) {
-      const merged = { ..._state.items[idx], ...item };
-      _state.items = [
-        ..._state.items.slice(0, idx),
+      const merged = { ...items[idx], ...item };
+      nextItems = [
+        ...items.slice(0, idx),
         merged,
-        ..._state.items.slice(idx + 1),
+        ...items.slice(idx + 1),
       ].sort(_byCreatedDesc);
     } else {
-      _state.items = [item, ..._state.items].sort(_byCreatedDesc);
-      _state.total += 1;
+      nextItems = [item, ...items].sort(_byCreatedDesc);
+      nextTotal = _state.total + 1;
     }
-    _notify();
+    _set({ items: nextItems, total: nextTotal });
   },
 
   /** Optimistic delete. Used after a successful DELETE /closet/{id}. */
   remove(itemId) {
     if (!itemId) return;
     const before = _state.items.length;
-    _state.items = _state.items.filter((it) => it.id !== itemId);
-    if (_state.items.length !== before) {
-      _state.total = Math.max(0, _state.total - (before - _state.items.length));
-      _notify();
+    const nextItems = _state.items.filter((it) => it.id !== itemId);
+    if (nextItems.length !== before) {
+      _set({
+        items: nextItems,
+        total: Math.max(0, _state.total - (before - nextItems.length)),
+      });
     }
   },
 
   /** Bulk replace — used by the page after a filtered/semantic search. */
   replaceAll(items, total) {
-    _state.items = (items || []).slice().sort(_byCreatedDesc);
-    _state.total = typeof total === 'number' ? total : _state.items.length;
-    _state.lastFullSync = Date.now();
-    _state.lastIncSync = _state.lastFullSync;
-    _notify();
+    const sorted = (items || []).slice().sort(_byCreatedDesc);
+    const now = Date.now();
+    _set({
+      items: sorted,
+      total: typeof total === 'number' ? total : sorted.length,
+      lastFullSync: now,
+      lastIncSync: now,
+    });
   },
 
   /** Hard reset — call on logout so the next user doesn't see stale data. */
   reset() {
-    _state.items = [];
-    _state.total = 0;
-    _state.lastFullSync = 0;
-    _state.lastIncSync = 0;
-    _state.error = null;
-    _notify();
+    _set({
+      items: [],
+      total: 0,
+      lastFullSync: 0,
+      lastIncSync: 0,
+      error: null,
+    });
   },
 };

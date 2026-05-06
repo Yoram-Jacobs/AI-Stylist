@@ -1,22 +1,14 @@
 [
   {
-    "content": "Refactor Marketplace.jsx Browse tab to use useCachedList with browseStore",
+    "content": "Add defensive patches to trend_scout (already done) — bundled for redeploy",
     "status": "completed"
   },
   {
-    "content": "Refactor Marketplace.jsx MyListings sub-component to use myListingsStore (with mutation hooks for delete + sync)",
+    "content": "Fix Stylist page error: missing TrendingUp lucide import",
     "status": "completed"
   },
   {
-    "content": "Refactor ExpertsDirectory.jsx to use useCachedList with expertsStore (preserving draft/applied filter pattern)",
-    "status": "completed"
-  },
-  {
-    "content": "Run frontend lint + esbuild to verify no compile errors",
-    "status": "completed"
-  },
-  {
-    "content": "Take screenshots / run frontend testing agent to verify Marketplace & Experts pages render correctly with cached lists and instant nav",
+    "content": "Trend-Scout: drop unreliable hallucinated images and add clickable source link on each card",
     "status": "completed"
   }
 ]
