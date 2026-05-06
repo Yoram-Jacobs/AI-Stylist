@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
+import { useClosetStore } from '@/lib/useClosetStore';
 import { api } from '@/lib/api';
 import { AdTicker } from '@/components/AdTicker';
 import { LanguagePicker } from '@/components/LanguagePicker';
@@ -25,6 +26,7 @@ const FALLBACK_TRENDS = [
 export default function Home() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const closet = useClosetStore();
   const isAdmin = (user?.roles || []).includes('admin');
   const [counts, setCounts] = useState(null);
   const [trends, setTrends] = useState(null); // null = loading, [] = empty, [...]
@@ -77,13 +79,33 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const closet = await api.listCloset({ limit: 1 });
+        // Read closet count straight from the global store (already
+        // populated by AppLayout's prewarm) — no extra round-trip.
+        // Marketplace count is still server-side because we don't
+        // store all listings client-side.
         const market = await api.listListings({ limit: 1, status: 'active' });
-        setCounts({ closet: closet.total || 0, market: market.total || 0 });
-      } catch { setCounts({ closet: 0, market: 0 }); }
+        setCounts({
+          closet: closet.total || (closet.items?.length ?? 0),
+          market: market.total || 0,
+        });
+      } catch { setCounts({ closet: closet.total || 0, market: 0 }); }
     })();
     fetchTrends();
+    // We intentionally only run this once per mount; closet.total
+    // updates flow through the dedicated effect below so the chip
+    // stays accurate after add/delete.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the closet chip in sync with store mutations from elsewhere
+  // in the app (AddItem, ItemDetail delete, etc.) without a refetch.
+  useEffect(() => {
+    setCounts((prev) => {
+      const closetCount = closet.total || (closet.items?.length ?? 0);
+      if (prev && prev.closet === closetCount) return prev;
+      return { closet: closetCount, market: prev?.market ?? 0 };
+    });
+  }, [closet.total, closet.items]);
 
   const firstName = (user?.display_name || user?.email || '').split(/\s|@/)[0];
 

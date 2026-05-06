@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent } from '@/components/ui/card';
@@ -13,6 +13,9 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useLocation as useAppLocation } from '@/lib/location';
+import { useAuth } from '@/lib/auth';
+import { browseStore, myListingsStore } from '@/lib/marketplaceStore';
+import { useCachedList } from '@/lib/createCachedStore';
 import { toast } from 'sonner';
 
 const fmt = (cents, cur = 'USD') =>
@@ -36,41 +39,36 @@ const RADIUS_OPTIONS = ['any', '5', '25', '50', '200'];
 export default function Marketplace() {
   const { t } = useTranslation();
   const loc = useAppLocation();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ source: 'all', category: 'all', radius: 'any' });
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const params = { status: 'active' };
-      // Source filter is multiplexed on the marketplace page: classic
-      // source values (Retail) hit ``?source=…`` while the new intent
-      // values (for_sale/swap/donate) hit ``?mode=…`` (with for_sale →
-      // sell on the wire). The marketplace browse always implies
-      // source=Shared so we don't need to send it explicitly.
-      if (filters.source === 'Retail') {
-        params.source = 'Retail';
-      } else if (_INTENT_VALUES.has(filters.source)) {
-        params.mode = _INTENT_TO_MODE[filters.source];
-      }
-      if (filters.category !== 'all') params.category = filters.category;
-      // Attach coords whenever we have them so the server can rank results
-      // by proximity; honour the user's radius filter when it's not "any".
-      if (loc?.coords?.lat != null && loc?.coords?.lng != null) {
-        params.lat = loc.coords.lat;
-        params.lng = loc.coords.lng;
-        if (filters.radius !== 'any') params.radius_km = Number(filters.radius);
-      }
-      const res = await api.listListings(params);
-      setItems(res.items || []);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || t('market.loadFailed'));
-    } finally { setLoading(false); }
-  };
+  // Stable params object — keyed inputs to the cached browse store.
+  // Mirrors the original wire-shape decisions: classic source values
+  // (Retail) hit ``?source=…`` while the new intent values
+  // (for_sale/swap/donate) hit ``?mode=…``. Geo coords are attached
+  // when available so the server can rank by proximity; the radius
+  // filter is honoured only when explicitly chosen.
+  const browseParams = useMemo(() => {
+    const params = {};
+    if (filters.source === 'Retail') {
+      params.source = 'Retail';
+    } else if (_INTENT_VALUES.has(filters.source)) {
+      params.mode = _INTENT_TO_MODE[filters.source];
+    }
+    if (filters.category !== 'all') params.category = filters.category;
+    if (loc?.coords?.lat != null && loc?.coords?.lng != null) {
+      params.lat = loc.coords.lat;
+      params.lng = loc.coords.lng;
+      if (filters.radius !== 'any') params.radius_km = Number(filters.radius);
+    }
+    return params;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.source, filters.category, filters.radius, loc?.coords?.lat, loc?.coords?.lng]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [filters.source, filters.category, filters.radius, loc?.coords?.lat, loc?.coords?.lng]);
+  const { items, loading, refreshing } = useCachedList(browseStore, browseParams);
+  // ``refreshing`` lets us hint that a stale-while-revalidate refresh
+  // is in flight without blanking the grid; we don't render a spinner
+  // for it today but the value is exposed for future polish.
+  void refreshing;
 
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
@@ -202,22 +200,23 @@ export default function Marketplace() {
 
 function MyListings() {
   const { t } = useTranslation();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
   const [removingId, setRemovingId] = useState(null);
   const [syncing, setSyncing] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const me = await api.me();
-      const res = await api.listListings({ seller_id: me.id, limit: 50 });
-      setItems(res.items || []);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
-  };
+  // Filter object that drives the cached store. The same shape was
+  // used in the prewarm at AppLayout boot — passing the exact same
+  // ``{seller_id}`` here means the page paints from cache instantly.
+  const sellerFilters = useMemo(
+    () => (user?.id ? { seller_id: user.id } : null),
+    [user?.id],
+  );
 
-  useEffect(() => { load(); }, []);
+  // useCachedList tolerates a missing user (filters=null short-circuits
+  // to an empty cache slot) so we don't have to gate the hook call.
+  const { items, loading } = useCachedList(myListingsStore, sellerFilters || {}, {
+    revalidateOnMount: !!sellerFilters,
+  });
 
   // Hard-delete the listing AND reset the linked closet item back to
   // private/own (handled atomically on the backend). The closet card
@@ -229,7 +228,11 @@ function MyListings() {
     try {
       await api.deleteListing(l.id);
       toast.success(t('market.listingRemoved', { defaultValue: 'Removed from marketplace' }));
-      setItems((prev) => prev.filter((x) => x.id !== l.id));
+      // Optimistic local removal in the cache so the UI flips
+      // immediately. Browse cache may also show this listing, so we
+      // invalidate it for a quiet refetch on next visit.
+      if (sellerFilters) myListingsStore.removeItem(sellerFilters, l.id);
+      browseStore.invalidate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('market.removeFailed', { defaultValue: 'Could not remove listing' }));
     } finally {
@@ -259,7 +262,13 @@ function MyListings() {
           defaultValue: `Synced ${candidates} item(s): ${created} listed, ${skipped} already on marketplace${synced ? `, ${synced} re-flagged Shared` : ''}.`,
         }));
       }
-      await load();
+      // Sync may have created new listings server-side; bust both
+      // caches so the next render shows the fresh state.
+      if (sellerFilters) {
+        myListingsStore.invalidate(sellerFilters);
+        await myListingsStore.ensure(sellerFilters, { force: true });
+      }
+      browseStore.invalidate();
     } catch (err) {
       toast.error(err?.response?.data?.detail || t('market.syncFailed', { defaultValue: 'Could not sync marketplace' }));
     } finally {

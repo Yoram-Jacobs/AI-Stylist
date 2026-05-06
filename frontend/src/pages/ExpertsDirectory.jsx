@@ -16,10 +16,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
 import { useLocation } from '@/lib/location';
 import { AdTicker } from '@/components/AdTicker';
 import { useAuth } from '@/lib/auth';
+import { expertsStore } from '@/lib/expertsStore';
+import { useCachedList } from '@/lib/createCachedStore';
 
 /**
  * Experts directory — public-facing list of self-certified fashion pros.
@@ -29,20 +30,31 @@ export default function ExpertsDirectory() {
   const { t } = useTranslation();
   const loc = useLocation?.();
   const { user } = useAuth();
-  const [items, setItems] = useState(null);
-  const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState({
+  // Two-state filter pattern: ``draft`` is bound to the inputs (every
+  // keystroke), ``applied`` is the snapshot the cached store fetches.
+  // We only promote ``draft -> applied`` when the user clicks Search,
+  // hits Enter, or clears. Initial ``applied`` is the empty filter
+  // set so we hit the same cache slot the AppLayout prewarm warmed.
+  const [draft, setDraft] = useState({
     profession: '',
     country: '',
     region: '',
     q: '',
   });
-  const [busy, setBusy] = useState(false);
+  const [applied, setApplied] = useState({
+    profession: '',
+    country: '',
+    region: '',
+    q: '',
+  });
 
   // Pre-seed country & region from device location on first mount.
+  // We seed only the *draft* — the user still has to apply it. This
+  // keeps the prewarmed default-view cache hit on first paint and
+  // gives the user an immediate hint of what filters might be useful.
   useEffect(() => {
     if (!loc) return;
-    setFilters((f) => ({
+    setDraft((f) => ({
       ...f,
       country: f.country || loc.country_code || loc.country || '',
       region: f.region || loc.city || '',
@@ -50,37 +62,22 @@ export default function ExpertsDirectory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc?.country_code, loc?.city]);
 
-  const load = async () => {
-    setBusy(true);
-    try {
-      const params = Object.fromEntries(
-        Object.entries({
-          profession: filters.profession || undefined,
-          country: filters.country || undefined,
-          region: filters.region || undefined,
-          q: filters.q || undefined,
-          limit: 40,
-        }).filter(([, v]) => v),
-      );
-      const res = await api.listProfessionals(params);
-      setItems(res?.items || []);
-      setTotal(res?.total || 0);
-    } catch {
-      setItems([]);
-      setTotal(0);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const expertParams = useMemo(() => {
+    const p = {};
+    if (applied.profession) p.profession = applied.profession;
+    if (applied.country) p.country = applied.country;
+    if (applied.region) p.region = applied.region;
+    if (applied.q) p.q = applied.q;
+    return p;
+  }, [applied.profession, applied.country, applied.region, applied.q]);
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { items, total, loading } = useCachedList(expertsStore, expertParams);
 
+  const apply = () => setApplied({ ...draft });
   const clear = () => {
-    setFilters({ profession: '', country: '', region: '', q: '' });
-    setTimeout(load, 0);
+    const empty = { profession: '', country: '', region: '', q: '' };
+    setDraft(empty);
+    setApplied(empty);
   };
 
   const professions = useMemo(() => {
@@ -89,6 +86,8 @@ export default function ExpertsDirectory() {
   }, [items]);
 
   const viewerIsPro = !!user?.professional?.is_professional;
+  // Show the skeleton only when we have nothing cached yet.
+  const showSkeleton = loading && (!items || items.length === 0);
 
   return (
     <div className="min-h-full">
@@ -129,9 +128,9 @@ export default function ExpertsDirectory() {
                 <div className="relative mt-1">
                   <SearchIcon className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    value={filters.q}
-                    onChange={(e) => setFilters({ ...filters, q: e.target.value })}
-                    onKeyDown={(e) => e.key === 'Enter' && load()}
+                    value={draft.q}
+                    onChange={(e) => setDraft({ ...draft, q: e.target.value })}
+                    onKeyDown={(e) => e.key === 'Enter' && apply()}
                     className="ps-9 rounded-xl"
                     placeholder={t('experts.filters.search')}
                     data-testid="experts-filter-search"
@@ -144,11 +143,11 @@ export default function ExpertsDirectory() {
                 </Label>
                 <Input
                   list="experts-profession-suggestions"
-                  value={filters.profession}
+                  value={draft.profession}
                   onChange={(e) =>
-                    setFilters({ ...filters, profession: e.target.value })
+                    setDraft({ ...draft, profession: e.target.value })
                   }
-                  onKeyDown={(e) => e.key === 'Enter' && load()}
+                  onKeyDown={(e) => e.key === 'Enter' && apply()}
                   className="mt-1 rounded-xl"
                   placeholder={t('experts.filters.anyProfession')}
                   data-testid="experts-filter-profession"
@@ -164,11 +163,11 @@ export default function ExpertsDirectory() {
                   {t('experts.filters.country')}
                 </Label>
                 <Input
-                  value={filters.country}
+                  value={draft.country}
                   onChange={(e) =>
-                    setFilters({ ...filters, country: e.target.value })
+                    setDraft({ ...draft, country: e.target.value })
                   }
-                  onKeyDown={(e) => e.key === 'Enter' && load()}
+                  onKeyDown={(e) => e.key === 'Enter' && apply()}
                   className="mt-1 rounded-xl"
                   placeholder="IL, US, FR…"
                   data-testid="experts-filter-country"
@@ -179,11 +178,11 @@ export default function ExpertsDirectory() {
                   {t('experts.filters.region')}
                 </Label>
                 <Input
-                  value={filters.region}
+                  value={draft.region}
                   onChange={(e) =>
-                    setFilters({ ...filters, region: e.target.value })
+                    setDraft({ ...draft, region: e.target.value })
                   }
-                  onKeyDown={(e) => e.key === 'Enter' && load()}
+                  onKeyDown={(e) => e.key === 'Enter' && apply()}
                   className="mt-1 rounded-xl"
                   data-testid="experts-filter-region"
                 />
@@ -191,8 +190,8 @@ export default function ExpertsDirectory() {
             </div>
             <div className="flex gap-2 mt-4">
               <Button
-                onClick={load}
-                disabled={busy}
+                onClick={apply}
+                disabled={loading}
                 className="rounded-xl"
                 data-testid="experts-apply-filters"
               >
@@ -201,7 +200,7 @@ export default function ExpertsDirectory() {
               <Button
                 variant="secondary"
                 onClick={clear}
-                disabled={busy}
+                disabled={loading}
                 className="rounded-xl"
                 data-testid="experts-clear-filters"
               >
@@ -222,7 +221,7 @@ export default function ExpertsDirectory() {
         </Card>
 
         {/* --- Grid --- */}
-        {items === null ? (
+        {showSkeleton ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton

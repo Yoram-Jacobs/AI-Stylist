@@ -600,8 +600,19 @@ export default function AddItem() {
         }
 
         try {
-          await api.createItem(buildCreatePayload(cardLike));
+          const created = await api.createItem(buildCreatePayload(cardLike));
           createdHere += 1;
+          // Patch the global closet store so /closet shows the new
+          // card the moment the user navigates there — no full
+          // refetch required. ``created`` is the persisted document
+          // returned by POST /closet (already includes id,
+          // created_at, etc.).
+          if (created && created.id) {
+            try {
+              const { closetStore } = await import('@/lib/closetStore');
+              closetStore.upsert(created);
+            } catch { /* store import failure should never block upload */ }
+          }
         } catch (_) {
           failedHere += 1;
         }
