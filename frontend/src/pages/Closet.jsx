@@ -463,7 +463,13 @@ export default function Closet() {
       {/* Selection action bar */}
       {selectMode && (
         <div
-          className="mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-border bg-secondary/60"
+          // Sticky toolbar — stays pinned just under TopNav (h-16 on
+          // md+) as the user scrolls through long closets, so the
+          // selection count + Delete/Complete-Outfit actions are
+          // always one tap away. Mobile pins to top-0 since there's
+          // no TopNav. Bumped opacity + backdrop-blur + shadow so it
+          // reads cleanly over the grid below.
+          className="sticky top-0 md:top-16 z-20 mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-border bg-secondary/95 supports-[backdrop-filter]:bg-secondary/80 supports-[backdrop-filter]:backdrop-blur shadow-editorial"
           data-testid="closet-selection-bar"
           role="toolbar"
           aria-label="Selection actions"
