@@ -152,7 +152,11 @@ export function FashionScoutPanel() {
 
   const load = useCallback(async () => {
     try {
-      const { cards: rows } = await api.fashionScoutFeed(12, {
+      // Stylist panel shows the full daily set (~30) filtered by the
+      // viewer's relevance ranking. The backend reads our auth header
+      // and re-ranks the candidate pool by gender / profession /
+      // occupation / country before slicing to limit.
+      const { cards: rows } = await api.fashionScoutFeed(30, {
         language,
         country,
       });

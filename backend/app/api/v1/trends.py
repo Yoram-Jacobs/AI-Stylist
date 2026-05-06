@@ -8,11 +8,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.db.database import get_db
-from app.services.auth import get_current_user, require_admin
+from app.services.auth import get_current_user, get_current_user_optional, require_admin
 from app.services.trend_scout import (
     BUCKETS,
     fashion_scout_feed,
     latest_trend_cards,
+    rank_cards_for_user,
     run_trend_scout,
 )
 
@@ -77,8 +78,16 @@ async def get_fashion_scout_feed(
     limit: int = Query(default=12, ge=1, le=50),
     language: str | None = Query(default=None, max_length=8),
     country: str | None = Query(default=None, max_length=4),
+    personalized: bool = Query(default=True),
+    user: dict | None = Depends(get_current_user_optional),
 ) -> dict[str, Any]:
     """Newest-first flat feed for the Stylist right-panel news-flash.
+
+    When the request is authenticated and ``personalized`` is true (the
+    default), cards are ranked by relevance to the viewer's
+    demographics (gender / profession / occupation / country) over a
+    wider candidate pool, then sliced to ``limit``. Anonymous (or
+    explicitly opted-out) requests fall back to strict newest-first.
 
     Wrapped in a top-level guard so a transient DB / translator error
     never returns a 500 to the user — we degrade to an empty feed
@@ -86,18 +95,27 @@ async def get_fashion_scout_feed(
     """
     try:
         cards = await fashion_scout_feed(
-            limit=limit, language=language, country=country
+            limit=limit,
+            language=language,
+            country=country,
+            user=user if (user and personalized) else None,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception(
-            "fashion_scout endpoint failed (limit=%s language=%s country=%s): %s",
+            "fashion_scout endpoint failed (limit=%s language=%s country=%s personalized=%s): %s",
             limit,
             language,
             country,
+            personalized,
             exc,
         )
         cards = []
-    return {"cards": cards, "count": len(cards), "language": language or "en"}
+    return {
+        "cards": cards,
+        "count": len(cards),
+        "language": language or "en",
+        "personalized": bool(user and personalized),
+    }
 
 
 @router.post("/run-now")

@@ -136,6 +136,15 @@ class User(BaseDoc):
     # Email address used to receive seller payouts via PayPal Payouts API.
     paypal_receiver_email: str | None = None
 
+    # --- Phase TS-2 (Trend-Scout personalization) ---
+    # Free-text occupation used as a signal when ranking Trend-Scout
+    # cards. Distinct from ``professional.profession`` (which is the
+    # fashion-pro toggle for the /experts directory) — this is the
+    # user's actual day-job, e.g. "marketing manager", "student",
+    # "barista". Optional; absent users get neutral newest-first
+    # ranking.
+    occupation: str | None = None
+
     # --- Professional (Phase U) ----------------------------------------
     # Self-service "is fashion professional?" toggle + business card.
     # When is_professional=True the user appears in the /experts directory
