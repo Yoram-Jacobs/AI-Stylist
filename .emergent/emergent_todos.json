@@ -1,30 +1,22 @@
 [
   {
-    "content": "Backend: ?updated_after + ?ids_only added to GET /closet",
+    "content": "Refactor Marketplace.jsx Browse tab to use useCachedList with browseStore",
     "status": "completed"
   },
   {
-    "content": "Frontend closetStore singleton with prewarm + subscribe + incremental sync + mutations",
+    "content": "Refactor Marketplace.jsx MyListings sub-component to use myListingsStore (with mutation hooks for delete + sync)",
     "status": "completed"
   },
   {
-    "content": "AppLayout prewarms after auth (eager load, before navigation)",
+    "content": "Refactor ExpertsDirectory.jsx to use useCachedList with expertsStore (preserving draft/applied filter pattern)",
     "status": "completed"
   },
   {
-    "content": "Closet.jsx reads from store, filters client-side, no refetch on nav",
+    "content": "Run frontend lint + esbuild to verify no compile errors",
     "status": "completed"
   },
   {
-    "content": "ItemDetail edit + delete patches store; AddItem create patches store",
-    "status": "completed"
-  },
-  {
-    "content": "Home count chip reads from store too (no extra round-trip)",
-    "status": "completed"
-  },
-  {
-    "content": "Verified live: SPA Closet revisits = 0 API calls; instant paint",
-    "status": "completed"
+    "content": "Take screenshots / run frontend testing agent to verify Marketplace & Experts pages render correctly with cached lists and instant nav",
+    "status": "in_progress"
   }
 ]

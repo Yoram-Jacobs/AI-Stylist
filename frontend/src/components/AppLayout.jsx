@@ -6,27 +6,34 @@ import { LanguageSync } from '@/components/LanguageSync';
 import { LocationBanner } from '@/components/LocationBanner';
 import { useAuth } from '@/lib/auth';
 import { closetStore } from '@/lib/closetStore';
+import { prewarmMarketplace, resetMarketplace } from '@/lib/marketplaceStore';
+import { prewarmExperts, resetExperts } from '@/lib/expertsStore';
 import { Loader2 } from 'lucide-react';
 
 export const AppLayout = () => {
   const { user, loading } = useAuth();
 
-  // Eager closet warm-up.
+  // Eager warm-up for closet, marketplace browse + my-listings, and
+  // experts directory.
   //
-  // We fire ONE /closet fetch the moment auth resolves, **before**
-  // the user navigates anywhere. By the time they tap "Closet" the
-  // store is already hydrated and the page paints instantly. The
-  // prewarm is idempotent — Closet.jsx's own ``useClosetStore`` won't
-  // double-fire it within the FRESH_MS window.
+  // We fire these the moment auth resolves, **before** the user
+  // navigates anywhere. By the time they tap any of those tabs the
+  // store is already hydrated and the page paints instantly. All
+  // prewarms are idempotent + best-effort — failures don't surface
+  // to the UI, the page-driven ``ensure`` call retries.
   //
-  // We also reset the store on logout so a different user's data
+  // We also reset every store on logout so a different user's data
   // never leaks across sessions on the same browser.
   useEffect(() => {
     if (loading) return;
     if (user) {
       closetStore.prewarm().catch(() => {});
+      prewarmMarketplace(user.id).catch(() => {});
+      prewarmExperts().catch(() => {});
     } else {
       closetStore.reset();
+      resetMarketplace();
+      resetExperts();
     }
   }, [user, loading]);
 
