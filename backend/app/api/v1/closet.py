@@ -1168,6 +1168,16 @@ async def list_items(
     # generic "Shared" filter — surfacing the user's actual marketplace
     # decision instead of the catch-all source flag.
     marketplace_intent: MarketplaceIntent | None = Query(default=None),
+    # Phase Z3 — incremental sync. When the frontend already has a
+    # snapshot from a prior call it sends ``updated_after`` (ISO8601)
+    # to fetch ONLY items whose ``updated_at`` (or ``created_at`` for
+    # rows that pre-date the field) is greater than the supplied
+    # timestamp. Lets the closet store stay fresh after a focus event
+    # without re-shipping the full 25 MB grid each time. Combine with
+    # ``?ids_only=1`` to stream just the IDs of currently-existing
+    # items so the client can prune anything deleted.
+    updated_after: str | None = Query(default=None, max_length=40),
+    ids_only: bool = Query(default=False),
     # Default raised from 100 → 500 → 2000 because mid/large closets
     # (300+ items) would silently truncate to the previous default
     # whenever an older frontend bundle was served from cache without
@@ -1183,6 +1193,17 @@ async def list_items(
         query["source"] = source
     if marketplace_intent:
         query["marketplace_intent"] = marketplace_intent
+    if updated_after:
+        # Match either ``updated_at`` (preferred) or ``created_at``
+        # (fallback for legacy rows that never received an
+        # ``updated_at`` write). $or so we don't miss either flavour.
+        query["$or"] = [
+            {"updated_at": {"$gt": updated_after}},
+            {
+                "updated_at": {"$exists": False},
+                "created_at": {"$gt": updated_after},
+            },
+        ]
     if category:
         # Category filter — case-insensitive + synonym aware. Legacy
         # rows in the DB have a mix of Title Case ("Top"), lowercase
@@ -1209,6 +1230,27 @@ async def list_items(
         query["category"] = {"$regex": pattern, "$options": "i"}
     if search:
         query["$text"] = {"$search": search}
+
+    # ``ids_only`` short-circuit. We just need the IDs of currently
+    # existing items so the client store can prune anything deleted
+    # remotely. ~50 KB instead of 25 MB for a 300-item closet.
+    if ids_only:
+        cur = db.closet_items.find(
+            query, {"_id": 0, "id": 1, "updated_at": 1}
+        ).sort("created_at", -1).limit(limit).skip(skip)
+        ids = []
+        async for row in cur:
+            ids.append(row.get("id"))
+        total = await repos.count(db.closet_items, query)
+        return {
+            "items": [],
+            "ids": ids,
+            "total": total,
+            "limit": limit,
+            "skip": skip,
+            "ids_only": True,
+        }
+
     items = await repos.find_many(
         db.closet_items, query, sort=[("created_at", -1)], limit=limit, skip=skip
     )

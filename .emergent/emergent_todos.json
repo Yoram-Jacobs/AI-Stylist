@@ -1,22 +1,30 @@
 [
   {
-    "content": "Refactor SourceTagBadge to accept intent/mode and replace 'Shared' label with For sale / Swap / Donate",
+    "content": "Backend: ?updated_after + ?ids_only added to GET /closet",
     "status": "completed"
   },
   {
-    "content": "Update Closet.jsx + ItemDetail.jsx to pass marketplace_intent",
+    "content": "Frontend closetStore singleton with prewarm + subscribe + incremental sync + mutations",
     "status": "completed"
   },
   {
-    "content": "Update Marketplace.jsx + ListingDetail.jsx to pass listing.mode",
+    "content": "AppLayout prewarms after auth (eager load, before navigation)",
     "status": "completed"
   },
   {
-    "content": "Verify translations for taxonomy.intent.{for_sale,swap,donate}",
+    "content": "Closet.jsx reads from store, filters client-side, no refetch on nav",
     "status": "completed"
   },
   {
-    "content": "Visually verify with screenshot — badges render For sale / Swap / Donate with correct colors",
+    "content": "ItemDetail edit + delete patches store; AddItem create patches store",
+    "status": "completed"
+  },
+  {
+    "content": "Home count chip reads from store too (no extra round-trip)",
+    "status": "completed"
+  },
+  {
+    "content": "Verified live: SPA Closet revisits = 0 API calls; instant paint",
     "status": "completed"
   }
 ]

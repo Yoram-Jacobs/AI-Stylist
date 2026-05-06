@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -23,6 +23,7 @@ import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
+import { useClosetStore } from '@/lib/useClosetStore';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
@@ -37,42 +38,86 @@ const SOURCES = ['all', 'Private', 'for_sale', 'swap', 'donate', 'Retail'];
 const _SOURCE_VALUES = new Set(['Private', 'Shared', 'Retail']);
 const _INTENT_VALUES = new Set(['for_sale', 'swap', 'donate']);
 
-// --- Module-level cache (stale-while-revalidate) -----------------------
-// Navigating away from /closet and back used to re-fetch the entire
-// response (25+ MB once items have reconstructed images). With this
-// cache the grid paints instantly from the last known snapshot and a
-// background refresh replaces it when the server responds.
-const CLOSET_CACHE = {
-  // cache key -> { items, total, ts }
-  entries: new Map(),
-  key(filters) {
-    return `${filters.category}|${filters.source}|${filters.search || ''}`;
-  },
-  get(filters) { return this.entries.get(this.key(filters)); },
-  set(filters, items, total) {
-    this.entries.set(this.key(filters), { items, total, ts: Date.now() });
-  },
-  patch(filters, updater) {
-    const e = this.entries.get(this.key(filters));
-    if (e) e.items = updater(e.items);
-  },
-  invalidate() { this.entries.clear(); },
+// Category synonyms — keep parity with the backend's matcher in
+// closet.list_items so client-side filtering yields the same set of
+// items as a server-side ``?category=`` would. This matters because
+// we now filter the in-memory store rather than re-fetching.
+const _CATEGORY_SYNONYMS = {
+  top:        new Set(['top', 'tops']),
+  bottom:     new Set(['bottom', 'bottoms']),
+  outerwear:  new Set(['outerwear']),
+  shoes:      new Set(['shoes', 'footwear']),
+  accessory:  new Set(['accessory', 'accessories']),
+  dress:      new Set(['dress', 'dresses', 'full body']),
 };
+
+function _matchesCategory(item, requested) {
+  if (!requested || requested === 'all') return true;
+  const synonyms = _CATEGORY_SYNONYMS[requested] || new Set([requested]);
+  const cat = (item?.category || '').toLowerCase();
+  return synonyms.has(cat);
+}
+
+function _matchesSource(item, requested) {
+  if (!requested || requested === 'all') return true;
+  if (_SOURCE_VALUES.has(requested)) return item?.source === requested;
+  if (_INTENT_VALUES.has(requested)) return item?.marketplace_intent === requested;
+  return true;
+}
+
+function _matchesSearch(item, q) {
+  if (!q) return true;
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  // Mirror backend $text loosely: match any substring across the
+  // user-visible string fields. Cheap on a 300-item closet.
+  const haystack = [
+    item?.title, item?.name, item?.category, item?.sub_category,
+    item?.color, item?.brand, item?.material,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(needle);
+}
 
 export default function Closet() {
   const { t } = useTranslation();
+  // Single source of truth: the global closet store. Reading from it
+  // means navigating to /closet paints **instantly** (no network) —
+  // the prewarm in AppLayout has already populated the snapshot.
+  const store = useClosetStore();
   const initialFilters = { category: 'all', source: 'all', search: '' };
-  const initialCached = CLOSET_CACHE.get(initialFilters);
-  const [items, setItems] = useState(initialCached?.items || []);
-  const [total, setTotal] = useState(initialCached?.total || 0);
-  // Only show the big loading skeleton when we have no cached snapshot;
-  // otherwise paint the cached grid immediately and revalidate silently.
-  const [loading, setLoading] = useState(!initialCached);
   const [filters, setFilters] = useState(initialFilters);
   // Search mode: 'keyword' uses Mongo text search, 'meaning' calls FashionCLIP.
   const [searchMode, setSearchMode] = useState('keyword');
-  const [semanticActive, setSemanticActive] = useState(false); // true while the current list is semantic results
+  const [semanticActive, setSemanticActive] = useState(false);
+  const [semanticItems, setSemanticItems] = useState([]);
   const [semanticIndexed, setSemanticIndexed] = useState(0);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+
+  // Apply filters client-side over the store snapshot. Wrapped in a
+  // memo so re-renders triggered by other state (selection, etc.)
+  // don't re-walk a 300-item list unnecessarily.
+  const filteredItems = useMemo(() => {
+    if (semanticActive) return semanticItems;
+    return (store.items || []).filter(
+      (it) =>
+        _matchesCategory(it, filters.category) &&
+        _matchesSource(it, filters.source) &&
+        _matchesSearch(it, filters.search),
+    );
+  }, [store.items, filters.category, filters.source, filters.search, semanticActive, semanticItems]);
+
+  const items = filteredItems;
+  const total = semanticActive
+    ? semanticItems.length
+    : (filters.category === 'all' && filters.source === 'all' && !filters.search
+      ? store.total
+      : filteredItems.length);
+  // Show the skeleton in either of two cases:
+  //   * the store is mid-prewarm and we have no cached items yet
+  //     (very first visit after sign-in), OR
+  //   * a semantic search is in flight (those override ``items``).
+  const loading =
+    (store.loading && (store.items?.length || 0) === 0) || semanticLoading;
 
   // Selection state
   const [selectMode, setSelectMode] = useState(false);
@@ -83,73 +128,62 @@ export default function Closet() {
   const [completionOpen, setCompletionOpen] = useState(false);
   const [completionAnchors, setCompletionAnchors] = useState([]);
 
+  // No-op compat shim. Some downstream code (e.g. the delete handler)
+  // calls ``fetchItems`` after a mutation to refresh the grid; with
+  // the store-based design we instead call ``store.remove`` /
+  // ``store.upsert`` and let React re-render. The shim lets us leave
+  // those code paths untouched while we land this refactor.
   const fetchItems = useCallback(async () => {
-    // Only show the skeleton when we have no cached data to paint.
-    const cached = CLOSET_CACHE.get(filters);
-    if (!cached) setLoading(true);
-    setSemanticActive(false);
-    try {
-      // Explicitly request a high limit so power users with large
-      // closets (>100 items) always get the full set on a single
-      // round-trip. The backend caps at 2000; we ask for the full
-      // headroom so we don't rely on the default-on-the-server
-      // contract — this protects us from any older bundle that
-      // happened to default to 100 still floating around in a CDN
-      // edge cache.
-      const params = { limit: 2000 };
-      if (filters.category !== 'all') params.category = filters.category;
-      // Source filter is now multiplexed: classic source values
-      // (Private/Retail) hit ``?source=…`` while the new intent values
-      // (for_sale/swap/donate) hit ``?marketplace_intent=…`` so the
-      // backend can filter the right field.
-      if (_SOURCE_VALUES.has(filters.source)) {
-        params.source = filters.source;
-      } else if (_INTENT_VALUES.has(filters.source)) {
-        params.marketplace_intent = filters.source;
-      }
-      if (filters.search) params.search = filters.search;
-      const res = await api.listCloset(params);
-      const nextItems = res.items || [];
-      const nextTotal = res.total || 0;
-      setItems(nextItems);
-      setTotal(nextTotal);
-      CLOSET_CACHE.set(filters, nextItems, nextTotal);
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to load closet');
-    } finally { setLoading(false); }
-  }, [filters]);
+    return store.incrementalSync();
+  }, [store]);
 
   const fetchSemantic = useCallback(async (text) => {
-    setLoading(true);
+    setSemanticLoading(true);
     try {
       const res = await api.searchCloset({ text, limit: 48, min_score: 0.18 });
-      setItems(res.items || []);
-      setTotal(res.total || 0);
+      const sItems = res.items || [];
+      setSemanticItems(sItems);
       setSemanticIndexed(res.indexed || 0);
       setSemanticActive(true);
-      if ((res.items || []).length === 0) {
+      if (sItems.length === 0) {
         toast.message('No meaningful matches found \u2014 try different words.');
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Semantic search failed.');
       setSemanticActive(false);
-    } finally { setLoading(false); }
+    } finally { setSemanticLoading(false); }
   }, []);
 
-  useEffect(() => { fetchItems(); }, [filters.category, filters.source, fetchItems]);
-
-  // Debounced live-search for keyword mode — typing updates the
-  // closet grid after ~300 ms of inactivity, matching standard
-  // search-bar UX so the user doesn't have to hit Enter. We
-  // deliberately skip this for ``meaning`` mode because the
-  // semantic search hits an LLM-grade endpoint that's expensive to
-  // call per keystroke; users still submit that one explicitly via
-  // the Search button.
+  // Mount: incremental sync only (the eager prewarm in AppLayout
+  // already populated the store). Filter changes no longer trigger
+  // any network — they re-filter the in-memory list. This is the
+  // core of the "don't fully reload on navigation" UX win.
   useEffect(() => {
-    if (searchMode !== 'keyword') return undefined;
-    // Skip the initial mount fire for empty searches — the main
-    // ``fetchItems`` effect above already runs on mount.
-    const handle = setTimeout(() => { fetchItems(); }, 300);
+    store.incrementalSync().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refresh on focus / visibility — picks up changes the user made
+  // in another tab. Throttled inside the store itself.
+  useEffect(() => {
+    const onFocus = () => { store.incrementalSync().catch(() => {}); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onFocus();
+    });
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced semantic-search trigger; keyword search is now purely
+  // client-side over the store snapshot, so no network involvement.
+  useEffect(() => {
+    if (searchMode !== 'meaning') return undefined;
+    const q = filters.search.trim();
+    if (!q) return undefined;
+    const handle = setTimeout(() => { fetchSemantic(q); }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.search, searchMode]);
@@ -217,16 +251,16 @@ export default function Closet() {
     } else {
       toast.error('Could not delete the selected items');
     }
-    // Remove successfully deleted items from UI; refresh total to be safe.
+    // Drop deleted items from the global store so every page sees
+    // the change immediately (Closet, AddItem duplicate-check,
+    // Stylist picker). We let the periodic incremental sync reconcile
+    // ``total`` rather than firing a full refetch.
     const okIds = new Set(
-      ids.filter((_, idx) => results[idx].status === 'fulfilled')
+      ids.filter((_, idx) => results[idx].status === 'fulfilled'),
     );
-    setItems((prev) => prev.filter((it) => !okIds.has(it.id)));
-    CLOSET_CACHE.patch(filters, (arr) => arr.filter((it) => !okIds.has(it.id)));
+    okIds.forEach((id) => store.remove(id));
     setSelected(new Set());
     setSelectMode(false);
-    // Reconcile total in the background.
-    fetchItems();
   };
 
   const onCardClick = (e, item) => {

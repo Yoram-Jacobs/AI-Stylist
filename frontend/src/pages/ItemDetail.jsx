@@ -504,6 +504,12 @@ export default function ItemDetail() {
       const updated = await api.updateItem(id, patch);
       setItem(updated);
       setForm(toFormState(updated, user));
+      // Sync to the global store so navigating back to /closet shows
+      // the edited fields without a refetch.
+      try {
+        const { closetStore } = await import('@/lib/closetStore');
+        closetStore.upsert(updated);
+      } catch { /* non-blocking */ }
       toast.success(t('itemDetail.detailsSaved'));
       // Per UX spec: after a successful edit, take the user back
       // to the closet so they immediately see the updated item in
@@ -644,6 +650,12 @@ export default function ItemDetail() {
   const onDelete = async () => {
     try {
       await api.deleteItem(id);
+      // Drop from the global store so /closet reflects the deletion
+      // immediately without a refetch.
+      try {
+        const { closetStore } = await import('@/lib/closetStore');
+        closetStore.remove(id);
+      } catch { /* non-blocking */ }
       toast.success(t('itemDetail.deleted'));
       nav('/closet');
     } catch (err) {
