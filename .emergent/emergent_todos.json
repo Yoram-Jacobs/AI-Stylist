@@ -1,14 +1,30 @@
 [
   {
-    "content": "Add defensive patches to trend_scout (already done) — bundled for redeploy",
+    "content": "Backend: add occupation field to User schema + UpdateUserIn DTO",
     "status": "completed"
   },
   {
-    "content": "Fix Stylist page error: missing TrendingUp lucide import",
+    "content": "Backend: add personalized ranking to trend_scout (gender/profession/occupation/country)",
     "status": "completed"
   },
   {
-    "content": "Trend-Scout: drop unreliable hallucinated images and add clickable source link on each card",
+    "content": "Backend: wire optional auth into /trends/fashion-scout to apply ranking when user present",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: add Occupation input to ProfileDetailsCard",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: Home.jsx now fetches /fashion-scout?limit=4 (top 4 personalized cards)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend: bump FashionScoutPanel to fetch ~30 cards (full daily set, filtered)",
+    "status": "completed"
+  },
+  {
+    "content": "Verify everything via screenshots",
     "status": "completed"
   }
 ]

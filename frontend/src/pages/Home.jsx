@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/lib/auth';
 import { useClosetStore } from '@/lib/useClosetStore';
+import { useLocation as useAppLocation } from '@/lib/location';
 import { api } from '@/lib/api';
 import { AdTicker } from '@/components/AdTicker';
 import { LanguagePicker } from '@/components/LanguagePicker';
@@ -59,21 +60,39 @@ const BUCKET_VISUALS = {
 const DEFAULT_BUCKET_VISUAL = { Icon: Sparkles, tone: 'bg-secondary/60' };
 
 export default function Home() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const closet = useClosetStore();
+  const loc = useAppLocation();
   const isAdmin = (user?.roles || []).includes('admin');
   const [counts, setCounts] = useState(null);
   const [trends, setTrends] = useState(null); // null = loading, [] = empty, [...]
   const [trendDate, setTrendDate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Resolve language + country for the personalized fashion-scout
+  // call. Same pattern the Stylist FashionScoutPanel uses so both
+  // surfaces hit the same cache key. The endpoint also picks up the
+  // logged-in user automatically (auth header) and re-ranks the
+  // candidate pool by the viewer's gender/profession/occupation.
+  const language = (user?.preferred_language || i18n.language || 'en')
+    .split('-')[0]
+    .toLowerCase();
+  const country =
+    (loc?.country_code || user?.home_location?.country_code || '')
+      .toString()
+      .toUpperCase() || null;
+
   // Pulled into a callback so the admin "🔄 refresh" button can re-fetch
   // the same trends without duplicating logic. The ``setTrends(null)``
   // gate keeps the skeletons visible during the LLM run (~5–10 s).
   const fetchTrends = async () => {
     try {
-      const res = await api.trendsLatest(1);
+      // Top 4 personalized cards. The backend uses our auth header to
+      // rank a wider candidate pool against the user's demographics
+      // and slices to limit=4 — we don't need to send any extra
+      // ranking hints from the client.
+      const res = await api.fashionScoutFeed(4, { language, country });
       if (res?.cards?.length) {
         setTrends(res.cards);
         setTrendDate(res.cards[0]?.date || null);
@@ -256,9 +275,9 @@ export default function Home() {
             ) : null}
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="home-trend-scout-feed">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="home-trend-scout-feed">
           {trends === null
-            ? Array.from({ length: 3 }).map((_, i) => (
+            ? Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-40 w-full rounded-[calc(var(--radius)+6px)]" />
               ))
             : (trends.length > 0 ? trends : FALLBACK_TRENDS).map((card, i) => {

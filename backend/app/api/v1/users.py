@@ -46,6 +46,9 @@ class UpdateUserIn(BaseModel):
     # --- Phase 4P: PayPal payouts ---
     paypal_receiver_email: str | None = None
 
+    # --- Phase TS-2 (Trend-Scout personalization) ---
+    occupation: str | None = None
+
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)) -> dict[str, Any]:

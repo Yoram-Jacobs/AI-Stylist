@@ -190,6 +190,7 @@ export function ProfileDetailsCard() {
       date_of_birth: user?.date_of_birth || '',
       sex: user?.sex || '',
       personal_status: user?.personal_status || '',
+      occupation: user?.occupation || '',
       address: {
         line1: user?.address?.line1 || '',
         line2: user?.address?.line2 || '',
@@ -277,6 +278,7 @@ export function ProfileDetailsCard() {
         date_of_birth: form.date_of_birth || null,
         sex: form.sex || null,
         personal_status: form.personal_status || null,
+        occupation: form.occupation || null,
         address: prune(form.address),
         units: { weight: wUnit, length: lUnit },
         face_photo_url: form.face_photo_url || null,
@@ -559,6 +561,31 @@ export function ProfileDetailsCard() {
                       ))}
                     </SelectContent>
                   </Select>
+                </Field>
+                {/* Free-text occupation. Distinct from the
+                    "Professional" toggle below — that one is a
+                    fashion-pro flag for the /experts directory.
+                    Occupation is the user's actual day-job (e.g.
+                    "marketing manager", "barista", "student") and
+                    feeds the Trend-Scout personalization ranker so
+                    the home/stylist feeds skew toward content
+                    relevant to their working life. */}
+                <Field
+                  label={t('profile.occupation', { defaultValue: 'Occupation' })}
+                  htmlFor="f-occupation"
+                >
+                  <Input
+                    id="f-occupation"
+                    value={form.occupation}
+                    onChange={(e) => setField('occupation', e.target.value)}
+                    placeholder={t('profile.occupationPlaceholder', {
+                      defaultValue: 'e.g. Marketing manager, Student, Barista',
+                    })}
+                    maxLength={80}
+                    autoComplete="organization-title"
+                    className="rounded-xl"
+                    data-testid="profile-field-occupation"
+                  />
                 </Field>
               </div>
             </AccordionContent>
