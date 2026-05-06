@@ -198,7 +198,15 @@ function toFormState(item, user = null) {
     condition: item.condition || '',
     quality: item.quality || '',
     repair_advice: item.repair_advice || '',
-    price_cents: item.price_cents ?? '',
+    // Whole-unit pricing in the UI: store the form value in
+    // currency *units* (e.g. ``29`` for ₪29) and let ``diffPatch``
+    // convert back to cents on save. The previous flow exposed raw
+    // cents in the input and re-saved them as cents, which meant
+    // typing "100" intending $100 ended up storing 100 cents = $1
+    // — the symptom users reported as "the system divides my price
+    // by 100". Defaulting to 0 also drops the awkward "—"/empty
+    // initial state.
+    price_cents: Math.round(Number(item.price_cents ?? 0) / 100),
     currency: item.currency || 'USD',
     marketplace_intent: item.marketplace_intent || 'own',
     formality: item.formality || '',
@@ -240,11 +248,15 @@ function diffPatch(loaded, form, user = null) {
       }
       continue;
     }
-    // price_cents: user types dollars in the UI; convert before send.
+    // price_cents: form holds whole currency units (e.g. ``29`` for
+    // ₪29) — the wire format is cents, so multiply by 100. We also
+    // diff against the loaded value re-projected into the same
+    // whole-unit space so a no-op edit stays out of the patch body.
     if (key === 'price_cents') {
-      const parsed = b === '' || b == null ? null : Math.round(Number(b));
-      if (parsed !== a) {
-        out[key] = Number.isFinite(parsed) ? parsed : null;
+      const aUnits = a === '' || a == null ? null : Math.round(Number(a));
+      const bUnits = b === '' || b == null ? null : Math.round(Number(b));
+      if (bUnits !== aUnits) {
+        out[key] = Number.isFinite(bUnits) ? bUnits * 100 : null;
       }
       continue;
     }
@@ -1212,14 +1224,32 @@ export default function ItemDetail() {
             <CardContent className="p-5 space-y-3">
               <div className="caps-label text-muted-foreground">{t('itemDetail.edit.sectionPricing')}</div>
               <div className="grid grid-cols-3 gap-3">
-                <Field label={t('itemDetail.edit.priceCents')} htmlFor="f-price">
+                <Field
+                  label={`${t('itemDetail.edit.priceCents', { defaultValue: 'Price' })} (${form.currency || 'USD'})`}
+                  htmlFor="f-price"
+                >
                   <Input
                     id="f-price"
                     type="number"
                     min="0"
                     step="1"
-                    value={form.price_cents}
-                    onChange={(e) => setField('price_cents', e.target.value)}
+                    inputMode="numeric"
+                    // Integer-only: whole currency units. The form
+                    // value lives in units (e.g. ``29`` for ₪29) and
+                    // ``diffPatch`` re-multiplies by 100 on save —
+                    // see the ``price_cents`` branch in diffPatch
+                    // for why fractional cents are deliberately
+                    // dropped from the UI.
+                    value={form.price_cents === '' || form.price_cents == null ? 0 : form.price_cents}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw && !/^\d*$/.test(raw)) return;
+                      setField(
+                        'price_cents',
+                        raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0),
+                      );
+                    }}
+                    placeholder="0"
                     className="rounded-xl"
                     data-testid="item-edit-field-price_cents"
                   />
