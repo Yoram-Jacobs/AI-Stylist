@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped + Phase O Wave 1 shipped: Stylist Brain migrated to Qwen-VL w/ Gemini fallback)**
+# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped + Phase O Wave O.1 shipped + SPA eager-load caching shipped)**
 
 ## 1) Objectives
 
@@ -62,6 +62,23 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 - ✅ End-to-end verified:
   - Qwen brain completion observed at ~**19.5s**
   - Full `/api/v1/stylist` call observed at ~**42s** total in preview environment
+
+### ✅ SPA zero-delay navigation (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
+**Objective achieved:** Main directory pages no longer re-fetch/flash spinners on SPA back/forward navigation.
+
+- ✅ Introduced a lightweight cached-store layer (`createCachedStore.js`) with:
+  - eager prewarm
+  - stale-while-revalidate
+  - bounded LRU caching
+  - mutation helpers (invalidate / upsert / remove)
+- ✅ Closet: `closetStore.js` eager-loaded + incremental sync support.
+- ✅ Marketplace: `marketplaceStore.js` (browseStore + myListingsStore) wired into `Marketplace.jsx`.
+- ✅ Experts: `expertsStore.js` wired into `ExpertsDirectory.jsx` with a **draft/applied** filter pattern (typing doesn’t spam network).
+- ✅ `AppLayout.jsx` prewarms all three stores at boot and resets on logout.
+- ✅ Verified via frontend testing agent (`iteration_19`):
+  - instant returns to `/market` and `/experts`
+  - stale-while-revalidate works
+  - no console errors attributable to app code
 
 ---
 
@@ -223,10 +240,8 @@ Delivered previously; unchanged.
 
 ---
 
-### Phase O — Stylist Provider Migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
-
-#### Marketplace Stability Hotfix (v1.1.2 candidate) — **SHIPPED**
-Out-of-band hotfix wave for the user-reported "items stuck on Private / can't delete listing" regressions. All bugs reproduced via direct unit-style scripts and validated via testing-agent run iteration_18.
+### Marketplace Stability Hotfix (v1.1.2 candidate) — **SHIPPED**
+Out-of-band hotfix wave for the user-reported "items stuck on Private / can't delete listing" regressions. All bugs reproduced and validated.
 
 **Backend (shipped)**
 - ✅ `DELETE /api/v1/listings/{id}` is now coordinated cleanup:
@@ -237,17 +252,49 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
   - flips closet item `source` → `Private` on intent revert (unless caller passed an explicit `source`)
   - clears `auto_listing_id` + `auto_listing_needs_completion`
   - retires `reserved` listings too (was previously only `draft|active`)
-- ✅ `create_item` (POST /api/v1/closet) now writes `auto_created=True` on the auto-created listing (was missing — caused intent-revert teardown to silently no-op for items created with intent already set, since the retire query filters on `auto_created=True`).
-- ✅ Backfill + auto-list paths now map garment condition (`excellent` / `bad`) to listing condition vocab (`like_new` / `fair`). Previously items with `condition='excellent'` failed Pydantic validation and were silently counted as `failed` in the backfill response.
+- ✅ `create_item` (POST /api/v1/closet) now writes `auto_created=True` on the auto-created listing (fixes intent-revert teardown).
+- ✅ Backfill + auto-list paths now map garment condition (`excellent` / `bad`) to listing condition vocab (`like_new` / `fair`).
 
 **Frontend (shipped)**
-- ✅ `Marketplace.jsx` → `MyListings`: per-card **Remove listing** button (with confirm dialog) + top-bar **Sync from closet** button that calls the backfill endpoint and surfaces `created / skipped / source_synced` counts in a toast. Cards now also show `mode · status`.
-- ✅ `ListingDetail.jsx` owner view: **Remove from marketplace** button alongside the existing "Manage in mine" CTA.
+- ✅ `Marketplace.jsx` → `MyListings`: per-card **Remove listing** button + top-bar **Sync from closet** button.
+- ✅ `ListingDetail.jsx` owner view: **Remove from marketplace** button.
 - ✅ `lib/api.js`: new `backfillMarketplaceListings()` helper.
 
 **Verification**
-- ✅ Backend: `iteration_18` testing agent run — 100% pass on marketplace sync flows after fix.
-- ✅ Local repro scripts (intent-revert, backfill, delete-listing) all pass.
+- ✅ Backend: `iteration_18` testing agent run — 100% pass.
+
+---
+
+### SPA eager-load caching (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
+
+#### Cache layer + stores — **SHIPPED**
+**Files:**
+- ✅ `app/frontend/src/lib/createCachedStore.js`
+- ✅ `app/frontend/src/lib/closetStore.js`
+- ✅ `app/frontend/src/lib/marketplaceStore.js`
+- ✅ `app/frontend/src/lib/expertsStore.js`
+
+**What shipped**
+- ✅ Stale-while-revalidate list stores with bounded LRU.
+- ✅ Mutation helpers (`invalidate`, `upsertItem`, `removeItem`).
+- ✅ `AppLayout.jsx` prewarm on auth resolve; reset on logout.
+
+#### Page integrations — **SHIPPED**
+- ✅ `Closet.jsx` (already shipped earlier) uses `closetStore`.
+- ✅ `Marketplace.jsx` uses `browseStore` + `myListingsStore` via `useCachedList`.
+- ✅ `ExpertsDirectory.jsx` uses `expertsStore` via `useCachedList` with draft/applied filters.
+
+#### Verification — **SHIPPED**
+- ✅ Frontend testing agent `iteration_19` — 100% pass on:
+  - browse filter switching
+  - tab switching
+  - `/market → /closet → /market` instant return
+  - `/experts → /home → /experts` instant return
+  - experts search/apply/clear behavior
+
+---
+
+### Phase O — Stylist Provider Migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
 
 #### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
 
@@ -258,11 +305,11 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
   - base64 image support via data URIs
   - JSON response mode via `response_format={type:"json_object"}`
   - connect-only retries/backoff
-  - 60s read timeout (no retry on read timeouts to stay inside gateway limits)
+  - 60s read timeout
 - ✅ New `app/backend/app/services/stylist_brain.py`:
   - `QwenStylistBrain` (primary)
   - `GeminiStylistBrain` (adapter)
-  - `FallbackBrain` (silent fallback on Qwen failures)
+  - `FallbackBrain` (silent fallback)
   - future slot reserved for `GemmaStylistBrain`
 - ✅ New env vars (documented in `backend/.env.example` and wired in `config.py`):
   - `STYLIST_PROVIDER` (default `qwen`)
@@ -272,30 +319,33 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
   - `QWEN_BRAIN_MODEL` (default `qwen-vl-max-latest`)
   - `QWEN_EYES_MODEL` (default `qwen-vl-plus`)
 - ✅ Integration points updated:
-  - `services/logic.py` now resolves stylist brain via `stylist_brain_service()`
-  - the old hard error “Gemini not configured” is removed; provider factory selects available providers
-  - provider name is stored as `advice._meta.stylist_brain` (string) rather than inside latency dict (which is typed as ints)
-
-**Verification (observed in preview)**
-- ✅ Direct DashScope smoke test succeeded
-- ✅ `stylist_brain_service().advise(...)` returns clean JSON with 2 outfit options
-- ✅ `/api/v1/stylist` endpoint returns valid advice JSON
+  - `services/logic.py` resolves stylist brain via `stylist_brain_service()`
+  - provider name stored as `advice._meta.stylist_brain`
 
 **Known notes**
-- Qwen responses are slower than Gemini in some cases; timeouts are handled by fallback provider when configured.
+- Qwen responses can be slower than Gemini; fallbacks handle timeouts when configured.
 
-#### Wave O.2 — Migrate garment_vision Eyes + Brain to Qwen-VL — **NEXT**
-- Migrate `garment_vision.py` (1246 lines; feeds AddItem) to call:
-  - Eyes tier: `qwen-vl-plus`
-  - Brain tier: `qwen-vl-max-latest`
-- Maintain JSON output contract compatibility with:
-  - segmentation/background-removal pipeline
-  - closet item card parsing
-  - duplicate detection pre-flight pipeline
-- Add careful validation:
-  - golden image fixtures
-  - prompt hardening + schema validation
-  - regression tests via curl/scripts
+#### Wave O.2 — Migrate AddItem garment_vision “Eyes” + “Brain” to Qwen-VL — **NEXT (P0/P1)**
+**Goal:** Fully migrate the AddItem multimodal pipeline off Gemini.
+
+**Where to resume**
+- `app/backend/app/services/garment_vision.py`
+
+**Implementation outline**
+1. Replace Gemini multimodal calls with DashScope Qwen-VL:
+   - Eyes tier: `qwen-vl-plus`
+   - Brain tier: `qwen-vl-max-latest`
+2. Maintain JSON output contract compatibility with:
+   - segmentation/background-removal pipeline
+   - closet item card parsing
+   - duplicate detection pre-flight pipeline
+3. Add careful validation:
+   - golden image fixtures
+   - prompt hardening + schema validation
+   - regression tests via curl/scripts
+
+**Testing**
+- Backend-only validation + targeted integration tests (curl/scripts).
 
 #### Wave O.3 — Add Gemma4-E4B fine-tune into provider chain — **LATER (blocked on hosting)**
 - Host the fine-tuned Gemma4-E4B on a 24/7 inference platform (HF Inference Endpoints / Modal / Runpod).
@@ -354,6 +404,13 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 - ✅ Environment URLs:
   - Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
   - Explicit `APP_PUBLIC_URL` overrides derivation (prod lock).
+
+### SPA eager-load caching (Closet + Marketplace + Experts)
+- ✅ App boot prewarms Closet, Marketplace (browse + my listings), and Experts.
+- ✅ Returning to `/closet`, `/market`, `/experts` shows cached results immediately (no spinner/skeleton flash).
+- ✅ Filters apply correctly and do not cause infinite re-fetch loops.
+- ✅ Mutations properly invalidate/update caches (e.g., delete listing removes from My Listings and browse invalidates).
+- ✅ Verified via frontend testing agent `iteration_19`.
 
 ### Phase O — Stylist provider migration
 - ✅ Wave O.1:

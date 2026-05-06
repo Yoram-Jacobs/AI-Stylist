@@ -17,6 +17,6 @@
   },
   {
     "content": "Take screenshots / run frontend testing agent to verify Marketplace & Experts pages render correctly with cached lists and instant nav",
-    "status": "in_progress"
+    "status": "completed"
   }
 ]
