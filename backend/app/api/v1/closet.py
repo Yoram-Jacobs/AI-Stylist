@@ -2375,6 +2375,17 @@ async def update_item(
     open_listing = False
     chosen_mode = "swap"  # safe default for the source-only path
     chosen_price_cents = 0
+    # Honour the currency on the closet item itself — fall back to the
+    # patched value, then the loaded item, then USD as a last resort.
+    # Without this the auto-listing flow used to hardcode USD even
+    # when the user picked ILS / EUR / etc on the closet card, so the
+    # marketplace card showed "$10" instead of "₪10".
+    chosen_currency = (
+        patch.get("currency")
+        or updated.get("currency")
+        or (prior or {}).get("currency")
+        or "USD"
+    )
     if new_source == "Shared" and prior_source != "Shared":
         open_listing = True
     if new_intent in _MARKETPLACE_INTENTS and prior_intent not in _MARKETPLACE_INTENTS:
@@ -2414,11 +2425,21 @@ async def update_item(
                     existing.get("auto_created")
                     and chosen_mode != existing.get("mode")
                 ):
+                    # Recompute fees for the new (price, currency)
+                    # tuple so the marketplace card stays consistent
+                    # — without this an item that flipped from
+                    # ``swap`` → ``for_sale`` kept its old $0 price
+                    # and stale fee rows.
+                    fees = compute_fees(chosen_price_cents)
                     await db.listings.update_one(
                         {"id": existing["id"]},
                         {"$set": {
                             "mode": chosen_mode,
+                            "currency": chosen_currency,
                             "financial_metadata.list_price_cents": chosen_price_cents,
+                            "financial_metadata.currency": chosen_currency,
+                            "financial_metadata.platform_fee_percent": 7.0,
+                            "financial_metadata.estimated_seller_net_cents": fees.seller_net_cents,
                             "updated_at": datetime.now(timezone.utc).isoformat(),
                         }},
                     )
@@ -2459,6 +2480,11 @@ async def update_item(
                     updated.get("condition") or updated.get("state") or "good"
                 )
                 listing_condition = _COND_MAP.get(raw_cond, "good")
+                # Compute fees up-front so the marketplace card shows
+                # the right "you receive" hint immediately. Without
+                # this the listing went out with platform_fee=0 and
+                # seller_net=0 — confusing on cards/checkouts.
+                fees = compute_fees(chosen_price_cents)
                 listing = Listing(
                     closet_item_id=item_id,
                     seller_id=user["id"],
@@ -2471,11 +2497,12 @@ async def update_item(
                     condition=listing_condition,
                     images=images,
                     location=updated.get("location"),
+                    currency=chosen_currency,
                     financial_metadata=FinancialMetadata(
                         list_price_cents=chosen_price_cents,
-                        currency="USD",
-                        platform_fee_percent=0.0,
-                        estimated_seller_net_cents=0,
+                        currency=chosen_currency,
+                        platform_fee_percent=7.0,
+                        estimated_seller_net_cents=fees.seller_net_cents,
                     ),
                     auto_created=True,
                     status="active",
@@ -2561,6 +2588,71 @@ async def update_item(
             logger.warning(
                 "auto-retire failed for closet item %s: %s", item_id, exc,
             )
+
+    else:
+        # No marketplace transition this update — but the user might
+        # still have edited price / currency on an item that's
+        # already published. Sync those changes onto the linked
+        # listing so the marketplace card reflects the new values
+        # immediately. Without this, an ILS-priced item created when
+        # the listing was first auto-spawned would show "$10" on the
+        # marketplace forever even after the user later corrected
+        # the currency on the item card.
+        price_or_currency_changed = (
+            "price_cents" in patch or "currency" in patch
+        )
+        was_listed = (
+            (prior or {}).get("source") == "Shared"
+            or ((prior or {}).get("marketplace_intent") or "own")
+            in _MARKETPLACE_INTENTS
+        )
+        if price_or_currency_changed and was_listed:
+            try:
+                existing = await db.listings.find_one(
+                    {
+                        "closet_item_id": item_id,
+                        "seller_id": user["id"],
+                        "auto_created": True,
+                        "status": {"$in": ["draft", "active"]},
+                    },
+                    {"_id": 0, "id": 1, "mode": 1},
+                )
+                if existing:
+                    # ``for_sale`` listings carry a real price; swap /
+                    # donate listings stay at 0 regardless of what's
+                    # on the closet item, so a user fiddling with
+                    # price on a swap listing doesn't accidentally
+                    # publish a price for a non-sale item.
+                    if existing.get("mode") == "sell":
+                        synced_price = int(
+                            patch.get("price_cents")
+                            or updated.get("price_cents")
+                            or 0
+                        )
+                    else:
+                        synced_price = 0
+                    fees = compute_fees(synced_price)
+                    await db.listings.update_one(
+                        {"id": existing["id"]},
+                        {"$set": {
+                            "currency": chosen_currency,
+                            "financial_metadata.list_price_cents": synced_price,
+                            "financial_metadata.currency": chosen_currency,
+                            "financial_metadata.platform_fee_percent": 7.0,
+                            "financial_metadata.estimated_seller_net_cents": fees.seller_net_cents,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }},
+                    )
+                    logger.info(
+                        "synced listing %s for closet item %s "
+                        "(price_cents=%s currency=%s)",
+                        existing["id"], item_id, synced_price, chosen_currency,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "listing sync failed for closet item %s: %s",
+                    item_id, exc,
+                )
 
     return updated
 

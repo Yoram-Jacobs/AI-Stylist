@@ -239,7 +239,7 @@ export default function ListingDetail() {
               <div className="caps-label text-muted-foreground">{t('market.feeBreakdown')}</div>
               <dl className="mt-3 text-sm space-y-2">
                 <div className="flex justify-between"><dt className="text-muted-foreground">{t('market.listPrice')}</dt><dd>{fmt(fm.list_price_cents, fm.currency)}</dd></div>
-                <div className="flex justify-between"><dt className="text-muted-foreground">{t('market.processingFee')}</dt><dd>− {fmt(fm.stripe_processing_fee_fixed_cents)} + 2.9%</dd></div>
+                <div className="flex justify-between"><dt className="text-muted-foreground">{t('market.processingFee')}</dt><dd>− {fmt(fm.stripe_processing_fee_fixed_cents, fm.currency)} + 2.9%</dd></div>
                 <div className="flex justify-between"><dt className="text-muted-foreground">{t('market.platformFee')}</dt><dd></dd></div>
                 <div className="flex justify-between font-medium border-t border-border pt-2"><dt>{t('market.sellerNet')}</dt><dd>{fmt(fm.estimated_seller_net_cents, fm.currency)}</dd></div>
               </dl>
@@ -248,13 +248,18 @@ export default function ListingDetail() {
 
           {isOwner ? (
             <div className="space-y-2" data-testid="listing-owner-actions">
-              <Button asChild variant="secondary" className="w-full rounded-xl" data-testid="listing-edit-button">
-                <Link to={`/market`}>{t('market.manageInMine')}</Link>
-              </Button>
               {/* Owner-only "Remove from marketplace" CTA. Hard-deletes
                   the listing AND resets the linked closet item back to
                   Private/own (atomic on the backend), so the closet
-                  card flips to Private on next render. */}
+                  card flips to Private on next render.
+
+                  NOTE: A "Manage in My listings" link used to live
+                  here but it just bounced the user back to the
+                  marketplace tab without any actual editing surface,
+                  so it was removed per user feedback. Editing of
+                  price/currency/intent happens on the closet item's
+                  detail page (the source of truth) — the listing
+                  inherits those values automatically. */}
               <Button
                 variant="ghost"
                 className="w-full rounded-xl text-rose-700 hover:text-rose-800 hover:bg-rose-50"

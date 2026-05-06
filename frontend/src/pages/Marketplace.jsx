@@ -168,9 +168,23 @@ export default function Marketplace() {
                         <SourceTagBadge source={l.source} mode={l.mode} />
                       </div>
                       <div className="mt-1 flex items-center justify-between">
-                        <div className="font-display text-lg">{fmt(l.financial_metadata?.list_price_cents)}</div>
+                        <div className="font-display text-lg">
+                          {/* Honour the listing's own currency rather
+                              than silently defaulting to USD — items
+                              are now created with whatever currency
+                              the user picked on the closet card. */}
+                          {fmt(
+                            l.financial_metadata?.list_price_cents,
+                            l.financial_metadata?.currency || l.currency,
+                          )}
+                        </div>
                         <div className="text-[11px] text-muted-foreground">
-                          {t('market.netShort', { amount: fmt(l.financial_metadata?.estimated_seller_net_cents) })}
+                          {t('market.netShort', {
+                            amount: fmt(
+                              l.financial_metadata?.estimated_seller_net_cents,
+                              l.financial_metadata?.currency || l.currency,
+                            ),
+                          })}
                         </div>
                       </div>
                       {typeof l.distance_km === 'number' ? (

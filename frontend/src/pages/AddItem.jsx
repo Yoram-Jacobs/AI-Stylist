@@ -86,7 +86,12 @@ const blankFields = () => ({
   gender: '', dress_code: '', season: [], tradition: '',
   colors: [], fabric_materials: [], pattern: '',
   state: '', condition: '', quality: '',
-  size: '', price_cents: '', price_input: '',
+  // Price defaults to 0 (whole-unit display) — was empty before
+  // which surfaced as "—" everywhere downstream and forced users
+  // through an awkward "first time you set a price" path. ``currency``
+  // defaults to USD but ItemDetail lets the user change it later;
+  // the marketplace card now honours whatever's on the item.
+  size: '', price_cents: 0, currency: 'USD',
   marketplace_intent: 'own',
   repair_advice: '',
   tags: [],
@@ -1483,40 +1488,39 @@ function IntentSelector({ fields, onChange, disabled }) {
       {intent === 'for_sale' && (
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" data-testid="add-item-fee-preview">
           <div>
-            <Label className="caps-label text-muted-foreground">{t('addItem.price')} (USD)</Label>
+            <Label className="caps-label text-muted-foreground">
+              {t('addItem.price')} ({fields.currency || 'USD'})
+            </Label>
             <Input
               type="text"
-              inputMode="decimal"
+              inputMode="numeric"
+              pattern="[0-9]*"
               autoComplete="off"
-              // Use a separate string draft so the user's literal typing
-              // is preserved verbatim. Writing back ``price_cents`` and
-              // reformatting on every keystroke (the previous
-              // implementation) caused "12" → "0.12" mid-typing because
-              // the value rerendered before the user finished. We keep
-              // ``price_cents`` updated alongside so the save path and
-              // fee preview keep working unchanged.
+              // Whole-unit pricing: the input represents currency
+              // *units* (e.g. ``100`` = $100 / ₪100), no fractional
+              // cents. We still persist as ``price_cents`` on the
+              // wire so all downstream fee math stays in cents — the
+              // ×100 happens in the change handler. Fractions were
+              // intentionally dropped after users reported the
+              // previous decimal flow felt like the system "divided
+              // their price by 100" (typing 100 in ItemDetail saved
+              // it as 100 cents = $1). Whole-unit semantics are now
+              // identical between AddItem and ItemDetail.
               value={
-                fields.price_input ??
-                (fields.price_cents
-                  ? (Number(fields.price_cents) / 100).toFixed(2)
-                  : '')
+                fields.price_cents != null && fields.price_cents !== ''
+                  ? String(Math.round(Number(fields.price_cents) / 100))
+                  : '0'
               }
               onChange={(e) => {
                 const raw = e.target.value;
-                // Permit only digits + a single decimal separator. This
-                // is friendlier than ``type="number"`` (which rejects
-                // intermediate "12." states) but still blocks letters.
-                if (raw && !/^\d*([.,]\d{0,2})?$/.test(raw)) return;
-                const normalised = raw.replace(',', '.');
-                onChange({
-                  price_input: raw,
-                  price_cents:
-                    normalised && !isNaN(parseFloat(normalised))
-                      ? Math.round(parseFloat(normalised) * 100)
-                      : '',
-                });
+                // Integer-only: drop anything that isn't a digit. An
+                // empty field collapses to 0 so the user can never
+                // accidentally save a "no price" listing.
+                if (raw && !/^\d*$/.test(raw)) return;
+                const units = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0);
+                onChange({ price_cents: units * 100 });
               }}
-              placeholder="0.00"
+              placeholder="0"
               disabled={disabled}
               data-testid="add-item-price"
               className="mt-1 rounded-xl"
@@ -1722,8 +1726,8 @@ function buildCreatePayload(card) {
     condition: f.condition || undefined,
     quality: f.quality || undefined,
     repair_advice: f.repair_advice || undefined,
-    price_cents: f.price_cents === '' || f.price_cents == null ? undefined : Number(f.price_cents),
-    currency: 'USD',
+    price_cents: f.price_cents === '' || f.price_cents == null ? 0 : Number(f.price_cents),
+    currency: f.currency || 'USD',
     marketplace_intent: f.marketplace_intent || 'own',
     tags: f.tags || [],
     image_base64: asBase64 || undefined,
