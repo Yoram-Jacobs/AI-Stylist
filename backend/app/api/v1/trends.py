@@ -1,6 +1,7 @@
 """/api/v1/trends \u2014 read + admin trigger endpoints for the Trend-Scout."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,8 @@ from app.services.trend_scout import (
     latest_trend_cards,
     run_trend_scout,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/trends", tags=["trends"])
 
@@ -75,10 +78,25 @@ async def get_fashion_scout_feed(
     language: str | None = Query(default=None, max_length=8),
     country: str | None = Query(default=None, max_length=4),
 ) -> dict[str, Any]:
-    """Newest-first flat feed for the Stylist right-panel news-flash."""
-    cards = await fashion_scout_feed(
-        limit=limit, language=language, country=country
-    )
+    """Newest-first flat feed for the Stylist right-panel news-flash.
+
+    Wrapped in a top-level guard so a transient DB / translator error
+    never returns a 500 to the user — we degrade to an empty feed
+    instead and log the underlying cause for support triage.
+    """
+    try:
+        cards = await fashion_scout_feed(
+            limit=limit, language=language, country=country
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "fashion_scout endpoint failed (limit=%s language=%s country=%s): %s",
+            limit,
+            language,
+            country,
+            exc,
+        )
+        cards = []
     return {"cards": cards, "count": len(cards), "language": language or "en"}
 
 
