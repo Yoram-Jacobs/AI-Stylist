@@ -140,6 +140,49 @@ def color_signature(image_data) -> Optional[str]:
         return None
 
 
+def compute_signatures(image_data) -> tuple[str | None, str | None]:
+    """Decode the image once and return both an aHash and a colour
+    signature. Used by the lazy backfill in /preflight where decoding
+    is by far the dominant cost — calling ``average_hash`` and
+    ``color_signature`` separately re-decodes the same data URL twice
+    per row, which on a 300-item closet adds up to multi-second
+    request latency. This helper halves that.
+    """
+    img = _decode_to_pil(image_data)
+    if img is None:
+        return (None, None)
+    ph: str | None = None
+    cs: str | None = None
+    try:
+        small = img.convert("L").resize(
+            (_HASH_SIZE, _HASH_SIZE), Image.Resampling.LANCZOS
+        )
+        arr = np.asarray(small, dtype=np.uint8)
+        avg = arr.mean()
+        bits = (arr > avg).flatten().astype(np.uint8)
+        ph = np.packbits(bits).tobytes().hex()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("phash compute failed: %s", exc)
+    try:
+        small = img.resize((16, 16), Image.Resampling.LANCZOS)
+        arr = np.asarray(small, dtype=np.uint8)
+        cell = 16 // _COLOR_GRID
+        out: list[int] = []
+        for gy in range(_COLOR_GRID):
+            for gx in range(_COLOR_GRID):
+                block = arr[
+                    gy * cell : (gy + 1) * cell,
+                    gx * cell : (gx + 1) * cell,
+                    :,
+                ]
+                mean = block.reshape(-1, 3).mean(axis=0).astype(np.uint8)
+                out.extend(int(c) for c in mean)
+        cs = bytes(out).hex()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("color signature compute failed: %s", exc)
+    return (ph, cs)
+
+
 def hamming_distance(a: str | None, b: str | None) -> int:
     """Hamming bit-distance between two 16-char hex digests. Returns
     a sentinel (65) for any malformed input so callers can treat it
