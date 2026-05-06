@@ -414,8 +414,7 @@ async def preflight_duplicates(
          backfill happens in the background as users use the app.
     """
     from app.services.image_hash import (
-        average_hash,
-        color_signature,
+        compute_signatures,
         is_duplicate_match,
     )
 
@@ -458,18 +457,39 @@ async def preflight_duplicates(
     async for row in cursor:
         candidates.append(row)
 
-    # Lazy phash + colour-sig backfill: any candidate missing either
-    # gets one computed from whichever stored image we can find. The
-    # first /preflight call after deployment may touch every legacy
-    # row, so we cap parallelism implicitly by doing this synchronously
-    # in a single request (~5 ms per row, total < 1.5 s for a 200-item
-    # closet). Subsequent calls hit the cached values.
+    # Lazy phash + colour-sig backfill, **bounded by both row count
+    # and wall-clock** so a large closet (300+ items) with big inline
+    # thumbnails doesn't block the upload flow on a multi-second PIL
+    # decode storm. Each row that's missing a hash contributes
+    # ~30–500 ms (the decode dominates and scales with thumbnail size,
+    # which on production can be a multi-MB original image). An
+    # uncapped backfill on a 300-item closet measured ~3 minutes in
+    # production — turning a 1 s upload pre-flight into a UX-breaking
+    # wait.
+    #
+    # We process up to ``_BACKFILL_CAP_PER_REQUEST`` rows OR
+    # ``_BACKFILL_TIME_BUDGET_S`` seconds, whichever comes first
+    # (iteration order = Mongo insertion order, i.e. most recent
+    # uploads first). Rows we skip stay un-backfilled this round and
+    # are picked up on subsequent calls. Net: monotonic convergence
+    # with bounded latency.
+    _BACKFILL_CAP_PER_REQUEST = 50
+    _BACKFILL_TIME_BUDGET_S = 5.0
+    import time as _time
+    _start = _time.monotonic()
     backfill_writes: list[tuple[str, dict[str, str]]] = []
+    backfill_remaining = 0
     for row in candidates:
         patch: dict[str, str] = {}
         needs_phash = not row.get("source_phash")
         needs_color = not row.get("source_color_sig")
         if not needs_phash and not needs_color:
+            continue
+        if (
+            len(backfill_writes) >= _BACKFILL_CAP_PER_REQUEST
+            or (_time.monotonic() - _start) >= _BACKFILL_TIME_BUDGET_S
+        ):
+            backfill_remaining += 1
             continue
         src = (
             row.get("thumbnail_data_url")
@@ -478,18 +498,24 @@ async def preflight_duplicates(
         )
         if not src:
             continue
-        if needs_phash:
-            ph = average_hash(src)
-            if ph:
-                row["source_phash"] = ph
-                patch["source_phash"] = ph
-        if needs_color:
-            cs = color_signature(src)
-            if cs:
-                row["source_color_sig"] = cs
-                patch["source_color_sig"] = cs
+        # Decode ONCE per row and produce whichever signature(s) the
+        # row is missing. Halves request latency on large closets vs
+        # decoding twice.
+        ph_new, cs_new = compute_signatures(src)
+        if needs_phash and ph_new:
+            row["source_phash"] = ph_new
+            patch["source_phash"] = ph_new
+        if needs_color and cs_new:
+            row["source_color_sig"] = cs_new
+            patch["source_color_sig"] = cs_new
         if patch:
             backfill_writes.append((row["id"], patch))
+    if backfill_remaining:
+        logger.info(
+            "preflight: backfilled %d rows in %.2fs; %d more deferred (user=%s)",
+            len(backfill_writes), _time.monotonic() - _start,
+            backfill_remaining, user["id"],
+        )
     # Persist backfilled hashes in one bulk update so future
     # /preflight calls skip the recompute.
     if backfill_writes:
