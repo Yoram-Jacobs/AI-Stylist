@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, CloudSun, Calendar, ArrowRight, RefreshCw } from 'lucide-react';
+import { Sparkles, CloudSun, Calendar, ArrowRight, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -149,14 +149,39 @@ export default function Home() {
 
       <section className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="home-kpis">
         {[
-          { label: t('home.piecesInCloset'), value: counts?.closet ?? '—', href: '/closet' },
-          { label: t('home.activeListings'), value: counts?.market ?? '—', href: '/market' },
-          { label: t('home.platformFee'), value: '7%', sub: t('home.platformFeeSub') },
+          {
+            label: t('home.piecesInCloset'),
+            value: counts?.closet ?? '—',
+            href: '/closet',
+            // Closet count is sourced from the global closet store
+            // (eager-prewarmed by AppLayout). While the very first
+            // /closet fetch is still in flight we show a spinner in
+            // place of "—" so the user gets clear feedback that the
+            // count is loading rather than zero/unknown.
+            loading: !closet.lastFullSync && (closet.loading || counts === null),
+            testId: 'home-kpi-closet',
+          },
+          { label: t('home.activeListings'), value: counts?.market ?? '—', href: '/market', loading: counts === null, testId: 'home-kpi-market' },
+          { label: t('home.platformFee'), value: '7%', sub: t('home.platformFeeSub'), testId: 'home-kpi-fee' },
         ].map((k) => (
-          <Card key={k.label} className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
+          <Card key={k.label} className="rounded-[calc(var(--radius)+6px)] shadow-editorial" data-testid={k.testId}>
             <CardContent className="p-5">
               <div className="caps-label text-muted-foreground">{k.label}</div>
-              <div className="mt-2 font-display text-4xl">{k.value}</div>
+              <div className="mt-2 font-display text-4xl min-h-[2.75rem] flex items-center">
+                {k.loading ? (
+                  <span
+                    className="inline-flex items-center gap-2 text-muted-foreground"
+                    data-testid={`${k.testId}-loading`}
+                    aria-live="polite"
+                    aria-busy="true"
+                  >
+                    <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+                    <span className="text-sm font-sans">{t('common.loading', { defaultValue: 'Loading…' })}</span>
+                  </span>
+                ) : (
+                  <span data-testid={`${k.testId}-value`}>{k.value}</span>
+                )}
+              </div>
               {k.sub && <div className="text-xs text-muted-foreground mt-1">{k.sub}</div>}
               {k.href && (
                 <Link to={k.href} className="inline-flex items-center text-sm text-[hsl(var(--accent))] mt-3">
