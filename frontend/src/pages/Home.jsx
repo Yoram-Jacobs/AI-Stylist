@@ -2,7 +2,21 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, CloudSun, Calendar, ArrowRight, RefreshCw, Loader2 } from 'lucide-react';
+import {
+  Sparkles,
+  CloudSun,
+  Calendar,
+  ArrowRight,
+  RefreshCw,
+  Loader2,
+  ExternalLink,
+  Crown,
+  Footprints,
+  Leaf,
+  Users,
+  Recycle,
+  Newspaper,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,6 +36,27 @@ const FALLBACK_TRENDS = [
   { id: 'fb-2', label: 'Street', headline: 'The quiet-luxe swap', summary: 'Logos out, fabric in: cashmere crewnecks over merino roll-necks dominate weekends.' },
   { id: 'fb-3', label: 'Sustainability', headline: 'Swap before you shop', summary: 'Community swap rooms grew 3x year-over-year; retailers are finally listening.' },
 ];
+
+// Per-bucket visual treatment for Trend-Scout cards.
+//
+// The underlying ``image_url`` field returned by the API is generated
+// by the LLM and is NOT a reliable representation of the article
+// content (it's a plausible-looking but hallucinated stock photo).
+// Showing those mis-leads the user, so we drop the image entirely and
+// substitute a small bucket icon in a tinted header band. The icon
+// gives the card a recognisable identity without lying about what
+// the article is about. The source link below the body lets readers
+// jump to the actual article when one is provided.
+const BUCKET_VISUALS = {
+  'ss26-runway':  { Icon: Crown,      tone: 'bg-secondary/60' },
+  street:         { Icon: Footprints, tone: 'bg-secondary/60' },
+  sustainability: { Icon: Leaf,       tone: 'bg-secondary/60' },
+  influencers:    { Icon: Users,      tone: 'bg-secondary/60' },
+  second_hand:    { Icon: Recycle,    tone: 'bg-secondary/60' },
+  recycling:      { Icon: Recycle,    tone: 'bg-secondary/60' },
+  news_flash:     { Icon: Newspaper,  tone: 'bg-secondary/60' },
+};
+const DEFAULT_BUCKET_VISUAL = { Icon: Sparkles, tone: 'bg-secondary/60' };
 
 export default function Home() {
   const { t } = useTranslation();
@@ -242,7 +277,10 @@ export default function Home() {
                 const chip = card.label || _prettyBucket(card.bucket) || card.tag;
                 const headline = card.headline || card.title;
                 const body = card.summary || card.body || card.blurb;
-                const image = card.image_url;
+                const sourceUrl = card.source_url;
+                const sourceName = card.source_name;
+                const visual = BUCKET_VISUALS[card.bucket] || DEFAULT_BUCKET_VISUAL;
+                const BucketIcon = visual.Icon;
                 const key = card.id || `${chip || 'trend'}-${headline || i}`;
                 return (
                   <motion.div
@@ -252,26 +290,46 @@ export default function Home() {
                     transition={{ delay: i * 0.05 }}
                     data-testid="home-trend-scout-card"
                   >
-                    <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial h-full overflow-hidden">
-                      {image ? (
-                        <div className="aspect-[16/9] bg-secondary overflow-hidden">
-                          <img
-                            src={image}
-                            alt={headline || ''}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        </div>
-                      ) : null}
-                      <CardContent className="p-5">
+                    <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial h-full overflow-hidden flex flex-col">
+                      {/* Bucket-themed header band — replaces the
+                          previously-rendered ``image_url`` (which was an
+                          LLM-hallucinated stock photo and didn't actually
+                          represent the article). The icon + chip give the
+                          card a recognisable identity without misleading
+                          the reader about the content. */}
+                      <div
+                        className={`flex items-center gap-2 px-5 py-3 border-b border-border ${visual.tone}`}
+                        data-testid="home-trend-scout-card-header"
+                      >
+                        <span className="inline-flex items-center justify-center h-7 w-7 rounded-full bg-card border border-border text-[hsl(var(--accent))]">
+                          <BucketIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
                         {chip ? (
-                          <div className="caps-label text-[hsl(var(--accent))]">{chip}</div>
+                          <div className="caps-label text-foreground/80 truncate">{chip}</div>
                         ) : null}
+                      </div>
+                      <CardContent className="p-5 flex-1 flex flex-col">
                         {headline ? (
-                          <h3 className="font-display text-xl mt-2 leading-tight">{headline}</h3>
+                          <h3 className="font-display text-xl leading-tight">{headline}</h3>
                         ) : null}
                         {body ? (
                           <p className="text-sm text-muted-foreground mt-3">{body}</p>
+                        ) : null}
+                        {sourceUrl ? (
+                          <a
+                            href={sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-auto pt-4 inline-flex items-center gap-1.5 text-xs text-[hsl(var(--accent))] hover:underline focus-visible:underline focus-visible:outline-none"
+                            data-testid="home-trend-scout-card-source"
+                          >
+                            <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                            <span className="truncate">
+                              {sourceName
+                                ? t('home.trendReadAt', { source: sourceName, defaultValue: `Read at ${sourceName}` })
+                                : t('home.trendReadSource', { defaultValue: 'Read source' })}
+                            </span>
+                          </a>
                         ) : null}
                       </CardContent>
                     </Card>
