@@ -230,6 +230,13 @@ class ClosetItem(BaseDoc):
     # ``thumbnail_data_url`` / ``segmented_image_url`` / etc. on the
     # first /preflight call that touches the row.
     source_phash: str | None = None
+    # Phase Z2.2 — 24-byte RGB colour signature (48 hex chars), 4
+    # quadrants × 3 channels averaged. Used together with
+    # ``source_phash`` so two same-shape garments of different colours
+    # (navy vs grey shorts of the same cut) are not mis-flagged as
+    # duplicates of each other. Optional + lazily backfilled like
+    # ``source_phash``.
+    source_color_sig: str | None = None
     # Set to ``True`` when the user explicitly approved adding a photo
     # the pre-flight flagged as a duplicate. The closet UI overlays a
     # red ⭐ on these cards, and the Stylist Brain filters them out of

@@ -8,17 +8,17 @@ Used by /closet/preflight to detect duplicate uploads even when:
   * the user takes a slightly different shot of the same garment
     (similar angle, similar lighting).
 
-Implementation: a 64-bit average-hash (aHash). Cheap (~3 ms per image
-on a typical pod), no extra dependencies — only Pillow + numpy, both
-already in requirements.txt. Hamming distance ≤ 6 bits ≈ "the same
-garment in a similar pose".
+Implementation: a 64-bit average-hash (aHash) PLUS a small RGB colour
+signature so two same-shape garments of *different colours* (e.g. navy
+shorts vs grey shorts) are NOT flagged as duplicates. Cheap (~3 ms per
+image on a typical pod), no extra dependencies — only Pillow + numpy,
+both already in requirements.txt.
 
-We intentionally avoid pHash (DCT-based) here. aHash is more
-forgiving with subtle colour shifts (lighting changes between two
-shots of the same garment) which is the workflow we care about, and
-it's significantly faster — important for the on-the-fly backfill
-inside /preflight which may need to hash 50-200 thumbnails in a single
-request.
+Match decision:
+  * Hamming distance ≤ 6 bits on the shape hash, AND
+  * Manhattan distance ≤ ``DEFAULT_COLOR_THRESHOLD`` on the colour
+    signature (sum of |Δr| + |Δg| + |Δb| over the 4 quadrants,
+    each channel 0–255 = max 4 × 255 × 3 = 3060).
 """
 
 from __future__ import annotations
@@ -43,6 +43,14 @@ _HASH_SIZE = 8
 # even after JPEG re-compression". Higher = more matches but more
 # false positives.
 DEFAULT_HAMMING_THRESHOLD = 6
+
+# Colour signature: average RGB per quadrant → 4 quadrants × 3 channels
+# = 12 bytes = 24 hex chars. Manhattan distance is on the raw byte
+# values (0–255). 220 ≈ "noticeably different colour family" empirically:
+# navy↔grey scores ~600+, two photos of the same navy garment under
+# different lighting score ~80–150.
+_COLOR_GRID = 2  # 2x2 grid of quadrants
+DEFAULT_COLOR_THRESHOLD = 220
 
 
 _DATA_URL_RE = re.compile(r"^data:image/[^;]+;base64,(.*)$", re.I)
@@ -94,6 +102,44 @@ def average_hash(image_data) -> Optional[str]:
         return None
 
 
+def color_signature(image_data) -> Optional[str]:
+    """Compute a coarse RGB colour signature: average colour per
+    quadrant (2x2 grid), packed as 12 bytes = 24 hex chars.
+
+    The phash above throws away colour by converting to greyscale —
+    that's intentional for matching the *same garment* across
+    lighting changes, but it's the reason a navy and a grey pair of
+    shorts of the same cut produce near-identical hashes. The colour
+    signature recovers enough chroma information to tell those apart
+    without sacrificing the phash's robustness.
+    """
+    img = _decode_to_pil(image_data)
+    if img is None:
+        return None
+    try:
+        # Resize to a tiny grid then read average colour per cell.
+        # 16x16 is large enough to be representative but small enough
+        # that the operation is sub-millisecond.
+        small = img.resize((16, 16), Image.Resampling.LANCZOS)
+        arr = np.asarray(small, dtype=np.uint8)  # shape (16, 16, 3)
+        cell = 16 // _COLOR_GRID  # 8
+        out: list[int] = []
+        for gy in range(_COLOR_GRID):
+            for gx in range(_COLOR_GRID):
+                block = arr[
+                    gy * cell : (gy + 1) * cell,
+                    gx * cell : (gx + 1) * cell,
+                    :,
+                ]
+                # Per-channel mean → 3 ints (0–255 each)
+                mean = block.reshape(-1, 3).mean(axis=0).astype(np.uint8)
+                out.extend(int(c) for c in mean)
+        return bytes(out).hex()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("color signature compute failed: %s", exc)
+        return None
+
+
 def hamming_distance(a: str | None, b: str | None) -> int:
     """Hamming bit-distance between two 16-char hex digests. Returns
     a sentinel (65) for any malformed input so callers can treat it
@@ -106,3 +152,59 @@ def hamming_distance(a: str | None, b: str | None) -> int:
         return (ai ^ bi).bit_count()
     except ValueError:
         return 65
+
+
+def color_distance(a: str | None, b: str | None) -> int:
+    """Manhattan distance between two colour signatures (24 hex chars
+    each). Returns a sentinel (10_000) for malformed input. Range:
+    0 (identical) to 4 × 3 × 255 = 3060 (full spectrum apart).
+
+    We use Manhattan over Euclidean because each channel is bounded
+    and the threshold is easier to reason about: ~220 ≈ "different
+    colour family across the garment surface".
+    """
+    if not a or not b or len(a) != len(b):
+        return 10_000
+    try:
+        ab = bytes.fromhex(a)
+        bb = bytes.fromhex(b)
+    except ValueError:
+        return 10_000
+    return int(sum(abs(int(x) - int(y)) for x, y in zip(ab, bb, strict=False)))
+
+
+def is_duplicate_match(
+    sha_a: str | None,
+    sha_b: str | None,
+    phash_a: str | None,
+    phash_b: str | None,
+    color_a: str | None,
+    color_b: str | None,
+    *,
+    hamming_threshold: int = DEFAULT_HAMMING_THRESHOLD,
+    color_threshold: int = DEFAULT_COLOR_THRESHOLD,
+) -> bool:
+    """Single source of truth for "are these two images duplicates?".
+
+    Decision tree:
+      1. Exact SHA-256 match → duplicate (re-upload of the exact bytes).
+      2. Shape similar (Hamming ≤ threshold) AND
+         (no colour sigs available OR colour distance ≤ threshold) → duplicate.
+      3. Otherwise → not a duplicate.
+
+    Rule (2)'s colour gate is the fix for "navy shorts flagged as a
+    duplicate of grey shorts of the same cut". When *neither* side has
+    a colour signature we fall back to phash-only behaviour for
+    backwards compatibility with rows that pre-date the colour-sig
+    backfill.
+    """
+    if sha_a and sha_b and sha_a == sha_b:
+        return True
+    if not phash_a or not phash_b:
+        return False
+    if hamming_distance(phash_a, phash_b) > hamming_threshold:
+        return False
+    # Shape says "match"; gate on colour if we have it.
+    if color_a and color_b:
+        return color_distance(color_a, color_b) <= color_threshold
+    return True

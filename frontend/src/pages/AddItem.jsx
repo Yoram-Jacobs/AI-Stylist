@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
-import { sha256File, aHashFile } from '@/lib/utils';
+import { sha256File, aHashFile, colorSignatureFile } from '@/lib/utils';
 import DuplicatePreflightDialog from '@/components/DuplicatePreflightDialog';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
@@ -227,17 +227,24 @@ export default function AddItem() {
     // ----------------------------------------------------------------
     const fingerprints = await Promise.all(
       files.map(async (f) => {
-        // Compute both hashes in parallel — sha256 catches exact-byte
-        // re-uploads (post-Z2 items), aHash catches visual duplicates
-        // including legacy items whose original bytes weren't stored.
-        const [sha256, phash] = await Promise.all([
+        // Compute all three fingerprints in parallel:
+        //   * sha256       → exact-byte re-upload (post-Z2 items)
+        //   * aHash        → shape similarity (survives JPEG re-compression)
+        //   * colour sig   → chroma signature so two same-shape garments
+        //                    of *different* colours (navy vs grey shorts)
+        //                    are correctly distinguished. Without this the
+        //                    aHash alone produced false-positive duplicate
+        //                    flags reported on dressapp.co.
+        const [sha256, phash, color_sig] = await Promise.all([
           sha256File(f),
           aHashFile(f),
+          colorSignatureFile(f),
         ]);
         return {
           file: f,
           sha256,
           phash,
+          color_sig,
           filename: f.name || null,
           size_bytes: typeof f.size === 'number' ? f.size : null,
         };
@@ -251,6 +258,7 @@ export default function AddItem() {
         .map((fp) => ({
           sha256: fp.sha256 || null,
           phash: fp.phash || null,
+          color_sig: fp.color_sig || null,
           filename: fp.filename,
           size_bytes: fp.size_bytes,
         }));
@@ -415,6 +423,7 @@ export default function AddItem() {
           // backend can persist them on the ClosetItem document.
           sourceSha256: fp.sha256 || null,
           sourcePhash: fp.phash || null,
+          sourceColorSig: fp.color_sig || null,
           sourceFilename: fp.filename || null,
           sourceSizeBytes: fp.size_bytes || null,
           isDuplicate: !!isDup,
@@ -1722,6 +1731,7 @@ function buildCreatePayload(card) {
     // card knows whether to paint the red ⭐ overlay.
     source_sha256: card.sourceSha256 || undefined,
     source_phash: card.sourcePhash || undefined,
+    source_color_sig: card.sourceColorSig || undefined,
     source_filename: card.sourceFilename || undefined,
     source_size_bytes:
       typeof card.sourceSizeBytes === 'number' ? card.sourceSizeBytes : undefined,

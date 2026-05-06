@@ -121,6 +121,12 @@ class CreateItemIn(BaseModel):
     # path as sha256. Catches re-uploads even when the bytes differ
     # (e.g. JPEG re-compression). Optional.
     source_phash: str | None = None
+    # Phase Z2.2 — 24-byte RGB colour signature (48 hex chars)
+    # computed in-browser via colorSignatureFile. Used together with
+    # ``source_phash`` to distinguish two same-shape garments of
+    # different colours (e.g. navy shorts vs grey shorts) that the
+    # luminance-only phash cannot tell apart on its own.
+    source_color_sig: str | None = None
     # Set when the user explicitly approves a photo the pre-flight
     # flagged as already in their closet. Closet card renders a red ⭐
     # and the Stylist Brain skips it during outfit composition.
@@ -232,6 +238,7 @@ async def create_item(
         source_filename=payload.source_filename,
         source_size_bytes=payload.source_size_bytes,
         source_phash=payload.source_phash,
+        source_color_sig=payload.source_color_sig,
         is_duplicate=payload.is_duplicate,
     )
     doc = item.model_dump()
@@ -239,14 +246,20 @@ async def create_item(
     # Phase Z2.1 — if the client didn't compute a phash (older client,
     # camera capture, etc.) AND we have raw bytes here, compute one
     # server-side so this item is immediately searchable by /preflight
-    # without waiting for the lazy backfill cycle.
-    if not doc.get("source_phash") and raw_bytes:
+    # without waiting for the lazy backfill cycle. We compute the
+    # colour signature on the same condition for the same reason.
+    if raw_bytes:
         try:
-            from app.services.image_hash import average_hash
+            from app.services.image_hash import average_hash, color_signature
 
-            ph = average_hash(raw_bytes)
-            if ph:
-                doc["source_phash"] = ph
+            if not doc.get("source_phash"):
+                ph = average_hash(raw_bytes)
+                if ph:
+                    doc["source_phash"] = ph
+            if not doc.get("source_color_sig"):
+                cs = color_signature(raw_bytes)
+                if cs:
+                    doc["source_color_sig"] = cs
         except Exception:  # noqa: BLE001
             pass
 
@@ -364,8 +377,14 @@ class PreflightPhotoIn(BaseModel):
     # after JPEG re-compression / resizing. Optional — the frontend
     # computes it via canvas + the in-browser hashing helper.
     phash: str | None = None
+    # Phase Z2.2 — 48-char hex colour signature (4 quadrants × 3
+    # channels). Used together with ``phash`` so two same-shape
+    # garments of *different* colours (e.g. navy vs grey shorts) are
+    # not mis-flagged as duplicates. Optional; absence = phash-only
+    # behaviour.
+    color_sig: str | None = None
     # Optional, surfaced back to the UI so the dialog can show
-    # "IMG_1742.jpg looks like a duplicate of \u2026".
+    # "IMG_1742.jpg looks like a duplicate of …".
     filename: str | None = None
     size_bytes: int | None = None
 
@@ -395,9 +414,9 @@ async def preflight_duplicates(
          backfill happens in the background as users use the app.
     """
     from app.services.image_hash import (
-        DEFAULT_HAMMING_THRESHOLD,
         average_hash,
-        hamming_distance,
+        color_signature,
+        is_duplicate_match,
     )
 
     db = get_db()
@@ -428,6 +447,7 @@ async def preflight_duplicates(
             "original_image_url": 1,
             "source_sha256": 1,
             "source_phash": 1,
+            "source_color_sig": 1,
             "source_filename": 1,
             "source_size_bytes": 1,
             "is_duplicate": 1,
@@ -438,15 +458,18 @@ async def preflight_duplicates(
     async for row in cursor:
         candidates.append(row)
 
-    # Lazy phash backfill: any candidate missing source_phash gets
-    # one computed from whichever stored image we can find. The first
-    # /preflight call after deployment may touch every legacy row, so
-    # we cap parallelism implicitly by doing this synchronously in a
-    # single request (~3 ms per row, total < 1 s for a 200-item
-    # closet). Subsequent calls hit the cached hash.
-    backfill_writes: list[tuple[str, str]] = []
+    # Lazy phash + colour-sig backfill: any candidate missing either
+    # gets one computed from whichever stored image we can find. The
+    # first /preflight call after deployment may touch every legacy
+    # row, so we cap parallelism implicitly by doing this synchronously
+    # in a single request (~5 ms per row, total < 1.5 s for a 200-item
+    # closet). Subsequent calls hit the cached values.
+    backfill_writes: list[tuple[str, dict[str, str]]] = []
     for row in candidates:
-        if row.get("source_phash"):
+        patch: dict[str, str] = {}
+        needs_phash = not row.get("source_phash")
+        needs_color = not row.get("source_color_sig")
+        if not needs_phash and not needs_color:
             continue
         src = (
             row.get("thumbnail_data_url")
@@ -455,10 +478,18 @@ async def preflight_duplicates(
         )
         if not src:
             continue
-        ph = average_hash(src)
-        if ph:
-            row["source_phash"] = ph
-            backfill_writes.append((row["id"], ph))
+        if needs_phash:
+            ph = average_hash(src)
+            if ph:
+                row["source_phash"] = ph
+                patch["source_phash"] = ph
+        if needs_color:
+            cs = color_signature(src)
+            if cs:
+                row["source_color_sig"] = cs
+                patch["source_color_sig"] = cs
+        if patch:
+            backfill_writes.append((row["id"], patch))
     # Persist backfilled hashes in one bulk update so future
     # /preflight calls skip the recompute.
     if backfill_writes:
@@ -468,9 +499,9 @@ async def preflight_duplicates(
             ops = [
                 UpdateOne(
                     {"id": item_id, "user_id": user["id"]},
-                    {"$set": {"source_phash": ph}},
+                    {"$set": patch},
                 )
-                for item_id, ph in backfill_writes
+                for item_id, patch in backfill_writes
             ]
             await db.closet_items.bulk_write(ops, ordered=False)
         except Exception:  # noqa: BLE001
@@ -479,12 +510,18 @@ async def preflight_duplicates(
             # time.
             pass
 
-    # Resolve matches.
+    # Resolve matches using the colour-aware ``is_duplicate_match``
+    # helper. The helper requires shape similarity AND colour
+    # proximity — the fix for "navy shorts mis-flagged as a duplicate
+    # of grey shorts of the same cut" reported on dressapp.co. When
+    # either side lacks a colour signature we fall back to phash-only
+    # for backwards compatibility (relevant only during the brief
+    # window between deploy and the lazy backfill catching up).
     matches: list[dict[str, Any]] = []
     seen_per_photo: set[str] = set()
     for p in payload.photos:
-        # Prefer sha256 exact match — fastest, zero false-positive.
         existing_match: dict[str, Any] | None = None
+        # Pass 1: exact byte match — fastest, zero false-positive.
         if p.sha256:
             existing_match = next(
                 (
@@ -494,12 +531,26 @@ async def preflight_duplicates(
                 ),
                 None,
             )
-        # Fall back to phash within Hamming threshold.
+        # Pass 2: shape + colour. Pick the best (lowest-Hamming) row
+        # among those that satisfy both gates.
         if existing_match is None and p.phash:
+            from app.services.image_hash import (
+                DEFAULT_HAMMING_THRESHOLD,
+                hamming_distance,
+            )
             best_dist = DEFAULT_HAMMING_THRESHOLD + 1
             for r in candidates:
+                if not is_duplicate_match(
+                    p.sha256,
+                    r.get("source_sha256"),
+                    p.phash,
+                    r.get("source_phash"),
+                    p.color_sig,
+                    r.get("source_color_sig"),
+                ):
+                    continue
                 d = hamming_distance(p.phash, r.get("source_phash"))
-                if d <= DEFAULT_HAMMING_THRESHOLD and d < best_dist:
+                if d < best_dist:
                     best_dist = d
                     existing_match = r
 

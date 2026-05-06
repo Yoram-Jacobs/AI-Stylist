@@ -116,3 +116,82 @@ export async function aHashFile(file) {
     return null;
   }
 }
+
+/**
+ * Phase Z2.2 — compute a 24-byte RGB colour signature (4 quadrants ×
+ * 3 channels). Mirrors the backend's `image_hash.color_signature`.
+ *
+ * Why we need it: the aHash above throws away colour by converting
+ * to luminance — that's intentional for matching the *same garment*
+ * across lighting changes, but it's why a navy and a grey pair of
+ * shorts of the same cut produced near-identical hashes. The colour
+ * signature recovers enough chroma information to tell those apart
+ * without sacrificing the aHash's robustness to lighting.
+ *
+ * Output is 48 hex chars (24 bytes). Backend computes Manhattan
+ * distance and rejects matches over `DEFAULT_COLOR_THRESHOLD`.
+ *
+ * @param {File|Blob} file
+ * @returns {Promise<string|null>} 48-char lowercase hex digest
+ */
+export async function colorSignatureFile(file) {
+  if (!file) return null;
+  try {
+    let bmp = null;
+    if (typeof createImageBitmap === "function") {
+      try { bmp = await createImageBitmap(file); } catch (_) { bmp = null; }
+    }
+    if (!bmp) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      bmp = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = reject;
+        im.src = dataUrl;
+      });
+    }
+    // Resize to 16x16 — large enough to be representative, small
+    // enough that the readback is sub-millisecond on mobile.
+    const SIZE = 16;
+    const GRID = 2; // 2x2 grid of quadrants → 4 quadrants × 3 channels
+    const canvas = document.createElement("canvas");
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, 0, 0, SIZE, SIZE);
+    const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
+    const cell = SIZE / GRID; // 8
+    const out = new Uint8Array(GRID * GRID * 3);
+    let outIdx = 0;
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let yy = 0; yy < cell; yy++) {
+          for (let xx = 0; xx < cell; xx++) {
+            const px = ((gy * cell + yy) * SIZE + (gx * cell + xx)) * 4;
+            r += data[px];
+            g += data[px + 1];
+            b += data[px + 2];
+            n += 1;
+          }
+        }
+        out[outIdx++] = Math.round(r / n);
+        out[outIdx++] = Math.round(g / n);
+        out[outIdx++] = Math.round(b / n);
+      }
+    }
+    let hex = "";
+    for (let i = 0; i < out.length; i++) hex += out[i].toString(16).padStart(2, "0");
+    return hex;
+  } catch (_) {
+    return null;
+  }
+}
