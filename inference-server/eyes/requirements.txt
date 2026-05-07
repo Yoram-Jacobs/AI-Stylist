@@ -9,7 +9,7 @@
 # doesn't publish manylinux wheels for Gemma-3-supporting versions,
 # so source compile is the only Debian-compatible path. CPX32 builds
 # it in ~5 min; the layer is then cached for subsequent rebuilds.
-llama-cpp-python==0.3.19
+llama-cpp-python==0.3.22
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4

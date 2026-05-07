@@ -133,12 +133,96 @@ def _ensure_mmproj_present() -> Path | None:
     return Path(p)
 
 
+def _peek_gguf_arch(path: Path) -> dict[str, Any]:
+    """Read the first few KV pairs from a GGUF header to surface the
+    architecture name and tokenizer model BEFORE we hand the file to
+    llama.cpp. llama.cpp's own load failure is a generic "Failed to
+    load model from file" with no detail; this pre-flight makes the
+    real reason ("architecture 'gemma3n' is not supported by this
+    build") obvious in the container log.
+
+    Pure-Python parser of just enough of the GGUF v3 spec to read
+    ``general.architecture`` / ``general.name`` / ``general.quantization_version``.
+    Never raises — returns ``{}`` on any parse hiccup so a malformed
+    metadata block doesn't block the actual load attempt.
+
+    GGUF spec: https://github.com/ggml-org/ggml/blob/master/docs/gguf.md
+    """
+    import struct
+
+    out: dict[str, Any] = {}
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"GGUF":
+                return {"_error": f"not a GGUF file (magic={magic!r})"}
+            (version,) = struct.unpack("<I", f.read(4))
+            (_tensor_count,) = struct.unpack("<Q", f.read(8))
+            (kv_count,) = struct.unpack("<Q", f.read(8))
+            out["_gguf_version"] = version
+            out["_kv_count"] = kv_count
+
+            def read_str() -> str:
+                (n,) = struct.unpack("<Q", f.read(8))
+                return f.read(n).decode("utf-8", errors="replace")
+
+            def skip_value(value_type: int) -> None:
+                # Type IDs per GGUF v3 spec.
+                if value_type in (0, 1, 7):  # uint8, int8, bool
+                    f.read(1)
+                elif value_type in (2, 3):    # uint16, int16
+                    f.read(2)
+                elif value_type in (4, 5, 6):  # uint32, int32, float32
+                    f.read(4)
+                elif value_type in (10, 11, 12):  # uint64, int64, float64
+                    f.read(8)
+                elif value_type == 8:  # string
+                    (n,) = struct.unpack("<Q", f.read(8))
+                    f.read(n)
+                elif value_type == 9:  # array
+                    (inner,) = struct.unpack("<I", f.read(4))
+                    (n,) = struct.unpack("<Q", f.read(8))
+                    for _ in range(n):
+                        skip_value(inner)
+                else:
+                    raise ValueError(f"unknown gguf value type {value_type}")
+
+            for _ in range(min(kv_count, 200)):
+                key = read_str()
+                (value_type,) = struct.unpack("<I", f.read(4))
+                if key in (
+                    "general.architecture",
+                    "general.name",
+                    "general.basename",
+                    "general.quantization_version",
+                    "tokenizer.ggml.model",
+                ):
+                    if value_type == 8:
+                        out[key] = read_str()
+                    elif value_type in (4, 5):
+                        out[key] = struct.unpack("<i" if value_type == 5 else "<I", f.read(4))[0]
+                    else:
+                        skip_value(value_type)
+                else:
+                    skip_value(value_type)
+    except Exception as exc:  # noqa: BLE001
+        out["_parse_error"] = str(exc)
+    return out
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     from llama_cpp import Llama
 
     model_path = _ensure_model_present()
     mmproj_path = _ensure_mmproj_present()
+
+    # Pre-flight metadata sniff. If llama.cpp fails to load the file
+    # below, this log line is what tells us whether the architecture
+    # is the issue (e.g., 'gemma3n' GGUF on a llama-cpp-python build
+    # too old for it) vs a corrupt download vs something else.
+    meta = _peek_gguf_arch(model_path)
+    log.info("gguf metadata: %s", meta)
 
     chat_handler = None
     vision_enabled = False
@@ -154,21 +238,31 @@ async def lifespan(_app: FastAPI):
         model_path, N_THREADS, N_CTX,
     )
     t0 = time.time()
-    llm = Llama(
-        model_path=str(model_path),
-        n_ctx=N_CTX,
-        n_threads=N_THREADS,
-        n_batch=N_BATCH,
-        chat_handler=chat_handler,
-        chat_format="gemma" if chat_handler is None else None,
-        # mmap is faster than read() on a single resident process; on
-        # a 4 GB-RAM CX22 it also lets the kernel reclaim cold pages
-        # under pressure instead of OOM-killing the whole container.
-        use_mmap=True,
-        use_mlock=False,
-        verbose=False,
-        logits_all=False,
-    )
+    try:
+        llm = Llama(
+            model_path=str(model_path),
+            n_ctx=N_CTX,
+            n_threads=N_THREADS,
+            n_batch=N_BATCH,
+            chat_handler=chat_handler,
+            chat_format="gemma" if chat_handler is None else None,
+            # mmap is faster than read() on a single resident process; on
+            # a 4 GB-RAM CX22 it also lets the kernel reclaim cold pages
+            # under pressure instead of OOM-killing the whole container.
+            use_mmap=True,
+            use_mlock=False,
+            verbose=False,
+            logits_all=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Surface the metadata one more time on failure so the user
+        # doesn't have to scroll up — the architecture string is
+        # almost always the smoking gun.
+        log.error(
+            "Llama() init failed for %s. GGUF metadata: %s. Error: %s",
+            model_path, meta, exc,
+        )
+        raise
     _app.state.llm = llm
     _app.state.lock = asyncio.Lock()
     _app.state.vision_enabled = vision_enabled
