@@ -1,0 +1,113 @@
+# syntax=docker/dockerfile:1.4
+#
+# HuggingFace Space — DressApp Eyes (Gemma-4 E2B, Q4_K_M)
+# ========================================================
+# **ARG-FALLBACK VARIANT** — use this if the HF Settings UI refuses to
+# create the ``EYES_HF_TOKEN`` Secret (a known intermittent UI bug).
+#
+# Trade-off: the token is passed as a public-ish Variable (build-arg)
+# and will appear in plaintext in your build logs. That's acceptable
+# for a *Read-only* HF token scoped to a single private repo
+# (``Yoram-Jacobs/dressapp-eyes-gguf``) — but **rotate the token
+# immediately after the first successful build** so the value in the
+# logs becomes useless.
+#
+# How to use:
+# -----------
+# 1. In your HF Space → Settings → "Variables and secrets" → click
+#    **"New variable"** (the *Variables* section, NOT *Secrets*).
+#       Name:  EYES_HF_TOKEN
+#       Value: hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   (your read token)
+# 2. Rename this file from ``Dockerfile.arg-fallback`` to
+#    ``Dockerfile`` in your Space repo (overwrite the existing one).
+# 3. Commit + push. HF auto-rebuilds. The build pulls the GGUF using
+#    the variable, then runtime serves predictions normally.
+# 4. After build succeeds → HF → your account → Settings → Access
+#    Tokens → revoke this token and issue a fresh one.
+#
+# Phase-2 (mmproj) is still toggled the same way as the secret-based
+# Dockerfile: uncomment the second hf_hub_download block once you've
+# pushed ``mmproj-Gemma4E2B-f16.gguf`` to the model repo.
+#
+FROM python:3.11-slim
+
+# Slim toolchain: curl is needed for the runtime healthcheck. We
+# don't ship build-essential/cmake/git here because we install
+# llama-cpp-python from a prebuilt CPU wheel index (see below) and
+# never compile from source — that's what was OOM-killing the build
+# (exit 137) on HF's free-tier sandbox.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /home/user/app
+
+# ---- Python dependencies -------------------------------------------------
+# ``--extra-index-url`` pulls the ``llama-cpp-python`` CPU wheel from
+# the upstream maintainer's feed and falls back to PyPI for the rest.
+COPY requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir --prefer-binary \
+      --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+      -r requirements.txt
+
+# ---- Application code ----------------------------------------------------
+COPY app.py ./app.py
+COPY README.md ./README.md
+
+# ---- Download GGUF at build time (ARG fallback) --------------------------
+# HF Spaces automatically forwards every "Variable" you define under
+# Settings → Variables to Docker as a ``--build-arg`` of the same name.
+# So declaring ``ARG EYES_HF_TOKEN`` here is enough to make the value
+# available during this RUN step.
+#
+# We DELIBERATELY do not bake the value into ``ENV`` — that would
+# persist it inside the final image layer. The ARG goes out of scope
+# after the RUN step finishes, so the runtime container has no
+# knowledge of the token.
+ARG EYES_HF_TOKEN
+
+ENV HF_HUB_ENABLE_HF_TRANSFER=0 \
+    LLAMA_MODEL_PATH=/models/phase6-Q4_K_M.gguf
+
+RUN test -n "$EYES_HF_TOKEN" \
+      || (echo "ERROR: EYES_HF_TOKEN build-arg is empty. Add it as a Variable in Space Settings." && exit 1) \
+ && HF_TOKEN="$EYES_HF_TOKEN" python -c "\
+import os; \
+from huggingface_hub import hf_hub_download; \
+p = hf_hub_download( \
+    repo_id='Yoram-Jacobs/dressapp-eyes-gguf', \
+    filename='phase6-Q4_K_M.gguf', \
+    local_dir='/models', \
+    token=os.environ['HF_TOKEN']); \
+print('downloaded:', p)" \
+ && ls -lh /models \
+ && unset HF_TOKEN
+
+# ---- Phase 2: vision projector (uncomment once mmproj is pushed) ---------
+# ARG EYES_HF_TOKEN
+# RUN HF_TOKEN="$EYES_HF_TOKEN" python -c "\
+# import os; \
+# from huggingface_hub import hf_hub_download; \
+# p = hf_hub_download( \
+#     repo_id='Yoram-Jacobs/dressapp-eyes-gguf', \
+#     filename='mmproj-Gemma4E2B-f16.gguf', \
+#     local_dir='/models', \
+#     token=os.environ['HF_TOKEN']); \
+# print('downloaded mmproj:', p)" \
+#  && unset HF_TOKEN
+# ENV LLAMA_MMPROJ_PATH=/models/mmproj-Gemma4E2B-f16.gguf
+
+# ---- Runtime -------------------------------------------------------------
+ENV LLAMA_THREADS=2 \
+    LLAMA_CTX_SIZE=4096 \
+    LLAMA_N_BATCH=256 \
+    PORT=7860
+
+EXPOSE 7860
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD curl -fsS http://localhost:7860/healthz || exit 1
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
