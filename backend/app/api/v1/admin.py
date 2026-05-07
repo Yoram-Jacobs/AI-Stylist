@@ -241,6 +241,60 @@ async def provider_calls(
     return {"provider": provider, "calls": snap[-limit:], "count": len(snap)}
 
 
+# -------------------- eyes provider toggle --------------------
+# Phase O.3 — runtime override for the closet vision pipeline. Flips
+# the model server between the legacy DashScope Qwen-VL path and the
+# self-hosted Gemma-4 E2B endpoint without a backend restart. The
+# override is persisted in ``config.{_id: 'eyes_provider'}`` and read
+# through a 5-second cache (see ``app.services.eyes_override``).
+@router.get("/eyes")
+async def eyes_status(_: dict = Depends(require_admin)) -> dict[str, Any]:
+    """Snapshot of the active Eyes provider + recent inference calls.
+
+    Combines the persisted override (``config`` collection) with the
+    most-recent ``garment-vision`` provider-activity entries so the
+    Profile UI can show "Gemma — last call ok in 4.2 s" out of the
+    box. No DB write happens here; safe to poll.
+    """
+    from app.services import eyes_override
+
+    snap = await eyes_override.status()
+    recent = provider_activity.snapshot("garment-vision").get("garment-vision", [])
+    last_calls = recent[-5:]  # newest 5 in chronological order
+    return {
+        **snap,
+        "recent_calls": last_calls,
+        "last_call": last_calls[-1] if last_calls else None,
+    }
+
+
+@router.post("/eyes")
+async def eyes_set_override(
+    payload: dict[str, Any],
+    user: dict = Depends(require_admin),
+) -> dict[str, Any]:
+    """Set or clear the Eyes provider override.
+
+    Body::
+
+        { "provider": "gemma" | "qwen" | null }
+
+    A null / missing / empty ``provider`` clears the override and
+    reverts the pod to the env-default. Any non-allowlisted value
+    returns 400 — we deliberately don't silently coerce to keep the
+    audit trail clean.
+    """
+    from app.services import eyes_override
+
+    raw = payload.get("provider") if isinstance(payload, dict) else None
+    by_email = (user.get("email") or "").lower() or None
+    try:
+        new_status = await eyes_override.set_override(raw, by_email=by_email)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return new_status
+
+
 # -------------------- trend-scout --------------------
 @router.get("/trend-scout")
 async def trend_scout_history(

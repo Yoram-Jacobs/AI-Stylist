@@ -15,6 +15,7 @@ import { CalendarConnect } from '@/components/CalendarConnect';
 import { LocationCard } from '@/components/LocationCard';
 import { InviteFriendsButton } from '@/components/InviteFriendsButton';
 import { ProfileDetailsCard } from '@/components/ProfileDetailsCard';
+import { DeveloperPanel } from '@/components/DeveloperPanel';
 import { SUPPORTED_LANGUAGES } from '@/lib/i18n';
 
 const VOICES = [
@@ -260,6 +261,15 @@ export default function Profile() {
               </Button>
             </div>
           </form>
+
+          {/*
+            Admin-only Developer panel. Renders nothing for non-admin
+            users (gate is inside the component) so this block is safe
+            to leave unconditionally mounted.
+          */}
+          <div className="mt-6">
+            <DeveloperPanel user={user} />
+          </div>
         </CardContent>
       </Card>
     </div>
