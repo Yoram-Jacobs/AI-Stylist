@@ -1,0 +1,19 @@
+# DressApp Eyes (Gemma-4 E2B GGUF) — CPU-only Hetzner deploy.
+#
+# llama-cpp-python: Gemma-3 / Gemma-4 E2B architecture support landed
+# after 0.3.5 (Dec 2024). 0.3.16 is the current stable release.
+# We install from the maintainer's prebuilt CPU wheel index so the
+# image build never compiles llama.cpp from source — that keeps the
+# Docker layer ~150 MB instead of pulling in gcc/cmake/build-essential
+# and avoids the 6-8 GB RAM compile peak that broke the HF Spaces
+# deploy. The base image (python:3.11-slim-bookworm in the Dockerfile)
+# matches the manylinux_2_28 ABI the wheel is built against.
+llama-cpp-python==0.3.16
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+huggingface_hub==0.27.0
+# Pillow is only consumed by the Phase-2 Llava chat handler (vision).
+# Keeping it here so an mmproj swap in the future doesn't need a
+# requirements bump on the deployed VPS.
+Pillow==11.0.0

@@ -49,6 +49,53 @@ services:
       retries: 5
     networks: [dress]
 
+  # ---------------------------------------------------------------
+  # DressApp Eyes (Phase O.3) — self-hosted Gemma-4 E2B inference.
+  # Internal-only; reached by the backend at http://eyes:7860 over
+  # the dress network. Caddy never proxies it. Lifts the Qwen-VL
+  # leg of garment_vision.py when EYES_PROVIDER=gemma in .env.
+  #
+  # First boot pulls a 3.4 GB GGUF from HuggingFace (private repo,
+  # auth via EYES_HF_TOKEN). Cached afterwards in eyes-cache, so
+  # subsequent restarts take ~30 s for model load only.
+  # ---------------------------------------------------------------
+  eyes:
+    build:
+      context: ../inference-server/eyes
+      dockerfile: Dockerfile
+    image: dressapp-eyes:latest
+    container_name: dressapp-eyes
+    restart: unless-stopped
+    environment:
+      EYES_HF_TOKEN: ${EYES_HF_TOKEN:-}
+      EYES_API_TOKEN: ${EYES_API_TOKEN:-}
+      # Optional: set in .env once you push the vision projector to
+      # enable the LLaVA chat handler. Until then, Phase 1 is text-only.
+      EYES_MMPROJ_FILE: ${EYES_MMPROJ_FILE:-}
+      LLAMA_THREADS: ${EYES_LLAMA_THREADS:-2}
+      LLAMA_CTX_SIZE: ${EYES_LLAMA_CTX_SIZE:-4096}
+      LLAMA_N_BATCH: ${EYES_LLAMA_N_BATCH:-256}
+    expose:
+      - "7860"
+    # Memory ceiling: Q4_K_M of a ~5B Gemma model resides at ~4 GB.
+    # CX22 users (4 GB total) MUST add swap before bringing this up
+    # (see inference-server/eyes/README.md). CX32 users have 2 GB
+    # headroom and don't need swap. We don't set a hard limit here
+    # because OOM-killing under transient pressure would be worse
+    # than letting the kernel page out cold weights from the mmap.
+    volumes:
+      - eyes-cache:/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7860/healthz"]
+      interval: 30s
+      timeout: 5s
+      # First boot needs ~5–10 min to download the GGUF; after that,
+      # ~30 s to load the cached file. Set start_period to cover the
+      # cold-start case so Docker doesn't keep restarting the container.
+      start_period: 600s
+      retries: 3
+    networks: [dress]
+
   frontend:
     build:
       context: ..
@@ -96,6 +143,7 @@ services:
 volumes:
   model-cache:
   rembg-cache:
+  eyes-cache:
   caddy-data:
   caddy-config:
   caddy-logs:

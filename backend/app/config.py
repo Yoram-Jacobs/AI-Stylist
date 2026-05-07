@@ -212,6 +212,17 @@ class Settings:
     EYES_HF_TOKEN: str | None = (
         os.environ.get("EYES_HF_TOKEN") or None
     )
+    # Bearer secret shared between this backend and the self-hosted Eyes
+    # container (Hetzner deploy). Generated with ``openssl rand -hex 32``
+    # and pasted into both this backend's env and the eyes container's
+    # env. Kept distinct from ``EYES_HF_TOKEN`` so the HF token is never
+    # sent on hot-path inference calls; it's only used by the eyes
+    # container at first boot to pull the GGUF from huggingface.co.
+    # When unset, the request-time auth falls back to ``EYES_HF_TOKEN``
+    # for backwards-compat with the legacy HF Space deploy.
+    EYES_API_TOKEN: str | None = (
+        os.environ.get("EYES_API_TOKEN") or None
+    )
     # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
     # vision is added). Match the timeout to the worst case and let the
     # circuit breaker fall back to Qwen instead of stalling AddItem.

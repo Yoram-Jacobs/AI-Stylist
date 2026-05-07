@@ -1,22 +1,18 @@
 [
   {
-    "content": "HF Space: write revised Dockerfile (Q4_K_M only, drop F16/mmproj) + FastAPI /predict wrapper + requirements.txt + README",
+    "content": "Create /app/inference-server/eyes/ with Dockerfile, main.py, requirements.txt, README",
     "status": "completed"
   },
   {
-    "content": "Backend: add EYES_PROVIDER=gemma|qwen feature flag with EYES_GEMMA_SPACE_URL + EYES_HF_TOKEN config",
+    "content": "Add 'eyes' service to /app/deploy/docker-compose.yml",
     "status": "completed"
   },
   {
-    "content": "Backend: route _hf_chat_json through Gemma Space when flag is set, with auto-fallback to legacy provider on error",
+    "content": "Patch backend garment_vision.py + config.py for EYES_API_TOKEN",
     "status": "completed"
   },
   {
-    "content": "Backend: instrument provider_activity for Gemma OK / fail metrics (dashboard surface)",
-    "status": "completed"
-  },
-  {
-    "content": "Document mmproj gap and Phase 1 → Phase 2 path; provide deploy steps to user",
+    "content": "Lint check + service status",
     "status": "completed"
   }
 ]

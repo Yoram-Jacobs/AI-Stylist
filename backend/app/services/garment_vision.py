@@ -92,11 +92,15 @@ async def _call_gemma_space(
         "json_mode": True,
     }
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    # Token only required for *private* Spaces. Ours is public, but
-    # we still send it when configured so a future flip to private
-    # works without code changes.
-    if settings.EYES_HF_TOKEN:
-        headers["Authorization"] = f"Bearer {settings.EYES_HF_TOKEN}"
+    # Bearer auth between backend and the Eyes service. Prefer the
+    # dedicated EYES_API_TOKEN (used on the self-hosted Hetzner deploy
+    # where the HF token shouldn't be reaching the inference container
+    # on every call); fall back to EYES_HF_TOKEN for the legacy HF
+    # Space deploy where the same token gates both model download and
+    # request auth.
+    bearer = settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
 
     timeout_s = float(
         timeout if timeout is not None else settings.EYES_GEMMA_TIMEOUT_S
