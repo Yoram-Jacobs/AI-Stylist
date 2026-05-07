@@ -54,6 +54,93 @@ def _hf_client(token: str | None, *, base_url: str | None = None) -> Any:
     return _HFInferenceClient(**kwargs)
 
 
+async def _call_gemma_space(
+    *,
+    system_prompt: str,
+    user_text: str,
+    image_b64_jpeg: str,
+    max_tokens: int = 900,
+    temperature: float = 0.1,
+    timeout: float | None = None,
+) -> str:
+    """Phase O.3 — call the self-hosted Gemma-4 E2B HF Space.
+
+    The Space exposes a FastAPI ``/predict`` endpoint that wraps
+    llama-cpp-python. Phase 1 deploys a text-only Q4_K_M (no mmproj),
+    so the image bytes are sent for forward-compat but the Space
+    silently sets ``vision_disabled: true`` until an mmproj-*.gguf is
+    uploaded to the model repo (Phase 2).
+
+    Failures here are surfaced as ``RuntimeError`` so the outer
+    routing in ``_hf_chat_json`` can swap to the Qwen / HF / Gemini
+    fallback. That keeps AddItem working even when the free-tier
+    Space is sleeping or 5xxing.
+    """
+    space_url = (settings.EYES_GEMMA_SPACE_URL or "").rstrip("/")
+    if not space_url:
+        raise RuntimeError("EYES_GEMMA_SPACE_URL not configured.")
+
+    payload: dict[str, Any] = {
+        "system": system_prompt,
+        "prompt": user_text,
+        "image_b64": image_b64_jpeg,
+        "image_mime": "image/jpeg",
+        "max_tokens": int(max_tokens),
+        "temperature": float(temperature),
+        # Trigger llama.cpp grammar-constrained JSON when the Space
+        # supports it; older builds ignore the flag harmlessly.
+        "json_mode": True,
+    }
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    # Token only required for *private* Spaces. Ours is public, but
+    # we still send it when configured so a future flip to private
+    # works without code changes.
+    if settings.EYES_HF_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.EYES_HF_TOKEN}"
+
+    timeout_s = float(
+        timeout if timeout is not None else settings.EYES_GEMMA_TIMEOUT_S
+    )
+
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=timeout_s) as cli:
+            resp = await cli.post(
+                f"{space_url}/predict", json=payload, headers=headers,
+            )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Gemma Space network error: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Gemma Space {resp.status_code}: {resp.text[:300]}"
+        )
+    try:
+        body = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Gemma Space non-JSON response: {exc}") from exc
+
+    output = (body or {}).get("output")
+    if not output or not isinstance(output, str):
+        raise RuntimeError(
+            f"Gemma Space empty/invalid output: keys={list((body or {}).keys())}"
+        )
+    if body.get("vision_disabled"):
+        # Phase-1 expected state — log once per call so we can spot
+        # how often we're degrading. Not an error.
+        logger.info(
+            "Gemma Space replied with vision_disabled=true (Phase 1 text-only)."
+        )
+    logger.info(
+        "Gemma Space OK tokens=%s+%s elapsed_ms=%s",
+        body.get("tokens_prompt"),
+        body.get("tokens_completion"),
+        body.get("elapsed_ms"),
+    )
+    return output
+
+
+
 async def _hf_chat_json(
     *,
     model: str,
@@ -64,13 +151,56 @@ async def _hf_chat_json(
     temperature: float = 0.1,
     timeout: float = 45.0,
 ) -> str:
-    """Fire a single multimodal chat_completion at an HF-hosted model.
+    """Fire a single multimodal chat_completion at the configured Eyes provider.
 
-    Picks the custom endpoint when ``GARMENT_VISION_ENDPOINT_URL`` is
-    set \u2014 this is how we target the user's deployed Gemma 4 fine-tune
-    after they push from the Phase-6 notebook. Otherwise falls through
-    to the HF Inference Providers routing.
+    Provider routing (in priority order):
+      1. ``EYES_PROVIDER=gemma`` + ``EYES_GEMMA_SPACE_URL`` set ->
+         POST to the self-hosted Gemma-4 E2B HF Space. On any error we
+         log + fall through so AddItem never breaks while the Space is
+         flaky.
+      2. ``GARMENT_VISION_ENDPOINT_URL`` set -> that custom HF
+         Inference / DashScope endpoint (legacy Qwen-VL path).
+      3. Otherwise the HF Inference Providers default routing using
+         ``HF_TOKEN``.
     """
+    # Step 1 -- Gemma feature flag (Phase O.3). Wrapped in a broad
+    # except so a cold/sleeping Space, network blip, or malformed
+    # JSON response never blocks the user. We record the failure on
+    # ``provider_activity`` so the dashboard can surface regressions.
+    if (
+        (settings.EYES_PROVIDER or "").lower() == "gemma"
+        and settings.EYES_GEMMA_SPACE_URL
+    ):
+        t0 = time.perf_counter()
+        try:
+            out = await _call_gemma_space(
+                system_prompt=system_prompt,
+                user_text=user_text,
+                image_b64_jpeg=image_b64_jpeg,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                timeout=settings.EYES_GEMMA_TIMEOUT_S,
+            )
+            provider_activity.record(
+                "garment-vision",
+                ok=True,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                extra={"provider": "gemma", "model": "gemma-4-e2b-q4_k_m"},
+            )
+            return out
+        except Exception as exc:  # noqa: BLE001
+            provider_activity.record(
+                "garment-vision",
+                ok=False,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                error=repr(exc),
+                extra={"provider": "gemma", "fallback": "qwen"},
+            )
+            logger.warning(
+                "Gemma Space failed (%s); falling back to legacy provider",
+                exc,
+            )
+            # fall through to the existing path
     endpoint_url = settings.GARMENT_VISION_ENDPOINT_URL
     if endpoint_url:
         token = settings.GARMENT_VISION_ENDPOINT_KEY or settings.HF_TOKEN

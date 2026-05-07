@@ -190,6 +190,34 @@ class Settings:
     GARMENT_VISION_ENDPOINT_KEY: str | None = (
         os.environ.get("GARMENT_VISION_ENDPOINT_KEY") or None
     )
+
+    # --- Phase O Wave O.3 — Self-hosted Gemma-4 E2B Eyes ---
+    # Feature flag for the new self-hosted Gemma-4 E2B GGUF served from a
+    # HF Space. Values: ``"qwen"`` (default — keep existing pipeline) or
+    # ``"gemma"`` (route through the HF Space's ``/predict``). Gemma
+    # failures auto-fall-back to the existing path so a flaky Space
+    # never breaks AddItem.
+    EYES_PROVIDER: str = (
+        os.environ.get("EYES_PROVIDER", "qwen") or "qwen"
+    ).strip().lower()
+    # Public HF Space URL exposing FastAPI ``/predict``.
+    EYES_GEMMA_SPACE_URL: str | None = (
+        os.environ.get("EYES_GEMMA_SPACE_URL") or None
+    )
+    # Read-scope HF token for the (currently private) model repo. The
+    # HF Space pulls the GGUF at build time using this same secret —
+    # the backend doesn't need it at request time today, but we hold it
+    # in env so the same token can be reused later for HF Inference
+    # Endpoints / private Spaces.
+    EYES_HF_TOKEN: str | None = (
+        os.environ.get("EYES_HF_TOKEN") or None
+    )
+    # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
+    # vision is added). Match the timeout to the worst case and let the
+    # circuit breaker fall back to Qwen instead of stalling AddItem.
+    EYES_GEMMA_TIMEOUT_S: float = float(
+        os.environ.get("EYES_GEMMA_TIMEOUT_S", "60") or "60"
+    )
     # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
