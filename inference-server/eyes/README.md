@@ -99,9 +99,16 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
   up -d --build eyes
 ```
 
-First boot pulls the wheel index + the 3.4 GB GGUF — budget **5–10 min**
-on the first run, then **~30 s** for every restart afterward (the GGUF
-is cached in the `eyes-cache` named volume).
+First boot pulls the wheel index + builds llama-cpp-python from
+source + downloads the 3.4 GB GGUF — budget **8–15 min** on the
+first run, then **~30 s** for every restart afterward (the GGUF and
+the compiled wheel layer are both cached).
+
+Why the source build? Plain "linux_x86_64" wheels published by
+abetlen are built against MUSL libc (Alpine) and fail with
+`libc.musl-x86_64.so.1: cannot open shared object file` on the
+glibc-based Debian image we use. Compiling from source on the VPS
+is the only Debian-compatible path; CPX32 handles it cleanly.
 
 Watch the build + boot:
 
@@ -197,9 +204,10 @@ to the `Llava15ChatHandler` — no other code change required.
 
 | Symptom | Fix |
 |---|---|
-| `Failed to load model from file: /models/...` | Wrong llama-cpp-python version. Confirm `requirements.txt` pins `0.3.16` or newer. Older versions don't know the Gemma-3/4 architecture. |
+| `Failed to load model from file: /models/...` | Wrong llama-cpp-python version. Confirm `requirements.txt` pins `0.3.19` or newer. Older versions don't know the Gemma-3/4 architecture. |
+| `libc.musl-x86_64.so.1: cannot open shared object file` | The Dockerfile must compile llama-cpp-python from source (`pip install --no-binary llama-cpp-python …`). If you tweaked the Dockerfile to use the `--prefer-binary` flag, abetlen's wheel index ships Alpine/MUSL-built binaries that don't load on Debian. Revert to `--no-binary llama-cpp-python` and rebuild. |
 | `eyes` container OOM-kills (exit 137) at startup | Not enough RAM. Add swap (see top of file) or upgrade the VPS plan. |
 | `eyes` healthy, but backend logs `gemma fallback` | Either `EYES_API_TOKEN` mismatch (backend `.env` ≠ eyes `.env`) or the model is taking too long. Check `EYES_GEMMA_TIMEOUT_S` (default 60s). |
 | `huggingface_hub.utils._errors.RepositoryNotFoundError: 401` | HF token revoked / wrong scope. Issue a fresh **Read** token scoped to `Yoram-Jacobs/dressapp-eyes-gguf`, paste into `deploy/.env`, and `docker compose up -d eyes`. |
 | `truncated download or LFS pointer file` | Network blip during the 3.4 GB pull. Wipe the cache and retry: `docker compose down eyes && docker volume rm dressapp_eyes-cache && docker compose up -d eyes`. |
-| Building llama-cpp-python from source (long compile, then OOM) | Docker base image isn't `bookworm`. Confirm the first line of the Dockerfile is `FROM python:3.11-slim-bookworm` (NOT `slim` alone — that resolves to Trixie / glibc 2.41). |
+| Building llama-cpp-python from source (long compile, then OOM on smaller plans) | Expected on first build — that's the design. CPX32 (4 vCPU / 8 GB) builds it in ~5 min; CX22 (2 vCPU / 4 GB) needs swap or it will OOM during the compile. Lower `CMAKE_BUILD_PARALLEL_LEVEL` in the Dockerfile from 4 to 2 if you must build on the smaller plan. |

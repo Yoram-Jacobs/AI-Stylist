@@ -1,11 +1,14 @@
 # DressApp Eyes (Gemma-4 E2B GGUF) — CPU-only Hetzner deploy.
 #
 # llama-cpp-python: Gemma-3 / Gemma-4 E2B architecture support landed
-# after 0.3.5 (Dec 2024). 0.3.19 is the latest stable release with a
-# prebuilt CPU wheel published in abetlen's wheel index. 0.3.16 was
-# tried first but has NO published wheel — pip fell back to a source
-# build that needed gcc/cmake. The Dockerfile now ships the toolchain
-# anyway as a safety net (so a future wheel-index gap won't break us).
+# after 0.3.5 (Dec 2024). 0.3.19 is the latest stable release at time
+# of writing. The Dockerfile compiles this from source because the
+# only prebuilt CPU wheels available (abetlen's GitHub Pages index)
+# are built against MUSL libc / Alpine — they fail to load on Debian
+# with "libc.musl-x86_64.so.1: cannot open shared object file". PyPI
+# doesn't publish manylinux wheels for Gemma-3-supporting versions,
+# so source compile is the only Debian-compatible path. CPX32 builds
+# it in ~5 min; the layer is then cached for subsequent rebuilds.
 llama-cpp-python==0.3.19
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
