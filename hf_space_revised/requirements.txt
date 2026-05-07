@@ -1,10 +1,13 @@
 # DressApp Eyes — HF Space requirements (CPU Basic).
 #
-# llama-cpp-python pinned to a recent stable release with prebuilt CPU
-# wheels for Python 3.11. ``--prefer-binary`` in the Dockerfile picks
-# the wheel; if PyPI ever lacks one for our build, the source build
-# falls back to the cmake/build-essential stack we install up-front.
-llama-cpp-python==0.3.5
+# llama-cpp-python: Gemma-3 / Gemma-4 E2B architecture support landed
+# after 0.3.5 (Dec 2024). 0.3.16 is the current stable release with
+# both Gemma-3 text and (when paired with mmproj) Llava-style vision
+# chat handlers — required for the phase-6 fine-tune we ship here.
+# ``--prefer-binary`` in the Dockerfile picks the manylinux CPU wheel;
+# if PyPI ever lacks one for our build, the source build falls back
+# to the cmake/build-essential stack we install up-front.
+llama-cpp-python==0.3.16
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4

@@ -77,12 +77,31 @@ async def lifespan(_app: FastAPI):
             f"LLAMA_MMPROJ_PATH set but not a file: {MMPROJ_PATH}"
         )
 
+    # Pre-flight: surface a clear error if the GGUF didn't actually
+    # land on disk or got truncated mid-download. llama.cpp's own
+    # error ("Failed to load model from file") is uselessly opaque.
+    try:
+        _size = os.path.getsize(MODEL_PATH)
+    except OSError as exc:
+        raise RuntimeError(f"GGUF missing at {MODEL_PATH}: {exc}") from exc
+    if _size < 100 * 1024 * 1024:  # any real LLM GGUF is >100 MB
+        raise RuntimeError(
+            f"GGUF at {MODEL_PATH} is only {_size} bytes — likely a "
+            f"truncated download or LFS pointer file. Re-pull the repo."
+        )
+    log.info("gguf size: %.2f GB", _size / (1024**3))
+
+    # ``chat_format='gemma'`` is the templating used by the Gemma-3 /
+    # Gemma-4 E2B family. It's only consulted on the text path; when
+    # ``chat_handler`` is set (Phase 2 vision), the handler owns
+    # templating and this kwarg is ignored.
     llm = Llama(
         model_path=MODEL_PATH,
         n_ctx=N_CTX,
         n_threads=N_THREADS,
         n_batch=N_BATCH,
         chat_handler=chat_handler,
+        chat_format="gemma" if chat_handler is None else None,
         # Free CPU tier: no mmap is faster on HF's shared storage.
         use_mmap=False,
         use_mlock=False,
