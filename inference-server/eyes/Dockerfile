@@ -38,23 +38,34 @@ RUN apt-get update \
 WORKDIR /app
 
 # --- Python deps -----------------------------------------------------
-# --extra-index-url pulls llama-cpp-python from the maintainer's CPU
-# wheel feed. PyPI is still consulted for everything else.
+# We compile llama-cpp-python from source. Reason: abetlen's prebuilt
+# "linux_x86_64" wheels at https://abetlen.github.io/llama-cpp-python/whl/cpu
+# are actually built against MUSL libc (Alpine), not glibc. Installing
+# them on Debian / Ubuntu lands a binary that fails at import with
+# "libc.musl-x86_64.so.1: cannot open shared object file" — exactly the
+# trap we just hit. PyPI doesn't publish manylinux wheels for the
+# Gemma-3-supporting versions either, so source compile is the only
+# combination that produces a binary linked to the glibc this image
+# actually has. CPX32 (4 dedicated vCPUs / 8 GB RAM) handles the
+# compile in ~5 min; the resulting layer is fully cached afterwards.
 #
-# CMAKE_BUILD_PARALLEL_LEVEL caps source-build parallelism IF pip ever
-# falls back to compiling (when the pinned version isn't in the wheel
-# index). Set to 4 to use all CPX32 cores; lower it on smaller plans
+# CMAKE_BUILD_PARALLEL_LEVEL pegs the build at 4 threads to use all
+# CPX32 cores. Lower this on smaller plans (CX22's 2 vCPU / 4 GB RAM)
 # to avoid OOM during the compile.
 #
-# CMAKE_ARGS disables CPU-feature auto-detection so the resulting
-# binary is portable across the AMD/Intel mix of Hetzner's fleet.
+# CMAKE_ARGS:
+#   -DGGML_NATIVE=OFF  → disable CPU-feature auto-detection so the
+#                         resulting binary is portable across the
+#                         AMD/Intel mix of Hetzner's fleet (avoids
+#                         "Illegal instruction" if the host migrates).
+#   -DGGML_BLAS=OFF    → don't link against system BLAS; the GGML
+#                         built-in matmul is fast enough for CPU and
+#                         skips the libopenblas / libmkl runtime dep.
 COPY requirements.txt ./requirements.txt
 ENV CMAKE_BUILD_PARALLEL_LEVEL=4 \
     CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_BLAS=OFF"
 RUN pip install --upgrade pip \
- && pip install --prefer-binary \
-      --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
-      -r requirements.txt
+ && pip install --no-binary llama-cpp-python -r requirements.txt
 
 # --- App -------------------------------------------------------------
 COPY main.py ./main.py
