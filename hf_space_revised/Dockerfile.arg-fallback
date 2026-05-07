@@ -31,18 +31,26 @@
 #
 FROM python:3.11-slim
 
-# Build deps for the llama-cpp-python wheel + curl for the healthcheck.
+# Slim toolchain: curl is needed for the runtime healthcheck. We
+# don't ship build-essential/cmake/git here because we install
+# llama-cpp-python from a prebuilt CPU wheel index (see below) and
+# never compile from source — that's what was OOM-killing the build
+# (exit 137) on HF's free-tier sandbox.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl ca-certificates build-essential cmake git \
+      curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /home/user/app
 
 # ---- Python dependencies -------------------------------------------------
+# ``--extra-index-url`` pulls the ``llama-cpp-python`` CPU wheel from
+# the upstream maintainer's feed and falls back to PyPI for the rest.
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir --prefer-binary -r requirements.txt
+ && pip install --no-cache-dir --prefer-binary \
+      --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+      -r requirements.txt
 
 # ---- Application code ----------------------------------------------------
 COPY app.py ./app.py

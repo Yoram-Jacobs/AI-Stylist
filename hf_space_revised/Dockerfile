@@ -13,26 +13,23 @@
 # tried to use it as the ``--mmproj`` vision projector — that's not
 # what an mmproj file is (mmproj is a small dedicated vision encoder,
 # typically 500 MB–1 GB) and llama.cpp rejects the F16 LLM weights as
-# an mmproj, which is why the Space was sitting in ``Build error``.
-#
-# Without an mmproj file the model is text-only at the llama.cpp
-# layer. Vision is auto-enabled in Phase 2 the moment a real
-# ``mmproj-Gemma4E2B-f16.gguf`` is uploaded to the model repo
+# an mmproj. Without an mmproj file the model is text-only at the
+# llama.cpp layer. Vision is auto-enabled in Phase 2 the moment a
+# real ``mmproj-Gemma4E2B-f16.gguf`` is uploaded to the model repo
 # (see the notebook cell ``Export multimodal projector (mmproj)``).
 #
-# Phase-2 toggle (no code change needed):
-#   1. Add a second ``hf_hub_download`` call below for the mmproj
-#      file (sample line is commented out).
-#   2. Set the Space variable ``LLAMA_MMPROJ_PATH=/models/mmproj-Gemma4E2B-f16.gguf``
-#      via Space Settings → Variables.
-#   3. Redeploy. ``app.py`` detects the env var and switches to
-#      ``Llava15ChatHandler`` automatically.
+# Why we use a prebuilt wheel index
+# ---------------------------------
+# Building llama-cpp-python from source compiles llama.cpp's C++ in
+# parallel (one g++ per vCPU) and peaks at 6–8 GB RAM. HF Spaces'
+# free-tier build sandbox OOM-kills the process before it finishes
+# (exit code 137 in the build log, no useful stack trace because the
+# kernel SIGKILLs the whole process group).
 #
-# Hardware: free CPU Basic (2 vCPU, 16 GB RAM). Q4_K_M of the
-# ~5B-param Gemma-4 E2B fits comfortably in RAM but inference is slow
-# (~5–15 s per ~200-token completion). Production target remains
-# on-device inference via Capacitor; this Space is testing scaffold
-# for the JSON-contract validation.
+# We dodge the compile entirely by pointing pip at the upstream
+# project's prebuilt CPU wheel index:
+#   https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Install drops from ~10 min + OOM to ~30 s and needs no toolchain.
 #
 # Deploy notes
 # ------------
@@ -45,21 +42,30 @@
 #
 FROM python:3.11-slim
 
-# Build deps for the llama-cpp-python wheel + curl for the healthcheck.
+# Slim toolchain: curl is needed for the runtime healthcheck. We
+# DROP build-essential / cmake / git from the previous version
+# because we're no longer compiling llama-cpp-python — the wheel
+# from the upstream CPU index is binary-complete. This shrinks the
+# image by ~450 MB and slashes build time.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl ca-certificates build-essential cmake git \
+      curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # Working dir matches the standard HF Spaces layout.
 WORKDIR /home/user/app
 
 # ---- Python dependencies -------------------------------------------------
-# Keep this layer cacheable: copy requirements before app code so a code
-# change doesn't trigger a fresh wheel install (~5 min on free CPU).
+# ``--extra-index-url`` falls back to PyPI for everything except the
+# ``llama-cpp-python`` wheel, which it pulls from abetlen's CPU
+# wheel feed. ``--prefer-binary`` plus the explicit feed makes pip
+# refuse to fall back to a source build even if PyPI's metadata is
+# slightly newer.
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir --prefer-binary -r requirements.txt
+ && pip install --no-cache-dir --prefer-binary \
+      --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+      -r requirements.txt
 
 # ---- Application code ----------------------------------------------------
 COPY app.py ./app.py
@@ -72,7 +78,9 @@ COPY README.md ./README.md
 #
 # We pull only the Q4_K_M weights (~3.4 GB). The F16 LLM and the
 # (future) mmproj-*.gguf live in the same repo; uncomment the second
-# download block below once you've pushed the mmproj from the notebook.
+# download block below ONLY AFTER you've pushed the mmproj from the
+# notebook. Trying to download a file that doesn't exist yet causes
+# a silent build failure (HF truncates the 404 message).
 ENV HF_HUB_ENABLE_HF_TRANSFER=0 \
     LLAMA_MODEL_PATH=/models/phase6-Q4_K_M.gguf
 
@@ -89,8 +97,14 @@ p = hf_hub_download( \
 print('downloaded:', p)" \
  && ls -lh /models
 
-# ---- Phase 2: vision projector (uncomment after running the
-# mmproj export cell in the notebook and pushing the file) -----------------
+# ---- Phase 2: vision projector ------------------------------------------
+# UNCOMMENT ONLY AFTER you have:
+#   1. Run the notebook cell in MMPROJ_NOTEBOOK_CELL.md to extract
+#      ``mmproj-Gemma4E2B-f16.gguf`` from the original safetensors.
+#   2. Pushed the resulting mmproj file to
+#      ``Yoram-Jacobs/dressapp-eyes-gguf``.
+# Until both are done, leaving this block uncommented will fail the
+# build with a 404 from huggingface_hub.
 # RUN --mount=type=secret,id=EYES_HF_TOKEN,required=true \
 #     HF_TOKEN="$(cat /run/secrets/EYES_HF_TOKEN)" \
 #     python -c "\
