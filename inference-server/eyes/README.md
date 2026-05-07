@@ -10,27 +10,37 @@ in `deploy/docker-compose.yml`. Internal-only: backend reaches it at
 `http://eyes:7860` over the `dress` Docker network — Caddy never
 proxies it, so it's never publicly exposed.
 
+Repo path on the VPS: `/srv/AI-Stylist/` (matches the GitHub repo
+name; pre-existing deploys may also have it at `/srv/dressapp/` — the
+docs use the new path).
+
 ---
 
-## ⚠️ RAM budget — read first
+## RAM budget
 
-| Plan | Total | Backend (peak) | Caddy + frontend | Eyes (Q4_K_M, ~5 B) | Verdict |
-|---|---|---|---|---|---|
-| **CX22** | 4 GB  | ~1.4 GB | ~0.1 GB | ~4 GB resident | ❌ Will swap to disk hard. Boots, runs, but every `/predict` is 30 s+. |
-| **CX32** | 8 GB  | ~1.4 GB | ~0.1 GB | ~4 GB resident | ✅ ~2 GB headroom. Comfortable. **Recommended.** |
-| **CX42** | 16 GB | same    | same    | same | ✅ Future-proof for the Phase-2 mmproj (+1 GB) and bigger contexts. |
+| Plan | vCPU | RAM | Backend (peak) | Caddy + frontend | Eyes (Q4_K_M, ~5 B) | Verdict |
+|---|---|---|---|---|---|---|
+| CX22  | 2 shared       | 4 GB  | ~1.4 GB | ~0.1 GB | ~4 GB resident | ❌ Will swap to disk; every `/predict` is 30 s+. |
+| CX32  | 2 shared Intel | 8 GB  | ~1.4 GB | ~0.1 GB | ~4 GB resident | ✅ ~2 GB headroom. |
+| **CPX32** | **4 dedicated AMD EPYC** | **8 GB** | **~1.4 GB** | **~0.1 GB** | **~4 GB resident** | ✅ **Recommended.** Same RAM as CX32 but ~2× the inference speed thanks to dedicated cores. |
+| CX42  | 4 shared Intel | 16 GB | same    | same    | same | ✅ Future-proof for the Phase-2 mmproj (+1 GB) and bigger contexts. |
 
-If you're staying on CX22 for now, add a 4 GB swap file before bringing
-up the Eyes service:
+CPX32 (Hetzner's AMD line) is the sweet spot: 4 dedicated vCPUs let
+us bump `LLAMA_THREADS=4` in `deploy/.env` for ~2× the throughput
+you'd see on CX32's 2 shared cores. To take advantage:
+
+```
+EYES_LLAMA_THREADS=4
+```
+
+If you stay on a 4 GB-RAM CX22 instead, add a 4 GB swap file before
+bringing up the Eyes service:
 
 ```bash
 fallocate -l 4G /swapfile && chmod 600 /swapfile
 mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 ```
-
-Upgrade to CX32 from the Hetzner console when convenient — the whole
-migration is two clicks and ~30 s of downtime.
 
 ---
 
@@ -40,11 +50,16 @@ migration is two clicks and ~30 s of downtime.
 
 ```bash
 ssh root@<VPS_IP>
-cd /srv/dressapp
+cd /srv/AI-Stylist                    # repo root — NOT /srv/AI-Stylist/deploy
 git pull --ff-only origin main
 ```
 
-### 2. Add three new keys to `deploy/.env`
+If `git pull` reports `Already up to date.` but the
+`inference-server/eyes/` directory or `eyes:` service in
+`deploy/docker-compose.yml` is missing, the changes haven't landed on
+GitHub yet — push from your dev environment first.
+
+### 2. Add four new keys to `deploy/.env`
 
 ```bash
 $EDITOR deploy/.env
@@ -67,11 +82,19 @@ EYES_HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # Shared secret between the backend container and the eyes container.
 # Generate with:  openssl rand -hex 32
 EYES_API_TOKEN=replace-with-32-bytes-of-hex
+
+# CPX32 has 4 dedicated AMD vCPUs — use them all for inference.
+# Default is 2 (sized for the 2-vCPU CX22/CX32 plans).
+EYES_LLAMA_THREADS=4
 ```
 
 ### 3. Bring up the new service
 
+ALL `docker compose` commands below MUST run from `/srv/AI-Stylist/`,
+not from inside `deploy/`:
+
 ```bash
+cd /srv/AI-Stylist
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
   up -d --build eyes
 ```
@@ -91,14 +114,15 @@ You should see, in order:
 ```
 eyes  | downloading model: Yoram-Jacobs/dressapp-eyes-gguf/phase6-Q4_K_M.gguf
 eyes  | downloaded /models/phase6-Q4_K_M.gguf (3.42 GB) in 92.4s
-eyes  | loading model: /models/phase6-Q4_K_M.gguf (threads=2 ctx=4096)
-eyes  | model ready in 18.3s (vision=False)
+eyes  | loading model: /models/phase6-Q4_K_M.gguf (threads=4 ctx=4096)
+eyes  | model ready in 12.1s (vision=False)
 eyes  | INFO:     Uvicorn running on http://0.0.0.0:7860
 ```
 
 ### 4. Restart the backend so it picks up the new env
 
 ```bash
+cd /srv/AI-Stylist
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
   up -d backend
 ```
@@ -111,7 +135,7 @@ Qwen-VL.
 
 ---
 
-## Smoke test (run from the VPS)
+## Smoke test (run from `/srv/AI-Stylist/` on the VPS)
 
 ```bash
 # 1. Health (no auth required)
@@ -133,7 +157,8 @@ docker compose -f deploy/docker-compose.yml exec backend \
 
 Open the app, edit any closet item, click **Analyze**. The backend
 should succeed (LLM call routed via the eyes container) and the
-response latency will be ~5–15 s on CPU Basic. If it fails, the
+response latency will be ~3–8 s on CPX32's 4 dedicated cores
+(roughly 2× faster than the same Q4_K_M on CX32). If it fails, the
 backend's circuit breaker auto-falls-back to Qwen-VL — check
 `docker compose logs backend | grep gemma` for any timeout/error
 entries that triggered the fallback.
