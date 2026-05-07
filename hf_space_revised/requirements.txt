@@ -1,0 +1,15 @@
+# DressApp Eyes — HF Space requirements (CPU Basic).
+#
+# llama-cpp-python pinned to a recent stable release with prebuilt CPU
+# wheels for Python 3.11. ``--prefer-binary`` in the Dockerfile picks
+# the wheel; if PyPI ever lacks one for our build, the source build
+# falls back to the cmake/build-essential stack we install up-front.
+llama-cpp-python==0.3.5
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.4
+huggingface_hub==0.27.0
+# Pillow + base64 are stdlib enough for our /predict path, but we
+# keep Pillow explicit because llama-cpp-python's chat_handler (used
+# in Phase 2 once mmproj lands) imports it at runtime.
+Pillow==11.0.0
