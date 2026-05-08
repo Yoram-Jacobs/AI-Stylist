@@ -25,6 +25,44 @@
 .dressapp-anchor-btn:active { transform: translateY(0); }
 .dressapp-anchor-btn .dressapp-dot { width: 6px; height: 6px; border-radius: 999px; background: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.25); }
 
+/* ---- floating action button (always visible) ---- */
+.dressapp-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2147483645; /* below overlay (..46) but above page chrome */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 10px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,.0);
+  background: #0f172a;
+  color: #ffffff;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -10px rgba(15,23,42,.45), 0 2px 4px -1px rgba(15,23,42,.25);
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease, background 160ms ease;
+  opacity: 0.96;
+}
+.dressapp-fab:hover { background: #1e293b; transform: translateY(-1px); opacity: 1; box-shadow: 0 14px 28px -10px rgba(15,23,42,.55); }
+.dressapp-fab:active { transform: translateY(0); }
+.dressapp-fab:focus-visible { outline: 2px solid #0ea5e9; outline-offset: 2px; }
+.dressapp-fab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 999px;
+  background: rgba(14,165,233,.18);
+  color: #67e8f9;
+}
+.dressapp-fab-label { padding-right: 2px; }
+
 /* ---- overlay ---- */
 .dressapp-overlay-host {
   position: fixed; right: 16px; bottom: 16px; z-index: 2147483646;

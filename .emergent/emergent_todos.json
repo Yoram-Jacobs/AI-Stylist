@@ -1,18 +1,26 @@
 [
   {
-    "content": "Rebuild extension to ensure dist/ is fresh",
+    "content": "Add persistent floating action button to content.js (FAB) with hide-while-overlay",
     "status": "completed"
   },
   {
-    "content": "Create EXTENSION_INSTALL.md with load-unpacked + per-store guide",
+    "content": "Make detectChart/detectChartImage prefer open modals + active tab panels",
     "status": "completed"
   },
   {
-    "content": "Zip dist/ to /app/chrome-extension/dressapp-extension.zip",
+    "content": "Update backend system prompt: prefer bigger size when between sizes",
     "status": "completed"
   },
   {
-    "content": "Verify zip integrity and report final paths to user",
+    "content": "Update heuristic _match: prefer bigger row on tie + tightness check",
+    "status": "completed"
+  },
+  {
+    "content": "Rebuild extension + repackage zip",
+    "status": "completed"
+  },
+  {
+    "content": "Smoke-test backend with TestClient on tie-case + verify build",
     "status": "completed"
   }
 ]

@@ -123,10 +123,18 @@ You are given:
 Pick the size that best fits the user. Honour each measurement column
 strictly — never recommend a size where one of the user's measurements
 is larger than the column's upper bound by more than 1 cm (or 0.5 in).
-When two sizes are valid, prefer the smaller one for slim garments
-(shirt, dress, blouse, pants) and the larger one for outerwear (coat,
-jacket, hoodie). When measurements straddle two sizes, name the chosen
-size and mention the alternative in ``alternatives``.
+
+**Tie-breaking rule (very important):** when the user's measurements
+fall *between* two sizes — i.e. they sit at the boundary of a smaller
+size and the lower edge of the next one, OR they fit one critical
+column tightly while the next size up gives clear room — ALWAYS
+recommend the slightly **bigger** size. A garment that's a little
+loose is wearable; one that's too tight is not. Mention the smaller
+size as an alternative with ``"fit": "snug"`` so the user knows the
+trade-off.
+
+When measurements straddle two sizes, name the chosen (bigger) size
+and put the smaller one in ``alternatives``.
 
 Return ONLY valid JSON. No markdown, no backticks. Schema:
 
@@ -136,8 +144,8 @@ Return ONLY valid JSON. No markdown, no backticks. Schema:
   "garment_type":      "<your best inference, lowercase noun>",
   "size_chart_units":  "cm" | "in" | "mixed" | "unknown",
   "matched_columns":   ["chest", "waist", ...],
-  "reasoning":         "<one short paragraph, 1-3 sentences, plain text>",
-  "alternatives":      [{"size":"L","fit":"looser"}, ...]
+  "reasoning":         "<one short paragraph, 1-3 sentences, plain text. Briefly mention the bigger-on-tie reasoning when it applies.>",
+  "alternatives":      [{"size":"S","fit":"snug"}, ...]
 }
 
 If you can't find a usable chart in the input, set
@@ -345,12 +353,29 @@ _MEASUREMENT_FIELDS = ("chest", "bust", "waist", "hips", "hip")
 
 def _heuristic_match(*, chart_text: str,
                      measurements: dict[str, Any]) -> dict[str, Any] | None:
-    """Last-resort: scan the chart text for ranges that bracket the
-    user's chest/waist/hip measurements. Picks the *first* size label
-    whose ranges contain at least one user measurement."""
+    """Last-resort: scan the chart text for size rows whose ranges fit
+    the user's measurements.
+
+    Algorithm (mirrors the LLM's tie-breaking rule):
+      1. Parse the chart into rows of ``{label, ranges:[(lo, hi), …]}``.
+      2. Collect the user's numeric chest / waist / hip values.
+      3. Compute ``user_max`` = the largest of those values; this is the
+         dimension that constrains size choice.
+      4. Find the *smallest* row whose ``max(upper_bound)`` is ≥
+         ``user_max`` — that row "accommodates" the user.
+      5. **Bigger-on-tie:** if ``user_max`` is within 0.5 cm of that
+         row's *tightest* upper bound (i.e. the user is brushing the
+         ceiling on a critical dimension), bump the recommendation to
+         the next row if one exists. This implements the user-requested
+         rule: "if measurements fall between two sizes, recommend the
+         slightly bigger one".
+      6. Surface the smaller size as a ``snug`` alternative, mirroring
+         the LLM contract.
+    """
     if not chart_text or not measurements:
         return None
-    # Pull plausible numeric values (cm) from measurements.
+
+    # 1) Pull plausible numeric values (cm) from measurements.
     user_vals: dict[str, float] = {}
     for k, v in measurements.items():
         if not isinstance(v, (int, float)):
@@ -362,44 +387,171 @@ def _heuristic_match(*, chart_text: str,
                 break
     if not user_vals:
         return None
-    # Slice chart into rows by line; for each row find ranges and a
-    # "size label" as the first non-numeric-looking token.
-    lines = [ln for ln in chart_text.splitlines() if ln.strip()]
+
+    # 2) Parse rows from the chart text. Each row needs a label and
+    #    at least one numeric range.
     label_re = re.compile(r"^\s*([A-Za-z0-9./-]{1,8})\b")
-    for ln in lines:
+    rows: list[dict[str, Any]] = []
+    for ln in chart_text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
         m = label_re.match(ln)
         if not m:
             continue
         label = m.group(1)
-        # Skip header rows.
-        if label.lower() in {"size", "us", "uk", "eu", "cm", "in"}:
+        if label.lower() in {"size", "us", "uk", "eu", "cm", "in", "size:"}:
             continue
-        ranges = _RANGE_RE.findall(ln)
-        if not ranges:
-            continue
-        for col_idx, (lo, hi) in enumerate(ranges):
+        ranges: list[tuple[float, float]] = []
+        for lo_s, hi_s in _RANGE_RE.findall(ln):
             try:
-                lo_f = float(lo.replace(",", "."))
-                hi_f = float(hi.replace(",", "."))
+                lo_f = float(lo_s.replace(",", "."))
+                hi_f = float(hi_s.replace(",", "."))
+                if hi_f >= lo_f:
+                    ranges.append((lo_f, hi_f))
             except ValueError:
                 continue
-            for field, val in user_vals.items():
-                if lo_f <= val <= hi_f:
-                    return {
-                        "recommended_size": label.upper(),
-                        "confidence": 0.4,
-                        "garment_type": "unknown",
-                        "size_chart_units": "cm",
-                        "matched_columns": [field],
-                        "reasoning": (
-                            f"Heuristic match: {field} {val:g} cm fits the "
-                            f"{label.upper()} row ({lo_f:g}–{hi_f:g} cm). "
-                            f"AI sizing engines were unavailable; this is "
-                            f"a regex-based estimate."
-                        ),
-                        "alternatives": [],
-                    }
-    return None
+        if ranges:
+            rows.append({"label": label, "ranges": ranges})
+    if not rows:
+        return None
+
+    # 3) Pick the constraining user value (largest cm value).
+    matched_field = max(user_vals, key=user_vals.get)
+
+    # 3b) Map each user measurement to the chart's column index.
+    # Convention: most charts list columns in increasing-min order
+    # (waist has the smallest values, chest is in the middle, hips
+    # are the largest). We rank the chart's columns by their minimum
+    # value across rows and assign them by field-name category:
+    #
+    #   waist        -> smallest-min column
+    #   chest / bust -> middle column
+    #   hip  / hips  -> largest-min column
+    #
+    # If the candidate column doesn't even contain the user's value,
+    # we fall back to whichever column's union range does.
+    ncols = max(len(r["ranges"]) for r in rows)
+    columns: list[list[tuple[float, float]]] = [[] for _ in range(ncols)]
+    for r in rows:
+        for j, rng in enumerate(r["ranges"]):
+            if j < ncols:
+                columns[j].append(rng)
+
+    col_ranks: list[int] = sorted(
+        range(ncols),
+        key=lambda j: (
+            min(lo for lo, _ in columns[j]) if columns[j] else float("inf")
+        ),
+    )
+
+    _FIELD_RANK = {
+        "waist": 0,
+        "chest": 1, "bust": 1,
+        "shoulders": 1, "shoulder": 1,
+        "inseam": 1,
+        "hip": 2, "hips": 2,
+    }
+
+    def _assign_column(field: str, v: float) -> int:
+        rank = _FIELD_RANK.get(field.lower(), 1)
+        if rank >= len(col_ranks):
+            rank = len(col_ranks) - 1
+        candidate = col_ranks[rank]
+        ranges = columns[candidate]
+        if ranges:
+            col_min = min(lo for lo, _ in ranges)
+            col_max = max(hi for _, hi in ranges)
+            if col_min <= v <= col_max:
+                return candidate
+        # Fallback: any column whose union contains v.
+        for j, rng_list in enumerate(columns):
+            if not rng_list:
+                continue
+            col_min = min(lo for lo, _ in rng_list)
+            col_max = max(hi for _, hi in rng_list)
+            if col_min <= v <= col_max:
+                return j
+        return candidate  # nothing else fit; trust the rank-based pick
+
+    field_to_col: dict[str, int] = {
+        f: _assign_column(f, v) for f, v in user_vals.items()
+    }
+
+    TIE_BUFFER_CM = 0.5
+
+    def _row_accommodates(row: dict[str, Any]) -> bool:
+        for f, v in user_vals.items():
+            j = field_to_col.get(f, -1)
+            if j < 0 or j >= len(row["ranges"]):
+                continue  # column unmapped — skip this constraint
+            _, hi = row["ranges"][j]
+            if v > hi:
+                return False
+        return True
+
+    def _row_is_tight(row: dict[str, Any]) -> bool:
+        for f, v in user_vals.items():
+            j = field_to_col.get(f, -1)
+            if j < 0 or j >= len(row["ranges"]):
+                continue
+            lo, hi = row["ranges"][j]
+            if lo <= v <= hi and (hi - v) < TIE_BUFFER_CM:
+                return True
+        return False
+
+    # 4) Find smallest accommodating row.
+    chosen_i: int | None = None
+    for i, r in enumerate(rows):
+        if _row_accommodates(r):
+            chosen_i = i
+            break
+
+    bumped = False
+    if chosen_i is None:
+        # User exceeds every row — recommend the largest size we saw.
+        chosen_i = len(rows) - 1
+    elif _row_is_tight(rows[chosen_i]) and chosen_i + 1 < len(rows):
+        # 5) Bigger-on-tie bump.
+        chosen_i += 1
+        bumped = True
+
+    user_max = user_vals[matched_field]
+
+    chosen = rows[chosen_i]
+    smaller_alt = rows[chosen_i - 1] if chosen_i > 0 else None
+
+    if bumped:
+        reason = (
+            f"Heuristic match: your {matched_field} ({user_max:g} cm) is right "
+            f"at the upper edge of the smaller size, so DressApp recommends "
+            f"the slightly bigger size {chosen['label'].upper()}. "
+            f"AI sizing engines were unavailable; this is a regex-based "
+            f"estimate."
+        )
+    else:
+        reason = (
+            f"Heuristic match: your {matched_field} ({user_max:g} cm) fits "
+            f"the {chosen['label'].upper()} row. AI sizing engines were "
+            f"unavailable; this is a regex-based estimate."
+        )
+
+    alternatives: list[dict[str, Any]] = []
+    if bumped and smaller_alt is not None:
+        alternatives.append({
+            "size": smaller_alt["label"].upper(),
+            "fit": "snug",
+        })
+
+    return {
+        "recommended_size": chosen["label"].upper(),
+        "confidence": 0.45,
+        "garment_type": "unknown",
+        "size_chart_units": "cm",
+        "matched_columns": [matched_field],
+        "reasoning": reason,
+        "alternatives": alternatives,
+    }
 
 
 # ------------------------------ route --------------------------------

@@ -29,6 +29,20 @@ export function dismissOverlay() {
   document.getElementById(SPINNER_ID)?.remove();
 }
 
+let _onDismissCb = null;
+function _runOnDismiss() {
+  const cb = _onDismissCb;
+  _onDismissCb = null;
+  if (typeof cb === 'function') {
+    try { cb(); } catch (_) { /* swallow */ }
+  }
+}
+
+function _dismissAndCallback() {
+  dismissOverlay();
+  _runOnDismiss();
+}
+
 export function mountSpinner() {
   dismissOverlay();
   const el = document.createElement('div');
@@ -53,6 +67,7 @@ function sourceLabel(s) {
 
 export function mountOverlay(opts) {
   dismissOverlay();
+  _onDismissCb = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
   const root = ensureRoot();
   root.innerHTML = '';
   const card = document.createElement('div');
@@ -66,7 +81,7 @@ export function mountOverlay(opts) {
   close.setAttribute('aria-label', 'Close DressApp recommendation');
   close.setAttribute('data-testid', 'dressapp-overlay-close');
   close.textContent = '×';
-  close.addEventListener('click', dismissOverlay);
+  close.addEventListener('click', _dismissAndCallback);
   card.appendChild(close);
 
   const title = document.createElement('div');
