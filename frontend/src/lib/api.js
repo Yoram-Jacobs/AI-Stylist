@@ -341,6 +341,19 @@ export const api = {
   adminEnableCampaign: (id) =>
     client.post(`/admin/promotions/campaigns/${id}/enable`).then((r) => r.data),
 
+  // --- Phase O.3: Eyes provider runtime override ---
+  // Snapshot of the currently-active vision provider on this pod
+  // (Qwen-VL / Gemma-4 E2B), the source of truth (env vs DB),
+  // wiring sanity flags, and the last analyse call recorded by
+  // ``provider_activity`` for the closet pipeline. Called by the
+  // admin-only Developer panel in Profile.
+  adminEyesStatus: () => client.get('/admin/eyes').then((r) => r.data),
+  // Persist (or clear) the runtime override. Pass ``provider``
+  // as ``"gemma"`` / ``"qwen"`` to set, or ``null`` / undefined to
+  // clear and revert to env-default.
+  adminEyesSet: (provider) =>
+    client.post('/admin/eyes', { provider: provider ?? null }).then((r) => r.data),
+
   // --- Phase 4P: PayPal / credits / marketplace buy ---
   paypalConfig: () => client.get('/paypal/config').then((r) => r.data),
   creditsBalance: (currency = 'USD') =>

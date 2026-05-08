@@ -171,8 +171,15 @@ async def _hf_chat_json(
     # except so a cold/sleeping Space, network blip, or malformed
     # JSON response never blocks the user. We record the failure on
     # ``provider_activity`` so the dashboard can surface regressions.
+    #
+    # The active provider is resolved through ``eyes_override`` so an
+    # admin can flip Qwen<->Gemma at runtime via the Profile toggle
+    # without restarting the backend.
+    from app.services import eyes_override
+
+    active_provider = (await eyes_override.get_active_provider()).lower()
     if (
-        (settings.EYES_PROVIDER or "").lower() == "gemma"
+        active_provider == "gemma"
         and settings.EYES_GEMMA_SPACE_URL
     ):
         t0 = time.perf_counter()

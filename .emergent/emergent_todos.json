@@ -1,18 +1,22 @@
 [
   {
-    "content": "Create /app/inference-server/eyes/ with Dockerfile, main.py, requirements.txt, README",
+    "content": "Backend: create services/eyes_override.py (DB-cached resolver)",
     "status": "completed"
   },
   {
-    "content": "Add 'eyes' service to /app/deploy/docker-compose.yml",
+    "content": "Backend: add GET/POST /admin/eyes endpoints",
     "status": "completed"
   },
   {
-    "content": "Patch backend garment_vision.py + config.py for EYES_API_TOKEN",
+    "content": "Backend: garment_vision.py uses resolver instead of env directly",
     "status": "completed"
   },
   {
-    "content": "Lint check + service status",
+    "content": "Frontend: admin-only Developer accordion in Profile.jsx",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + restart + smoke test",
     "status": "completed"
   }
 ]
