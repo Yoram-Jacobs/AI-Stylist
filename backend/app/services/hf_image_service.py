@@ -59,9 +59,16 @@ class HFImageService:
         self.token = settings.HF_TOKEN
         self.model = settings.HF_IMAGE_MODEL
         self.provider = settings.HF_IMAGE_PROVIDER
-        self._client = InferenceClient(
-            api_key=self.token, timeout=120, provider=self.provider
-        )
+        # Some installed versions of ``huggingface_hub`` don't support the
+        # ``provider`` kwarg. Try the modern signature first, then fall back
+        # so the app can still boot on older runtimes — image generation
+        # will simply default to the model's hosted inference.
+        try:
+            self._client = InferenceClient(
+                api_key=self.token, timeout=120, provider=self.provider
+            )
+        except TypeError:
+            self._client = InferenceClient(api_key=self.token, timeout=120)
 
     # -------------------- public API --------------------
     async def generate(

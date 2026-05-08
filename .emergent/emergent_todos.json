@@ -1,22 +1,30 @@
 [
   {
-    "content": "Rewrite eyes Dockerfile: multi-stage build of llama-server from llama.cpp HEAD",
+    "content": "Backend: POST /api/v1/sizes/analyze-chart endpoint",
     "status": "completed"
   },
   {
-    "content": "Rewrite main.py: spawn llama-server in lifespan, proxy /predict -> 127.0.0.1:8080/v1/chat/completions",
+    "content": "Frontend: ExtensionConnect.jsx page (token handoff)",
     "status": "completed"
   },
   {
-    "content": "Update requirements.txt: drop llama-cpp-python, add httpx",
+    "content": "Frontend: body-measurements editor (already exists in ProfileDetailsCard)",
     "status": "completed"
   },
   {
-    "content": "Update README + docker-compose if needed",
-    "status": "completed"
+    "content": "Extension: package.json + vite.config + manifest + tailwind",
+    "status": "in_progress"
   },
   {
-    "content": "Lint check + commit notes",
-    "status": "completed"
+    "content": "Extension: popup + background + lib",
+    "status": "pending"
+  },
+  {
+    "content": "Extension: content script + 6 adapters + generic + overlay",
+    "status": "pending"
+  },
+  {
+    "content": "Extension: README + restart backend",
+    "status": "pending"
   }
 ]
