@@ -1,30 +1,30 @@
 [
   {
-    "content": "Backend: POST /api/v1/sizes/analyze-chart endpoint",
+    "content": "Add generic.detectChartImage + extend detectAnchor for size pills/buttons",
     "status": "completed"
   },
   {
-    "content": "Frontend: ExtensionConnect.jsx page (token handoff)",
+    "content": "Add imageToB64 helper + screenshot fallback in content.js",
     "status": "completed"
   },
   {
-    "content": "Frontend: body-measurements editor (already exists in ProfileDetailsCard)",
+    "content": "Add CAPTURE_VISIBLE_TAB handler in service worker (tabs permission)",
     "status": "completed"
   },
   {
-    "content": "Extension: package.json + vite.config + manifest + tailwind",
+    "content": "Polish overlay with data-testids, retry button, dismiss affordances",
+    "status": "completed"
+  },
+  {
+    "content": "Add data-testids to popup connect/disconnect/measurements",
+    "status": "completed"
+  },
+  {
+    "content": "yarn build and verify dist",
+    "status": "completed"
+  },
+  {
+    "content": "Run testing agent on backend /sizes endpoint + extension build artefacts",
     "status": "in_progress"
-  },
-  {
-    "content": "Extension: popup + background + lib",
-    "status": "pending"
-  },
-  {
-    "content": "Extension: content script + 6 adapters + generic + overlay",
-    "status": "pending"
-  },
-  {
-    "content": "Extension: README + restart backend",
-    "status": "pending"
   }
 ]

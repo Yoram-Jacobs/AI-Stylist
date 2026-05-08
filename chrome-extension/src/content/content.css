@@ -61,6 +61,9 @@
 .dressapp-alts span { margin-right: 6px; }
 .dressapp-alts em { color: #94a3b8; font-style: normal; }
 
+.dressapp-overlay-actions { margin-top: 10px; display: flex; gap: 8px; }
+.dressapp-overlay-actions .dressapp-overlay-cta { cursor: pointer; border: 0; }
+
 .dressapp-overlay-spinner {
   position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
   display: flex; align-items: center; gap: 8px;

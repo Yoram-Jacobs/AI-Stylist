@@ -74,14 +74,42 @@ async function handleAnalyze(payload) {
   }
 }
 
+/**
+ * Capture the currently visible tab as a JPEG and return the base64
+ * payload (no ``data:`` prefix). Used by the content script as a
+ * last-resort OCR fallback when neither HTML nor a same-origin
+ * <img> chart can be extracted.
+ *
+ * Only works on tabs the user has explicitly interacted with thanks
+ * to the ``activeTab`` permission — i.e. immediately after the user
+ * clicks the DressApp button. We capture once and never store the
+ * pixels: the SW just forwards them onward to the backend.
+ */
+async function handleCaptureVisibleTab() {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
+      format: 'jpeg', quality: 70,
+    });
+    if (typeof dataUrl !== 'string') {
+      return { ok: false, error: 'captureVisibleTab returned no data' };
+    }
+    const i = dataUrl.indexOf(',');
+    const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+    return { ok: true, image_b64: b64 };
+  } catch (e) {
+    return { ok: false, error: e?.message || 'captureVisibleTab failed' };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Dispatch table.
   const handlers = {
-    [messages.RECEIVE_HANDOFF]: () => handleHandoff(msg.payload || msg),
-    [messages.AUTH_STATUS]:     () => handleAuthStatus(),
-    [messages.CLEAR_AUTH]:      () => handleClearAuth(),
-    [messages.FETCH_ME]:        () => handleFetchMe(),
-    [messages.ANALYZE_CHART]:   () => handleAnalyze(msg.payload),
+    [messages.RECEIVE_HANDOFF]:     () => handleHandoff(msg.payload || msg),
+    [messages.AUTH_STATUS]:         () => handleAuthStatus(),
+    [messages.CLEAR_AUTH]:          () => handleClearAuth(),
+    [messages.FETCH_ME]:            () => handleFetchMe(),
+    [messages.ANALYZE_CHART]:       () => handleAnalyze(msg.payload),
+    [messages.CAPTURE_VISIBLE_TAB]: () => handleCaptureVisibleTab(),
   };
   const handler = handlers[msg?.type];
   if (!handler) {
