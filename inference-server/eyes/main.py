@@ -1,52 +1,51 @@
-"""DressApp Eyes — self-hosted Gemma-4 E2B inference service (Hetzner).
+"""DressApp Eyes — FastAPI proxy in front of a local ``llama-server``.
 
-Drop-in replacement for the Qwen-VL leg of the closet pipeline. Hits
-the same JSON contract our backend's ``garment_vision._call_gemma_space``
-already expects:
+Why a proxy?
+------------
+The first iteration of this service used ``llama-cpp-python`` (a
+Python binding around llama.cpp). Its bundled C++ library was too
+old to load Gemma-4 GGUFs (arch ``gemma4``, merged upstream via
+Unsloth's PR #21343, post-April 2026). Rather than wait for a wheel
+release that catches up, the Dockerfile now compiles ``llama-server``
+from ``llama.cpp`` HEAD. This file orchestrates that binary.
 
-    POST /predict
-    Authorization: Bearer <EYES_API_TOKEN>
-    Content-Type:  application/json
-    Body: {
-        "prompt":     "...",          # OR
-        "messages":   [...],          # OpenAI chat shape
-        "system":     "...",          # optional
-        "image_b64":  "...",          # ignored in Phase 1 (no mmproj)
-        "image_mime": "image/jpeg",
-        "max_tokens": 512,
-        "temperature": 0.2,
-        "json_mode":  false
-    }
-    -> { output, finish_reason, tokens_prompt, tokens_completion,
-         elapsed_ms, vision_used, vision_disabled }
+What stays the same
+-------------------
+The public contract: ``POST /predict`` accepts the same JSON shape
+the backend's ``garment_vision._call_gemma_space`` already sends.
+``GET /healthz`` still gates traffic on llama-server being warm.
+Bearer-token auth on ``/predict`` still uses ``EYES_API_TOKEN``.
 
-Lifecycle:
-  1. Boot: lazy-download the fine-tuned GGUF from the private HF repo
-     (or skip if it's already cached in the mounted volume) using
-     ``EYES_HF_TOKEN``. Then load it into llama.cpp once.
-  2. Health: ``GET /healthz`` returns 503 until the model is loaded,
-     200 afterwards. Compose marks the service healthy only after
-     200, so backend startup ordering stays correct.
-  3. Auth: every endpoint except ``GET /`` and ``GET /healthz`` requires
-     ``Authorization: Bearer <EYES_API_TOKEN>``. If ``EYES_API_TOKEN``
-     is unset, auth is disabled (intended only for local debugging).
-  4. Concurrency: llama.cpp keeps a single KV cache per context, so
-     we serialise inference behind an asyncio.Lock. With 2 vCPUs that's
-     also the right policy for throughput — splitting threads across
-     concurrent requests would be slower than serving sequentially.
+What changes inside
+-------------------
+1. ``lifespan``  spawns ``llama-server`` as a subprocess on
+   ``127.0.0.1:8080`` (loopback only — never reachable from the
+   docker network), waits for its ``/health`` endpoint to flip
+   green, and keeps a process handle so it's reaped on shutdown.
 
-See ``inference-server/eyes/README.md`` for deploy instructions.
+2. ``/predict`` translates our custom JSON to the OpenAI-compatible
+   ``/v1/chat/completions`` shape, posts it to the local server,
+   then translates the response back. Vision (image_b64) follows
+   OpenAI's ``image_url`` content-part convention — works iff the
+   GGUF was built with multimodal support and the right mmproj.
+
+GGUF download is unchanged: lazy fetch from HuggingFace on first boot
+into the ``/models`` Docker volume, cached forever afterwards.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import shutil
+import signal
+import struct
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -56,29 +55,32 @@ logging.basicConfig(
 )
 log = logging.getLogger("dressapp-eyes")
 
-# ---- Config (all from env, with sane defaults) -----------------------
+# ---- Config (env, with defaults set in Dockerfile) ------------------
 MODEL_DIR = Path(os.environ.get("EYES_MODEL_DIR", "/models"))
 MODEL_REPO = os.environ.get("EYES_MODEL_REPO", "Yoram-Jacobs/dressapp-eyes-gguf")
 MODEL_FILE = os.environ.get("EYES_MODEL_FILE", "phase6-Q4_K_M.gguf")
-MMPROJ_FILE = os.environ.get("EYES_MMPROJ_FILE")  # set in Phase 2
+MMPROJ_FILE = os.environ.get("EYES_MMPROJ_FILE")
 HF_TOKEN = os.environ.get("EYES_HF_TOKEN")
-
-API_TOKEN = os.environ.get("EYES_API_TOKEN")  # bearer for backend->eyes
+API_TOKEN = os.environ.get("EYES_API_TOKEN")
 
 N_THREADS = int(os.environ.get("LLAMA_THREADS", "2"))
 N_CTX = int(os.environ.get("LLAMA_CTX_SIZE", "4096"))
 N_BATCH = int(os.environ.get("LLAMA_N_BATCH", "256"))
 
+LLAMA_BIN = os.environ.get("LLAMA_BIN", "/usr/local/bin/llama-server")
+LLAMA_INTERNAL_HOST = "127.0.0.1"
+LLAMA_INTERNAL_PORT = int(os.environ.get("LLAMA_INTERNAL_PORT", "8080"))
+LLAMA_BASE_URL = f"http://{LLAMA_INTERNAL_HOST}:{LLAMA_INTERNAL_PORT}"
 
-# ---- Lazy model download --------------------------------------------
+# How long we'll wait for llama-server to finish loading the model
+# before declaring the boot a failure. Cold-start of Q4_K_M on CPX32
+# takes ~12 s; double it generously.
+LLAMA_BOOT_TIMEOUT_S = float(os.environ.get("LLAMA_BOOT_TIMEOUT_S", "120"))
+
+
+# ---- GGUF lazy download (unchanged from the previous iteration) -----
 def _ensure_model_present() -> Path:
-    """Download the GGUF on first boot, then no-op forever.
-
-    The container mounts a named docker volume at ``/models`` so
-    repeated rebuilds, redeploys, and even ``docker compose down``
-    won't trigger another 3.4 GB pull. Only an explicit
-    ``docker volume rm dressapp_eyes-cache`` does.
-    """
+    """Download the GGUF on first boot, no-op forever afterwards."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     target = MODEL_DIR / MODEL_FILE
     if target.is_file() and target.stat().st_size > 100 * 1024 * 1024:
@@ -87,13 +89,11 @@ def _ensure_model_present() -> Path:
             target, target.stat().st_size / (1024**3),
         )
         return target
-
     if not HF_TOKEN:
         raise RuntimeError(
             "EYES_HF_TOKEN is not set; cannot download the private "
             f"model {MODEL_REPO}/{MODEL_FILE}."
         )
-
     log.info("downloading model: %s/%s", MODEL_REPO, MODEL_FILE)
     from huggingface_hub import hf_hub_download
 
@@ -104,14 +104,14 @@ def _ensure_model_present() -> Path:
         local_dir=str(MODEL_DIR),
         token=HF_TOKEN,
     )
-    elapsed = time.time() - t0
-    size = os.path.getsize(p) / (1024**3)
-    log.info("downloaded %s (%.2f GB) in %.1fs", p, size, elapsed)
+    log.info(
+        "downloaded %s (%.2f GB) in %.1fs",
+        p, os.path.getsize(p) / (1024**3), time.time() - t0,
+    )
     return Path(p)
 
 
 def _ensure_mmproj_present() -> Path | None:
-    """Download the optional vision projector if EYES_MMPROJ_FILE is set."""
     if not MMPROJ_FILE:
         return None
     target = MODEL_DIR / MMPROJ_FILE
@@ -119,7 +119,7 @@ def _ensure_mmproj_present() -> Path | None:
         return target
     if not HF_TOKEN:
         raise RuntimeError(
-            "EYES_HF_TOKEN is required to download the mmproj file."
+            "EYES_HF_TOKEN is required to download the mmproj file.",
         )
     from huggingface_hub import hf_hub_download
 
@@ -133,23 +133,14 @@ def _ensure_mmproj_present() -> Path | None:
     return Path(p)
 
 
+# ---- GGUF metadata sniff (kept — useful diagnostic on load failure) -
 def _peek_gguf_arch(path: Path) -> dict[str, Any]:
-    """Read the first few KV pairs from a GGUF header to surface the
-    architecture name and tokenizer model BEFORE we hand the file to
-    llama.cpp. llama.cpp's own load failure is a generic "Failed to
-    load model from file" with no detail; this pre-flight makes the
-    real reason ("architecture 'gemma3n' is not supported by this
-    build") obvious in the container log.
+    """Read the GGUF header and surface ``general.architecture`` etc.
 
-    Pure-Python parser of just enough of the GGUF v3 spec to read
-    ``general.architecture`` / ``general.name`` / ``general.quantization_version``.
-    Never raises — returns ``{}`` on any parse hiccup so a malformed
-    metadata block doesn't block the actual load attempt.
-
-    GGUF spec: https://github.com/ggml-org/ggml/blob/master/docs/gguf.md
+    llama-server's failure modes can be opaque (it just exits non-zero
+    if the arch is unsupported); this lets us log the arch BEFORE
+    spawning the binary, so the cause is staring you in the face.
     """
-    import struct
-
     out: dict[str, Any] = {}
     try:
         with open(path, "rb") as f:
@@ -167,19 +158,18 @@ def _peek_gguf_arch(path: Path) -> dict[str, Any]:
                 return f.read(n).decode("utf-8", errors="replace")
 
             def skip_value(value_type: int) -> None:
-                # Type IDs per GGUF v3 spec.
-                if value_type in (0, 1, 7):  # uint8, int8, bool
+                if value_type in (0, 1, 7):
                     f.read(1)
-                elif value_type in (2, 3):    # uint16, int16
+                elif value_type in (2, 3):
                     f.read(2)
-                elif value_type in (4, 5, 6):  # uint32, int32, float32
+                elif value_type in (4, 5, 6):
                     f.read(4)
-                elif value_type in (10, 11, 12):  # uint64, int64, float64
+                elif value_type in (10, 11, 12):
                     f.read(8)
-                elif value_type == 8:  # string
+                elif value_type == 8:
                     (n,) = struct.unpack("<Q", f.read(8))
                     f.read(n)
-                elif value_type == 9:  # array
+                elif value_type == 9:
                     (inner,) = struct.unpack("<I", f.read(4))
                     (n,) = struct.unpack("<Q", f.read(8))
                     for _ in range(n):
@@ -200,7 +190,10 @@ def _peek_gguf_arch(path: Path) -> dict[str, Any]:
                     if value_type == 8:
                         out[key] = read_str()
                     elif value_type in (4, 5):
-                        out[key] = struct.unpack("<i" if value_type == 5 else "<I", f.read(4))[0]
+                        out[key] = struct.unpack(
+                            "<i" if value_type == 5 else "<I",
+                            f.read(4),
+                        )[0]
                     else:
                         skip_value(value_type)
                 else:
@@ -210,78 +203,145 @@ def _peek_gguf_arch(path: Path) -> dict[str, Any]:
     return out
 
 
+# ---- llama-server lifecycle ----------------------------------------
+def _build_llama_argv(model_path: Path, mmproj_path: Path | None) -> list[str]:
+    """Compose the llama-server command line.
+
+    We bind to loopback only — the proxy is the only thing that talks
+    to it. ``--api-key`` is intentionally omitted: traffic never leaves
+    the container, and the proxy itself enforces ``EYES_API_TOKEN`` on
+    the public ``/predict``.
+
+    Flags chosen:
+      --jinja          — use the GGUF's embedded chat template (Gemma 4
+                          ships its own template; the right thing here).
+      --chat-template-kwargs — bypass tool-call parsing surprises.
+      -fa              — flash-attention; meaningful speedup on CPU too.
+      --no-warmup      — skip the synthetic warmup token; saves ~3 s
+                          and the first real request will warm naturally.
+    """
+    argv = [
+        LLAMA_BIN,
+        "--model", str(model_path),
+        "--host", LLAMA_INTERNAL_HOST,
+        "--port", str(LLAMA_INTERNAL_PORT),
+        "--ctx-size", str(N_CTX),
+        "--threads", str(N_THREADS),
+        "--batch-size", str(N_BATCH),
+        "--n-predict", "1024",
+        "--jinja",
+        "-fa", "auto",
+    ]
+    if mmproj_path is not None:
+        argv += ["--mmproj", str(mmproj_path)]
+    return argv
+
+
+async def _wait_for_llama_ready(client: httpx.AsyncClient) -> None:
+    """Poll llama-server's /health until it returns ``status: ok``.
+
+    llama-server transitions through ``loading model`` → ``ok``. We
+    accept anything 2xx with ``status==ok``. Anything else (including
+    a connection refused while it's still binding) is treated as
+    "not ready yet, keep waiting".
+    """
+    deadline = time.time() + LLAMA_BOOT_TIMEOUT_S
+    last_err: str | None = None
+    while time.time() < deadline:
+        try:
+            r = await client.get(f"{LLAMA_BASE_URL}/health", timeout=3.0)
+            if r.status_code == 200:
+                body = r.json()
+                if body.get("status") == "ok":
+                    return
+                last_err = f"status={body.get('status')!r}"
+            else:
+                last_err = f"http={r.status_code}"
+        except Exception as exc:  # noqa: BLE001
+            last_err = type(exc).__name__
+        await asyncio.sleep(1.0)
+    raise RuntimeError(
+        f"llama-server failed to become ready within "
+        f"{LLAMA_BOOT_TIMEOUT_S:.0f}s (last={last_err})",
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    from llama_cpp import Llama
+    if not shutil.which(LLAMA_BIN) and not Path(LLAMA_BIN).is_file():
+        raise RuntimeError(
+            f"llama-server binary not found at {LLAMA_BIN}. The "
+            "Dockerfile must build it from llama.cpp source.",
+        )
 
     model_path = _ensure_model_present()
     mmproj_path = _ensure_mmproj_present()
 
-    # Pre-flight metadata sniff. If llama.cpp fails to load the file
-    # below, this log line is what tells us whether the architecture
-    # is the issue (e.g., 'gemma3n' GGUF on a llama-cpp-python build
-    # too old for it) vs a corrupt download vs something else.
     meta = _peek_gguf_arch(model_path)
     log.info("gguf metadata: %s", meta)
 
-    chat_handler = None
-    vision_enabled = False
-    if mmproj_path is not None:
-        from llama_cpp.llama_chat_format import Llava15ChatHandler
-
-        log.info("vision projector found: %s", mmproj_path)
-        chat_handler = Llava15ChatHandler(clip_model_path=str(mmproj_path))
-        vision_enabled = True
-
-    log.info(
-        "loading model: %s (threads=%d ctx=%d)",
-        model_path, N_THREADS, N_CTX,
+    argv = _build_llama_argv(model_path, mmproj_path)
+    log.info("spawning: %s", " ".join(argv))
+    # We deliberately let llama-server inherit stdout/stderr so its
+    # log lines (token throughput, KV cache, etc.) show up next to
+    # ours in ``docker compose logs``. Easier debugging.
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=None, stderr=None,
+        # Run in its own process group so we can SIGTERM the whole
+        # group on shutdown (llama-server forks worker threads but
+        # they all die with the parent — group is belt-and-braces).
+        start_new_session=True,
     )
-    t0 = time.time()
+
+    client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0))
     try:
-        llm = Llama(
-            model_path=str(model_path),
-            n_ctx=N_CTX,
-            n_threads=N_THREADS,
-            n_batch=N_BATCH,
-            chat_handler=chat_handler,
-            chat_format="gemma" if chat_handler is None else None,
-            # mmap is faster than read() on a single resident process; on
-            # a 4 GB-RAM CX22 it also lets the kernel reclaim cold pages
-            # under pressure instead of OOM-killing the whole container.
-            use_mmap=True,
-            use_mlock=False,
-            verbose=False,
-            logits_all=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        # Surface the metadata one more time on failure so the user
-        # doesn't have to scroll up — the architecture string is
-        # almost always the smoking gun.
-        log.error(
-            "Llama() init failed for %s. GGUF metadata: %s. Error: %s",
-            model_path, meta, exc,
-        )
+        await _wait_for_llama_ready(client)
+    except Exception:
+        # Don't leave a half-loaded llama-server eating 4 GB of RAM
+        # if /health never went green.
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        await client.aclose()
         raise
-    _app.state.llm = llm
+
+    _app.state.llama_proc = proc
+    _app.state.client = client
     _app.state.lock = asyncio.Lock()
-    _app.state.vision_enabled = vision_enabled
+    _app.state.vision_enabled = mmproj_path is not None
     _app.state.loaded_at = time.time()
     _app.state.model_basename = model_path.name
+    _app.state.gguf_metadata = meta
     log.info(
-        "model ready in %.1fs (vision=%s)",
-        time.time() - t0, vision_enabled,
+        "ready: model=%s vision=%s",
+        model_path.name, _app.state.vision_enabled,
     )
+
     try:
         yield
     finally:
-        log.info("shutdown")
+        log.info("shutdown: stopping llama-server")
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10.0)
+        except asyncio.TimeoutError:
+            log.warning("llama-server did not exit on SIGTERM, sending KILL")
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        await client.aclose()
 
 
 app = FastAPI(
     title="DressApp Eyes",
-    version="phase1-q4km-hetzner",
-    description="Self-hosted fine-tuned Gemma-4 E2B for garment analysis.",
+    version="phase1-llama-server",
+    description="FastAPI proxy in front of llama-server for fine-tuned Gemma-4 E2B.",
     lifespan=lifespan,
 )
 
@@ -289,14 +349,14 @@ app = FastAPI(
 # ---- Auth -----------------------------------------------------------
 def _require_token(authorization: str | None = Header(default=None)) -> None:
     if not API_TOKEN:
-        return  # auth disabled (dev only)
+        return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     if authorization.split(" ", 1)[1].strip() != API_TOKEN:
         raise HTTPException(status_code=401, detail="bad bearer token")
 
 
-# ---- Schemas --------------------------------------------------------
+# ---- Schemas (unchanged from previous main.py) ----------------------
 class ChatTurn(BaseModel):
     role: str = Field(..., pattern="^(system|user|assistant)$")
     content: str
@@ -308,7 +368,7 @@ class PredictIn(BaseModel):
     messages: list[ChatTurn] | None = None
     image_b64: str | None = None
     image_mime: str = "image/jpeg"
-    max_tokens: int = Field(default=512, ge=1, le=2048)
+    max_tokens: int = Field(default=512, ge=1, le=4096)
     temperature: float = Field(default=0.2, ge=0.0, le=1.5)
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
     json_mode: bool = False
@@ -324,13 +384,15 @@ class PredictOut(BaseModel):
     vision_disabled: bool = False
 
 
-# ---- Public endpoints (no auth) -------------------------------------
+# ---- Public endpoints ----------------------------------------------
 @app.get("/")
 async def root() -> dict[str, Any]:
     return {
         "service": "dressapp-eyes",
         "phase": "1",
+        "engine": "llama-server (built from llama.cpp HEAD)",
         "model": getattr(app.state, "model_basename", MODEL_FILE),
+        "gguf_metadata": getattr(app.state, "gguf_metadata", {}),
         "vision_enabled": getattr(app.state, "vision_enabled", False),
         "auth_required": bool(API_TOKEN),
         "endpoints": ["GET /", "GET /healthz", "POST /predict"],
@@ -339,8 +401,17 @@ async def root() -> dict[str, Any]:
 
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
-    if not getattr(app.state, "llm", None):
-        raise HTTPException(status_code=503, detail="model loading")
+    proc = getattr(app.state, "llama_proc", None)
+    if proc is None or proc.returncode is not None:
+        raise HTTPException(status_code=503, detail="llama-server not running")
+    client: httpx.AsyncClient = app.state.client
+    try:
+        r = await client.get(f"{LLAMA_BASE_URL}/health", timeout=2.0)
+        ok = (r.status_code == 200) and (r.json().get("status") == "ok")
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(status_code=503, detail="llama-server not healthy")
     return {
         "status": "ok",
         "model": app.state.model_basename,
@@ -349,8 +420,9 @@ async def healthz() -> dict[str, Any]:
     }
 
 
-# ---- Inference (auth required) --------------------------------------
-def _build_messages(req: PredictIn) -> list[dict[str, Any]]:
+# ---- Inference (auth required) -------------------------------------
+def _build_openai_messages(req: PredictIn) -> list[dict[str, Any]]:
+    """Translate our custom shape -> OpenAI /v1/chat/completions."""
     if req.messages:
         msgs: list[dict[str, Any]] = [
             {"role": m.role, "content": m.content} for m in req.messages
@@ -367,19 +439,21 @@ def _build_messages(req: PredictIn) -> list[dict[str, Any]]:
         msgs.append({"role": "user", "content": req.prompt})
 
     if app.state.vision_enabled and req.image_b64:
-        target_idx = None
+        # Find the LAST user message and convert its content to the
+        # OpenAI multimodal "list of parts" form. llama-server with
+        # ``--mmproj`` understands ``image_url`` parts identically.
+        target = None
         for i in range(len(msgs) - 1, -1, -1):
             if msgs[i]["role"] == "user":
-                target_idx = i
+                target = i
                 break
-        if target_idx is None:
+        if target is None:
             msgs.append({"role": "user", "content": []})
-            target_idx = len(msgs) - 1
-
-        existing = msgs[target_idx]["content"]
+            target = len(msgs) - 1
+        existing = msgs[target]["content"]
         text_blob = existing if isinstance(existing, str) else ""
         data_url = f"data:{req.image_mime};base64,{req.image_b64}"
-        msgs[target_idx]["content"] = [
+        msgs[target]["content"] = [
             {"type": "image_url", "image_url": {"url": data_url}},
             {"type": "text", "text": text_blob},
         ]
@@ -392,32 +466,40 @@ def _build_messages(req: PredictIn) -> list[dict[str, Any]]:
     dependencies=[Depends(_require_token)],
 )
 async def predict(req: PredictIn) -> PredictOut:
-    llm = app.state.llm
-    if llm is None:
-        raise HTTPException(status_code=503, detail="model not loaded")
-    msgs = _build_messages(req)
-
-    kwargs: dict[str, Any] = {
+    msgs = _build_openai_messages(req)
+    payload: dict[str, Any] = {
+        "model": "local",  # llama-server ignores model name; field required.
         "messages": msgs,
         "max_tokens": req.max_tokens,
         "temperature": req.temperature,
         "top_p": req.top_p,
+        "stream": False,
     }
     if req.json_mode:
-        kwargs["response_format"] = {"type": "json_object"}
+        payload["response_format"] = {"type": "json_object"}
 
+    client: httpx.AsyncClient = app.state.client
     t0 = time.time()
     async with app.state.lock:
         try:
-            res = await asyncio.to_thread(
-                llm.create_chat_completion, **kwargs,
+            r = await client.post(
+                f"{LLAMA_BASE_URL}/v1/chat/completions",
+                json=payload,
+                timeout=httpx.Timeout(120.0, connect=5.0),
             )
-        except Exception as exc:  # noqa: BLE001
-            log.exception("inference failure")
+        except httpx.HTTPError as exc:
+            log.exception("llama-server request failed")
             raise HTTPException(
-                status_code=500, detail=f"inference error: {exc}",
+                status_code=502, detail=f"llama-server error: {exc}",
             ) from exc
 
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"llama-server returned {r.status_code}: {r.text[:300]}",
+        )
+
+    res = r.json()
     elapsed_ms = int((time.time() - t0) * 1000)
     choice = (res.get("choices") or [{}])[0]
     msg = choice.get("message") or {}

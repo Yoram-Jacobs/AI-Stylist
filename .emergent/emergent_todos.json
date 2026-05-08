@@ -1,22 +1,22 @@
 [
   {
-    "content": "Backend: create services/eyes_override.py (DB-cached resolver)",
+    "content": "Rewrite eyes Dockerfile: multi-stage build of llama-server from llama.cpp HEAD",
     "status": "completed"
   },
   {
-    "content": "Backend: add GET/POST /admin/eyes endpoints",
+    "content": "Rewrite main.py: spawn llama-server in lifespan, proxy /predict -> 127.0.0.1:8080/v1/chat/completions",
     "status": "completed"
   },
   {
-    "content": "Backend: garment_vision.py uses resolver instead of env directly",
+    "content": "Update requirements.txt: drop llama-cpp-python, add httpx",
     "status": "completed"
   },
   {
-    "content": "Frontend: admin-only Developer accordion in Profile.jsx",
+    "content": "Update README + docker-compose if needed",
     "status": "completed"
   },
   {
-    "content": "Lint + restart + smoke test",
+    "content": "Lint check + commit notes",
     "status": "completed"
   }
 ]

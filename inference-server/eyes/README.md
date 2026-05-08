@@ -99,16 +99,22 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env \
   up -d --build eyes
 ```
 
-First boot pulls the wheel index + builds llama-cpp-python from
-source + downloads the 3.4 GB GGUF — budget **8–15 min** on the
-first run, then **~30 s** for every restart afterward (the GGUF and
-the compiled wheel layer are both cached).
+First boot: clones llama.cpp HEAD + compiles `llama-server` + downloads
+the 3.4 GB GGUF — budget **10–15 min** on the first run, then **~1 min**
+for every restart afterward (compile layer cached, GGUF cached).
 
-Why the source build? Plain "linux_x86_64" wheels published by
-abetlen are built against MUSL libc (Alpine) and fail with
-`libc.musl-x86_64.so.1: cannot open shared object file` on the
-glibc-based Debian image we use. Compiling from source on the VPS
-is the only Debian-compatible path; CPX32 handles it cleanly.
+Why we build llama.cpp from source instead of using a Python wheel:
+the fine-tune is `unsloth/gemma-4-e2b-it-unsloth-bnb-4bit` (Google
+Gemma-4, April 2026). The GGUF is tagged with arch `gemma4`. Stock
+`llama-cpp-python` wheels (latest 0.3.22) bundle a llama.cpp commit
+from before the Gemma-4 loader merged (Unsloth's PR #21343), so they
+reject the file with the opaque "Failed to load model from file"
+error. Building llama.cpp from HEAD picks up the `gemma4` loader.
+
+The container runs `llama-server` on the loopback (127.0.0.1:8080)
+and FastAPI proxies our existing `/predict` shape onto its
+OpenAI-compatible `/v1/chat/completions`. Backend's
+`garment_vision._call_gemma_space` contract is unchanged.
 
 Watch the build + boot:
 
@@ -120,11 +126,17 @@ You should see, in order:
 
 ```
 eyes  | downloading model: Yoram-Jacobs/dressapp-eyes-gguf/phase6-Q4_K_M.gguf
-eyes  | downloaded /models/phase6-Q4_K_M.gguf (3.42 GB) in 92.4s
-eyes  | loading model: /models/phase6-Q4_K_M.gguf (threads=4 ctx=4096)
-eyes  | model ready in 12.1s (vision=False)
+eyes  | downloaded /models/phase6-Q4_K_M.gguf (3.42 GB) in ~90s
+eyes  | gguf metadata: {'general.architecture': 'gemma4', ...}
+eyes  | spawning: /usr/local/bin/llama-server --model /models/...
+eyes  | <llama-server's own log: model load, KV cache size, threads>
+eyes  | ready: model=phase6-Q4_K_M.gguf vision=False
 eyes  | INFO:     Uvicorn running on http://0.0.0.0:7860
 ```
+
+If you ever see `Failed to load model from file` again, the metadata
+line directly above tells you exactly which arch the GGUF claims —
+match it against [llama.cpp's supported arch list](https://github.com/ggml-org/llama.cpp).
 
 ### 4. Restart the backend so it picks up the new env
 
