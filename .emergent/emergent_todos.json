@@ -1,30 +1,18 @@
 [
   {
-    "content": "Add generic.detectChartImage + extend detectAnchor for size pills/buttons",
+    "content": "Rebuild extension to ensure dist/ is fresh",
     "status": "completed"
   },
   {
-    "content": "Add imageToB64 helper + screenshot fallback in content.js",
+    "content": "Create EXTENSION_INSTALL.md with load-unpacked + per-store guide",
     "status": "completed"
   },
   {
-    "content": "Add CAPTURE_VISIBLE_TAB handler in service worker (tabs permission)",
+    "content": "Zip dist/ to /app/chrome-extension/dressapp-extension.zip",
     "status": "completed"
   },
   {
-    "content": "Polish overlay with data-testids, retry button, dismiss affordances",
-    "status": "completed"
-  },
-  {
-    "content": "Add data-testids to popup connect/disconnect/measurements",
-    "status": "completed"
-  },
-  {
-    "content": "yarn build and verify dist",
-    "status": "completed"
-  },
-  {
-    "content": "Run testing agent on backend /sizes endpoint + extension build artefacts",
+    "content": "Verify zip integrity and report final paths to user",
     "status": "completed"
   }
 ]
