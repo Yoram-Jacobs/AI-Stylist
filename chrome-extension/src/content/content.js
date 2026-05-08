@@ -217,16 +217,19 @@ async function onAnalyze(ev) {
       if (!chart_screenshot_b64) {
         const cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
         if (cap?.ok && cap.image_b64) chart_screenshot_b64 = cap.image_b64;
+        else log('captureVisibleTab failed (image fallback)', cap?.error);
       }
     } else if (!chartEl) {
       const cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
       if (cap?.ok && cap.image_b64) {
         chart_screenshot_b64 = cap.image_b64;
       } else {
+        const why = cap?.error || 'screenshot permission denied';
+        log('captureVisibleTab failed', why);
         mountOverlay({
           kind: 'warn',
           title: 'No size chart visible',
-          message: 'Open the store\'s size-guide modal (or Description tab) so the chart is on-screen, then click the DressApp button again.',
+          message: `Open the store's size-guide modal (or Description tab) so the chart is on-screen, then click DressApp again. (${why})`,
           retry: () => onAnalyze(),
           onDismiss: showFab,
         });

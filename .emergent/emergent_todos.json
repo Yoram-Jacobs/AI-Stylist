@@ -1,26 +1,22 @@
 [
   {
-    "content": "Add persistent floating action button to content.js (FAB) with hide-while-overlay",
+    "content": "Add shopping-site host_permissions for captureVisibleTab",
     "status": "completed"
   },
   {
-    "content": "Make detectChart/detectChartImage prefer open modals + active tab panels",
+    "content": "Surface real capture/analyze error in overlay warning + console",
     "status": "completed"
   },
   {
-    "content": "Update backend system prompt: prefer bigger size when between sizes",
+    "content": "Rewrite backend Qwen leg to use Qwen-VL multimodal w/ screenshot",
     "status": "completed"
   },
   {
-    "content": "Update heuristic _match: prefer bigger row on tie + tightness check",
+    "content": "Improve prompt: explicit step-by-step reasoning + screenshot guidance + bigger-on-tie",
     "status": "completed"
   },
   {
-    "content": "Rebuild extension + repackage zip",
-    "status": "completed"
-  },
-  {
-    "content": "Smoke-test backend with TestClient on tie-case + verify build",
+    "content": "Rebuild + repackage extension; smoke-test backend",
     "status": "completed"
   }
 ]

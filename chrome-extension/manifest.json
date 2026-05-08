@@ -63,7 +63,19 @@
   "host_permissions": [
     "https://dressapp.co/*",
     "https://*.dressapp.co/*",
-    "https://*.preview.emergentagent.com/*"
+    "https://*.preview.emergentagent.com/*",
+    "https://*.zara.com/*",
+    "https://*.asos.com/*",
+    "https://*.shein.com/*",
+    "https://*.hm.com/*",
+    "https://*.amazon.com/*",
+    "https://*.amazon.co.uk/*",
+    "https://*.amazon.de/*",
+    "https://*.amazon.fr/*",
+    "https://*.amazon.it/*",
+    "https://*.amazon.es/*",
+    "https://*.aliexpress.com/*",
+    "https://*.aliexpress.us/*"
   ],
   "externally_connectable": {
     "matches": [

@@ -115,14 +115,26 @@ class AnalyzeChartOut(BaseModel):
 _SYSTEM_PROMPT = """You are DressApp's sizing assistant.
 
 You are given:
-  * A clothing size chart from a third-party shopping site (HTML, plain
-    text, or as an image to OCR).
-  * The user's body measurements.
+  * A clothing size chart from a third-party shopping site. It can
+    arrive as **HTML**, as **plain text**, or as a **screenshot image**
+    that you must OCR. The screenshot may be a tightly-cropped chart
+    image OR a full browser viewport — in the latter case ignore the
+    surrounding product photos, navigation, ads, and reviews and focus
+    only on the obvious tabular region with size labels (S/M/L/EU 38…)
+    and numeric ranges (cm or in).
+  * The user's body measurements (chest / bust, waist, hips, etc.).
   * Optional metadata: garment type hint, store name, page title.
 
-Pick the size that best fits the user. Honour each measurement column
-strictly — never recommend a size where one of the user's measurements
-is larger than the column's upper bound by more than 1 cm (or 0.5 in).
+Reason step-by-step **internally** before answering:
+  1. Identify the size chart in the input. Note the column headers
+     (chest / bust / waist / hip / shoulder / sleeve / inseam …) and
+     the units (cm or in).
+  2. For every row, list the numeric ranges per column.
+  3. Compare the user's measurements against the relevant columns.
+  4. Pick the smallest size where every relevant user measurement
+     fits inside (or equal to) the row's column upper bound.
+  5. Apply the **bigger-on-tie** rule below.
+  6. Emit the final JSON.
 
 **Tie-breaking rule (very important):** when the user's measurements
 fall *between* two sizes — i.e. they sit at the boundary of a smaller
@@ -131,12 +143,12 @@ column tightly while the next size up gives clear room — ALWAYS
 recommend the slightly **bigger** size. A garment that's a little
 loose is wearable; one that's too tight is not. Mention the smaller
 size as an alternative with ``"fit": "snug"`` so the user knows the
-trade-off.
+trade-off. Never recommend a size where one of the user's
+measurements is larger than the column's upper bound by more than
+1 cm (or 0.5 in).
 
-When measurements straddle two sizes, name the chosen (bigger) size
-and put the smaller one in ``alternatives``.
-
-Return ONLY valid JSON. No markdown, no backticks. Schema:
+Return ONLY valid JSON. No markdown, no backticks, no chain-of-thought.
+Schema:
 
 {
   "recommended_size":  "<single label from the chart, e.g. 'M' or 'EU 38'>",
@@ -148,9 +160,10 @@ Return ONLY valid JSON. No markdown, no backticks. Schema:
   "alternatives":      [{"size":"S","fit":"snug"}, ...]
 }
 
-If you can't find a usable chart in the input, set
-``recommended_size`` to null, ``confidence`` to 0.0, and explain in
-``reasoning``."""
+If you cannot find a usable chart in the input (e.g. the screenshot
+shows only product photos and no table), set ``recommended_size`` to
+null, ``confidence`` to 0.0, and explain in ``reasoning`` what was
+missing so the user knows what to do next."""
 
 
 def _build_user_prompt(
@@ -308,40 +321,51 @@ async def _via_gemma(
     )
 
 
-async def _via_qwen(*, system_prompt: str, user_text: str) -> str:
-    """Fallback: DashScope Qwen text endpoint.
+async def _via_qwen(
+    *, system_prompt: str, user_text: str, image_b64: str | None = None,
+) -> str:
+    """Vision-aware fallback: DashScope Qwen-VL multimodal endpoint.
 
-    We deliberately use the text-only path here (not Qwen-VL) because:
-      a) the chart text we already extracted is cheaper + faster,
-      b) the user's screenshot path goes to Gemma-4 anyway in step 1.
-    Lazy-import dashscope so a deploy without the Qwen key doesn't
-    fail to load this module.
+    When the caller provides a screenshot we forward it as an inline
+    ``data:image/jpeg;base64`` part, which Qwen-VL models (qwen-vl-max,
+    qwen-vl-plus) OCR alongside the text prompt. When no screenshot is
+    available the call still works as a pure-text request — Qwen-VL
+    accepts text-only inputs.
+
+    Uses the shared :mod:`qwen_client` (httpx async, JSON-mode parsing,
+    automatic retries on 429/5xx). Falls back gracefully if the
+    DashScope key is unset so dev pods that don't have one configured
+    can still serve the heuristic.
     """
     if not getattr(settings, "DASHSCOPE_API_KEY", None):
         raise RuntimeError("DASHSCOPE_API_KEY not configured for Qwen fallback.")
     try:
-        import dashscope  # type: ignore
+        from app.services.qwen_client import (
+            QwenMessage, encode_image, get_qwen_client,
+        )
     except ImportError as exc:
-        raise RuntimeError("dashscope SDK not installed.") from exc
+        raise RuntimeError("qwen_client unavailable.") from exc
 
-    dashscope.api_key = settings.DASHSCOPE_API_KEY
-    resp = dashscope.Generation.call(
-        model="qwen-plus",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_text},
-        ],
-        result_format="message",
+    client = get_qwen_client()
+    images: list[str] = []
+    if image_b64:
+        images.append(encode_image(image_b64))
+
+    messages = [
+        QwenMessage(role="system", text=system_prompt),
+        QwenMessage(role="user", text=user_text, images=images),
+    ]
+    # qwen-vl-max-latest handles complex tables better than qwen-plus,
+    # and we already have it configured for the stylist brain. The
+    # 1500 token cap leaves enough room for a full reasoning paragraph
+    # plus the JSON envelope; max chart parse responses are ~400 tokens.
+    return await client.chat(
+        messages,
+        model=settings.QWEN_BRAIN_MODEL,
+        max_tokens=1500,
         temperature=0.1,
-        max_tokens=600,
+        response_format_json=True,
     )
-    if getattr(resp, "status_code", 200) != 200:
-        raise RuntimeError(f"Qwen status {resp.status_code}: {getattr(resp, 'message', '')[:200]}")
-    out = resp.output  # type: ignore[attr-defined]
-    try:
-        return out["choices"][0]["message"]["content"]  # type: ignore[index]
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Qwen unexpected response shape: {exc}") from exc
 
 
 # --------------------------- numeric fallback ------------------------
@@ -630,11 +654,13 @@ async def analyze_chart(
                 extra={"op": "size-chart"},
             )
 
-    # Step 2 — Qwen fallback (text only).
+    # Step 2 — Qwen-VL fallback (multimodal: forwards screenshot to OCR).
     if parsed is None:
         try:
             raw = await _via_qwen(
-                system_prompt=_SYSTEM_PROMPT, user_text=user_prompt,
+                system_prompt=_SYSTEM_PROMPT,
+                user_text=user_prompt,
+                image_b64=payload.chart_screenshot_b64,
             )
             parsed = _coerce_response(raw)
             if parsed:
@@ -642,7 +668,7 @@ async def analyze_chart(
             provider_activity.record(
                 "qwen", ok=parsed is not None,
                 latency_ms=int((time.time() - t0) * 1000),
-                extra={"op": "size-chart"},
+                extra={"op": "size-chart", "with_image": bool(payload.chart_screenshot_b64)},
             )
         except Exception as exc:  # noqa: BLE001
             log.info("qwen fallback failed: %s; first=%s", exc, err_first)
