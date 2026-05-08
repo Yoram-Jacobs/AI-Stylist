@@ -51,6 +51,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import asyncio
 import time
 from typing import Any
 
@@ -441,16 +442,12 @@ async def _via_qwen(
 ) -> str:
     """Vision-aware fallback: DashScope Qwen-VL multimodal endpoint.
 
-    When the caller provides a screenshot we forward it as an inline
-    ``data:image/jpeg;base64`` part, which Qwen-VL models (qwen-vl-max,
-    qwen-vl-plus) OCR alongside the text prompt. When no screenshot is
-    available the call still works as a pure-text request — Qwen-VL
-    accepts text-only inputs.
-
-    Uses the shared :mod:`qwen_client` (httpx async, JSON-mode parsing,
-    automatic retries on 429/5xx). Falls back gracefully if the
-    DashScope key is unset so dev pods that don't have one configured
-    can still serve the heuristic.
+    Wrapped in ``asyncio.wait_for`` with an explicit cap so a sluggish
+    DashScope round-trip doesn't keep the entire size endpoint hanging
+    for the user-facing 30 s. If the call exceeds the budget we raise
+    ``TimeoutError`` and let the orchestrator fall through to the
+    heuristic, which now reads any HTML the extension forwards
+    alongside the screenshot.
     """
     if not getattr(settings, "DASHSCOPE_API_KEY", None):
         raise RuntimeError("DASHSCOPE_API_KEY not configured for Qwen fallback.")
@@ -470,16 +467,18 @@ async def _via_qwen(
         QwenMessage(role="system", text=system_prompt),
         QwenMessage(role="user", text=user_text, images=images),
     ]
-    # qwen-vl-max-latest handles complex tables better than qwen-plus,
-    # and we already have it configured for the stylist brain. The
-    # 1500 token cap leaves enough room for a full reasoning paragraph
-    # plus the JSON envelope; max chart parse responses are ~400 tokens.
-    return await client.chat(
-        messages,
-        model=settings.QWEN_BRAIN_MODEL,
-        max_tokens=1500,
-        temperature=0.1,
-        response_format_json=True,
+    # 20 s budget: long enough for a one-shot multimodal call against a
+    # warm DashScope instance, short enough that a stuck connection
+    # doesn't strangle the size endpoint.
+    return await asyncio.wait_for(
+        client.chat(
+            messages,
+            model=settings.QWEN_BRAIN_MODEL,
+            max_tokens=1500,
+            temperature=0.1,
+            response_format_json=True,
+        ),
+        timeout=20.0,
     )
 
 

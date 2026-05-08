@@ -1,18 +1,14 @@
 [
   {
-    "content": "Make crop rectangle resizable (8 handles + drag-to-move) after first draw",
+    "content": "cropAndAnalyze: also extract overlapping <table> HTML and send chart_html",
     "status": "completed"
   },
   {
-    "content": "Show crop size in pixels next to Apply button so user has feedback",
+    "content": "Tighten Qwen-VL request timeout so heuristic kicks in fast on dead engines",
     "status": "completed"
   },
   {
-    "content": "Console diagnostic on Apply with dpr / src / cropped pixel size",
-    "status": "completed"
-  },
-  {
-    "content": "Rebuild + repackage extension",
+    "content": "Build + repackage extension",
     "status": "completed"
   }
 ]

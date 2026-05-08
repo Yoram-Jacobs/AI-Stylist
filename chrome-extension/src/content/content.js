@@ -536,6 +536,42 @@ function _normaliseRect({ x, y, w, h }) {
 }
 
 /**
+ * Find the best HTML chart-shaped node whose bounding box overlaps
+ * the crop rectangle. We score `<table>` elements by intersection
+ * area + the existing `generic.detectChart` chart-likeness signal,
+ * which lets us send the underlying structured HTML alongside the
+ * cropped screenshot. The backend can then run its instant heuristic
+ * on the text without waiting on the LLM.
+ *
+ * Returns the matching element's outerHTML (capped at 60 KB) or null.
+ */
+function _extractHtmlInRect(rect) {
+  const cx2 = rect.x + rect.w;
+  const cy2 = rect.y + rect.h;
+  const tables = Array.from(document.querySelectorAll('table'));
+  let best = null;
+  let bestArea = 0;
+  for (const t of tables) {
+    if (!t.isConnected) continue;
+    const r = t.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const ix = Math.max(0, Math.min(r.right, cx2) - Math.max(r.left, rect.x));
+    const iy = Math.max(0, Math.min(r.bottom, cy2) - Math.max(r.top, rect.y));
+    const inter = ix * iy;
+    if (inter <= 0) continue;
+    // Bias toward tables that look chart-like (size keywords + numbers).
+    const txt = (t.innerText || '').toLowerCase();
+    const looksChart = /\b(size|chest|bust|waist|hip|shoulder|sleeve|length)\b/.test(txt) && /\d/.test(txt);
+    const score = inter * (looksChart ? 4 : 1);
+    if (score > bestArea) {
+      bestArea = score;
+      best = t;
+    }
+  }
+  return best ? best.outerHTML.slice(0, 60_000) : null;
+}
+
+/**
  * Capture the viewport, crop to the user's CSS-pixel rectangle, send
  * the result for analysis. The crop happens locally in a canvas so we
  * never ship the surrounding (potentially-sensitive) viewport content
@@ -544,58 +580,62 @@ function _normaliseRect({ x, y, w, h }) {
 async function cropAndAnalyze(rect) {
   mountSpinner();
   try {
+    // 1) Try to also pull the HTML table the user just framed. When
+    //    the chart is HTML (e.g. AliExpress Size Guide modal), this
+    //    lets the backend's heuristic answer in <50 ms without
+    //    waiting on the LLM stack.
+    const chart_html = _extractHtmlInRect(rect);
+
+    // 2) Capture and crop the viewport screenshot for the LLM path.
     const screenshot = await _captureViewportWithPermission();
-    if (!screenshot) {
+    let cropped = null;
+    if (screenshot) {
+      try {
+        const dataUrl = `data:image/jpeg;base64,${screenshot}`;
+        const img = await _loadImage(dataUrl);
+        const dpr = window.devicePixelRatio || 1;
+        const sx = Math.max(0, Math.round(rect.x * dpr));
+        const sy = Math.max(0, Math.round(rect.y * dpr));
+        const sw = Math.min(img.width - sx, Math.round(rect.w * dpr));
+        const sh = Math.min(img.height - sy, Math.round(rect.h * dpr));
+        if (sw >= 8 && sh >= 8) {
+          const canvas = document.createElement('canvas');
+          canvas.width = sw;
+          canvas.height = sh;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+            cropped = _stripDataPrefix(canvas.toDataURL('image/jpeg', 0.88));
+          }
+        }
+        if (window.localStorage?.getItem('dressapp_debug')) {
+          console.info(LOG_PREFIX, 'crop sent', {
+            cssRect: rect,
+            sourceImg: { w: img.width, h: img.height },
+            cropPx: { sx, sy, sw, sh },
+            dpr,
+            b64Len: cropped?.length || 0,
+            chartHtmlLen: chart_html?.length || 0,
+          });
+        }
+      } catch (e) {
+        log('crop canvas failed', e);
+      }
+    }
+
+    if (!chart_html && !cropped) {
       mountOverlay({
         kind: 'warn',
-        title: 'Screenshot blocked',
-        message: 'DressApp needs the optional "all sites" permission to capture this page. Click the DressApp toolbar icon and approve the permission, then try again.',
+        title: 'Couldn\'t capture this region',
+        message: 'DressApp needs either a visible HTML table inside the box or the optional "all sites" permission for a screenshot. Click the DressApp toolbar icon, approve the permission, then try again.',
         retry: () => enterCropMode({ reason: 'manual' }),
         onDismiss: showFab,
       });
       return;
-    }
-
-    const dataUrl = `data:image/jpeg;base64,${screenshot}`;
-    const img = await _loadImage(dataUrl);
-
-    // The captured image is at devicePixelRatio scale relative to
-    // CSS-pixel coordinates the user dragged in. Multiply through.
-    const dpr = window.devicePixelRatio || 1;
-    const sx = Math.max(0, Math.round(rect.x * dpr));
-    const sy = Math.max(0, Math.round(rect.y * dpr));
-    const sw = Math.min(img.width - sx, Math.round(rect.w * dpr));
-    const sh = Math.min(img.height - sy, Math.round(rect.h * dpr));
-    if (sw < 8 || sh < 8) {
-      mountOverlay({
-        kind: 'warn',
-        title: 'Selection too small',
-        message: 'Drag a larger rectangle around the size chart.',
-        retry: () => enterCropMode({ reason: 'manual' }),
-        onDismiss: showFab,
-      });
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = sw;
-    canvas.height = sh;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas 2D context unavailable');
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    const cropped = _stripDataPrefix(canvas.toDataURL('image/jpeg', 0.88));
-    if (window.localStorage?.getItem('dressapp_debug')) {
-      console.info(LOG_PREFIX, 'crop sent', {
-        cssRect: rect,
-        sourceImg: { w: img.width, h: img.height },
-        cropPx: { sx, sy, sw, sh },
-        dpr,
-        b64Len: cropped?.length || 0,
-      });
     }
 
     await _sendForAnalysis({
-      chart_html: null,
+      chart_html,
       chart_screenshot_b64: cropped,
       garment_type: generic.detectGarmentType(document),
     });
