@@ -1,20 +1,18 @@
-# DressApp Eyes (Gemma-4 E2B GGUF) — CPU-only Hetzner deploy.
+# DressApp Eyes — proxy in front of a self-built llama.cpp server.
 #
-# llama-cpp-python: Gemma-3 / Gemma-4 E2B architecture support landed
-# after 0.3.5 (Dec 2024). 0.3.19 is the latest stable release at time
-# of writing. The Dockerfile compiles this from source because the
-# only prebuilt CPU wheels available (abetlen's GitHub Pages index)
-# are built against MUSL libc / Alpine — they fail to load on Debian
-# with "libc.musl-x86_64.so.1: cannot open shared object file". PyPI
-# doesn't publish manylinux wheels for Gemma-3-supporting versions,
-# so source compile is the only Debian-compatible path. CPX32 builds
-# it in ~5 min; the layer is then cached for subsequent rebuilds.
-llama-cpp-python==0.3.22
+# We dropped llama-cpp-python because its bundled llama.cpp commit is
+# too old to load Gemma-4 GGUFs (arch ``gemma4``, merged into mainline
+# via Unsloth's PR #21343). The Dockerfile now builds ``llama-server``
+# from llama.cpp HEAD; this proxy wraps it.
+#
+# Inference engine        : llama-server  (PID started by lifespan)
+# Wire format internally  : OpenAI /v1/chat/completions on 127.0.0.1
+# Wire format externally  : our existing /predict shape (unchanged so
+#                           backend's ``_call_gemma_space`` keeps working)
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4
 huggingface_hub==0.27.0
-# Pillow is only consumed by the Phase-2 Llava chat handler (vision).
-# Keeping it here so an mmproj swap in the future doesn't need a
-# requirements bump on the deployed VPS.
-Pillow==11.0.0
+# httpx talks to the local llama-server on the loopback. Sync would
+# work too, but we want to stream-cancel on FastAPI client-disconnect.
+httpx==0.28.1
