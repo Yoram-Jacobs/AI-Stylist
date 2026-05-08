@@ -63,6 +63,68 @@
 }
 .dressapp-fab-label { padding-right: 2px; }
 
+/* ---- pick mode ---- */
+.dressapp-pick-banner {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px 10px 16px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-family: 'Figtree', system-ui, sans-serif;
+  box-shadow: 0 14px 28px -10px rgba(15,23,42,.55);
+  max-width: 92vw;
+  pointer-events: auto;
+  animation: dressapp-banner-in 160ms ease-out;
+}
+@keyframes dressapp-banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.dressapp-pick-banner .dressapp-pick-text {
+  display: flex; flex-direction: column; gap: 1px;
+  line-height: 1.25;
+}
+.dressapp-pick-banner .dressapp-pick-text strong {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+}
+.dressapp-pick-banner .dressapp-pick-text span {
+  font-size: 12px; color: #cbd5e1;
+}
+.dressapp-pick-cancel {
+  border: 0; cursor: pointer;
+  background: rgba(248, 250, 252, 0.12);
+  color: #f8fafc;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  padding: 6px 10px; border-radius: 8px;
+  transition: background 120ms ease;
+}
+.dressapp-pick-cancel:hover { background: rgba(248, 250, 252, 0.22); }
+.dressapp-pick-cancel:focus-visible { outline: 2px solid #67e8f9; outline-offset: 2px; }
+
+.dressapp-pick-hover {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: none;
+  border: 2px solid #0ea5e9;
+  background: rgba(14, 165, 233, 0.10);
+  border-radius: 4px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.0);
+  display: none;
+  transition: opacity 80ms ease;
+}
+/* While pick mode is active, give the page a subtle "crosshair" cursor. */
+body:has(#dressapp-pick-banner) { cursor: crosshair !important; }
+body:has(#dressapp-pick-banner) * { cursor: crosshair !important; }
+body:has(#dressapp-pick-banner) #dressapp-pick-banner,
+body:has(#dressapp-pick-banner) #dressapp-pick-banner * { cursor: pointer !important; }
+
 /* ---- overlay ---- */
 .dressapp-overlay-host {
   position: fixed; right: 16px; bottom: 16px; z-index: 2147483646;

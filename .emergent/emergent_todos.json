@@ -1,18 +1,26 @@
 [
   {
-    "content": "Improve detectChartImage: catch description-tab images + largest-visible fallback",
+    "content": "Add 'Click the size chart' pick mode (hover highlight + click capture)",
     "status": "completed"
   },
   {
-    "content": "Score chart candidates so product photos are demoted",
+    "content": "Auto-enter pick mode when auto-detect fails (no more dead-end warning)",
     "status": "completed"
   },
   {
-    "content": "Add optional_host_permissions <all_urls> + request flow on FAB click",
+    "content": "Pick handler: convert <img>/table/iframe-region to backend payload",
     "status": "completed"
   },
   {
-    "content": "Rebuild + repackage extension",
+    "content": "Add CSS for pick banner + hover outline",
+    "status": "completed"
+  },
+  {
+    "content": "Console diagnostics dump for failing pages",
+    "status": "completed"
+  },
+  {
+    "content": "Build + repackage extension",
     "status": "completed"
   }
 ]
