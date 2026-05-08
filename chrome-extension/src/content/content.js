@@ -26,8 +26,6 @@ const HOST = location.hostname;
 const adapter = getAdapter(HOST);
 const ANCHOR_MOUNTED_ATTR = 'data-dressapp-mounted';
 const FAB_ID = 'dressapp-fab';
-const PICK_BANNER_ID = 'dressapp-pick-banner';
-const PICK_HOVER_ID = 'dressapp-pick-hover';
 const LOG_PREFIX = `[DressApp/${adapter.name}]`;
 const isTopFrame = window === window.top;
 
@@ -220,9 +218,9 @@ async function onAnalyze(ev) {
 
     if (!chartEl && !chartImg) {
       _logDetectionDiagnostics();
-      // No automatic match — invite the user to pick it manually.
+      // No automatic match — invite the user to crop the chart manually.
       dismissOverlay();
-      enterPickMode({ reason: 'auto-failed' });
+      enterCropMode({ reason: 'auto-failed' });
       return;
     }
 
@@ -284,7 +282,7 @@ async function _sendForAnalysis({ chart_html, chart_screenshot_b64, garment_type
     // If the recommendation came back without a size, give the user
     // a way to retry by picking the chart manually — the backend's
     // ``reasoning`` field already tells them *why* it couldn't pick.
-    retry: r.result?.recommended_size ? null : () => enterPickMode({ reason: 'manual' }),
+    retry: r.result?.recommended_size ? null : () => enterCropMode({ reason: 'manual' }),
   });
 }
 
@@ -308,60 +306,111 @@ function _logDetectionDiagnostics() {
 }
 
 // ---------------------------------------------------------------------
-// Pick mode — user clicks the chart manually
+// Crop mode — user drags a rectangle around the chart, clicks Apply.
+//
+// Why crop:
+//   * The chart is often a single <img> on the page that our heuristic
+//     misses (e.g. AliExpress's seller-uploaded JPGs in cross-origin
+//     iframes), and a viewport screenshot of the whole tab carries
+//     too much noise (product photos, ads) for the OCR to focus.
+//   * Letting the user define the exact rectangle gives the backend
+//     the cleanest possible image to feed Gemma's chart-extraction
+//     pass. It also works inside iframes, shadow roots, lazy-loaded
+//     panels — anywhere a screenshot can reach.
 // ---------------------------------------------------------------------
-let _pickActive = false;
+const CROP_BANNER_ID = 'dressapp-crop-banner';
+const CROP_OVERLAY_ID = 'dressapp-crop-overlay';
+const CROP_RECT_ID = 'dressapp-crop-rect';
+let _cropActive = false;
 
-function enterPickMode({ reason = 'manual' } = {}) {
-  if (_pickActive) return;
-  _pickActive = true;
+function enterCropMode({ reason = 'manual' } = {}) {
+  if (_cropActive) return;
+  _cropActive = true;
   hideFab();
   dismissOverlay();
 
+  // Banner with Apply / Cancel.
   const banner = document.createElement('div');
-  banner.id = PICK_BANNER_ID;
+  banner.id = CROP_BANNER_ID;
   banner.className = 'dressapp-pick-banner';
   banner.setAttribute('role', 'status');
-  banner.setAttribute('data-testid', 'dressapp-pick-banner');
+  banner.setAttribute('data-testid', 'dressapp-crop-banner');
   banner.innerHTML = `
     <div class="dressapp-pick-text">
-      <strong>Click the size chart</strong>
-      <span>${reason === 'auto-failed' ? "We couldn't find it automatically — point at it." : 'Click the chart image or table you want to analyze.'}</span>
+      <strong>Drag a box around the size chart</strong>
+      <span>${reason === 'auto-failed' ? "We couldn't find it automatically." : 'Drag to select; release; then click Apply.'}</span>
     </div>
-    <button type="button" class="dressapp-pick-cancel" data-testid="dressapp-pick-cancel">Cancel</button>
+    <button type="button" class="dressapp-pick-cancel" data-testid="dressapp-crop-cancel">Cancel</button>
+    <button type="button" class="dressapp-crop-apply" data-testid="dressapp-crop-apply" disabled>Apply</button>
   `;
   document.body.appendChild(banner);
 
-  const hover = document.createElement('div');
-  hover.id = PICK_HOVER_ID;
-  hover.className = 'dressapp-pick-hover';
-  hover.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(hover);
+  // Dim overlay covering the whole viewport (the rect is "cut out"
+  // visually with a brighter inner box on top).
+  const dim = document.createElement('div');
+  dim.id = CROP_OVERLAY_ID;
+  dim.className = 'dressapp-crop-overlay';
+  dim.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(dim);
+
+  // The rectangle the user is drawing.
+  const rectEl = document.createElement('div');
+  rectEl.id = CROP_RECT_ID;
+  rectEl.className = 'dressapp-crop-rect';
+  rectEl.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(rectEl);
+
+  let dragging = false;
+  let startX = 0, startY = 0;
+  let curRect = null;
+
+  const applyBtn = banner.querySelector('[data-testid="dressapp-crop-apply"]');
+  const cancelBtn = banner.querySelector('[data-testid="dressapp-crop-cancel"]');
 
   function isOurChrome(t) {
-    return t === banner || banner.contains(t) || t === hover || hover.contains(t);
+    return t === banner || banner.contains(t);
   }
 
-  function onMove(e) {
-    if (isOurChrome(e.target)) { hover.style.display = 'none'; return; }
-    const r = e.target.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) { hover.style.display = 'none'; return; }
-    hover.style.display = 'block';
-    hover.style.left = `${Math.max(0, r.left - 2)}px`;
-    hover.style.top = `${Math.max(0, r.top - 2)}px`;
-    hover.style.width = `${r.width + 4}px`;
-    hover.style.height = `${r.height + 4}px`;
-  }
-
-  function onClick(e) {
+  function onDown(e) {
     if (isOurChrome(e.target)) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    const target = e.target;
-    const x = e.clientX, y = e.clientY;
-    cleanup();
-    void handlePickedElement(target, x, y);
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    curRect = { x: startX, y: startY, w: 0, h: 0 };
+    _drawRect(curRect);
+    rectEl.style.display = 'block';
+    applyBtn.disabled = true;
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    const x = Math.min(startX, e.clientX);
+    const y = Math.min(startY, e.clientY);
+    const w = Math.abs(e.clientX - startX);
+    const h = Math.abs(e.clientY - startY);
+    curRect = { x, y, w, h };
+    _drawRect(curRect);
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    if (curRect && curRect.w >= 24 && curRect.h >= 16) {
+      applyBtn.disabled = false;
+    } else {
+      curRect = null;
+      rectEl.style.display = 'none';
+      applyBtn.disabled = true;
+    }
+  }
+
+  function _drawRect(r) {
+    rectEl.style.left = `${r.x}px`;
+    rectEl.style.top = `${r.y}px`;
+    rectEl.style.width = `${r.w}px`;
+    rectEl.style.height = `${r.h}px`;
   }
 
   function onKey(e) {
@@ -369,85 +418,122 @@ function enterPickMode({ reason = 'manual' } = {}) {
       e.preventDefault();
       cleanup();
       showFab();
+    } else if (e.key === 'Enter' && curRect && !applyBtn.disabled) {
+      e.preventDefault();
+      void doApply();
     }
   }
 
   function cleanup() {
-    _pickActive = false;
+    _cropActive = false;
+    document.removeEventListener('mousedown', onDown, true);
     document.removeEventListener('mousemove', onMove, true);
-    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('mouseup', onUp, true);
     document.removeEventListener('keydown', onKey, true);
     banner.remove();
-    hover.remove();
+    dim.remove();
+    rectEl.remove();
   }
 
-  banner.querySelector('[data-testid="dressapp-pick-cancel"]')
-    .addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      cleanup();
-      showFab();
-    });
+  async function doApply() {
+    if (!curRect) return;
+    const r = curRect;
+    cleanup();
+    await cropAndAnalyze(r);
+  }
 
+  applyBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void doApply();
+  });
+  cancelBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cleanup();
+    showFab();
+  });
+
+  document.addEventListener('mousedown', onDown, true);
   document.addEventListener('mousemove', onMove, true);
-  document.addEventListener('click', onClick, true);
+  document.addEventListener('mouseup', onUp, true);
   document.addEventListener('keydown', onKey, true);
 }
 
-async function handlePickedElement(el, _x, _y) {
+/**
+ * Capture the viewport, crop to the user's CSS-pixel rectangle, send
+ * the result for analysis. The crop happens locally in a canvas so we
+ * never ship the surrounding (potentially-sensitive) viewport content
+ * to the backend — only the bounded chart region.
+ */
+async function cropAndAnalyze(rect) {
   mountSpinner();
   try {
-    let chart_html = null;
-    let chart_screenshot_b64 = null;
-
-    // 1. <img> directly clicked, or contains an <img>.
-    let img = null;
-    if (el.tagName === 'IMG') img = el;
-    else if (typeof el.querySelector === 'function') img = el.querySelector('img');
-    if (!img && el.parentElement) {
-      // Walk up a couple of levels — the user might have clicked a wrapper.
-      let cur = el;
-      for (let i = 0; i < 3 && cur && !img; i += 1) {
-        if (cur.tagName === 'IMG') { img = cur; break; }
-        cur = cur.parentElement;
-      }
-    }
-    if (img) {
-      chart_screenshot_b64 = await imageToB64Jpeg(img);
-    }
-
-    // 2. <table> in or around the click target.
-    if (!chart_screenshot_b64) {
-      const table = el.closest?.('table') || el.querySelector?.('table');
-      if (table) chart_html = table.outerHTML.slice(0, 60_000);
-    }
-
-    // 3. Iframe — capture viewport (the iframe content lives elsewhere).
-    if (!chart_html && !chart_screenshot_b64) {
-      chart_screenshot_b64 = await _captureViewportWithPermission();
-    }
-
-    if (!chart_html && !chart_screenshot_b64) {
+    const screenshot = await _captureViewportWithPermission();
+    if (!screenshot) {
       mountOverlay({
         kind: 'warn',
-        title: 'Couldn\'t capture that element',
-        message: 'Try clicking directly on the size chart image or its table. If the chart is inside an iframe and screenshots are blocked, allow the optional permission and try again.',
-        retry: () => enterPickMode({ reason: 'manual' }),
+        title: 'Screenshot blocked',
+        message: 'DressApp needs the optional "all sites" permission to capture this page. Click the DressApp toolbar icon and approve the permission, then try again.',
+        retry: () => enterCropMode({ reason: 'manual' }),
         onDismiss: showFab,
       });
       return;
     }
 
-    await _sendForAnalysis({ chart_html, chart_screenshot_b64 });
+    const dataUrl = `data:image/jpeg;base64,${screenshot}`;
+    const img = await _loadImage(dataUrl);
+
+    // The captured image is at devicePixelRatio scale relative to
+    // CSS-pixel coordinates the user dragged in. Multiply through.
+    const dpr = window.devicePixelRatio || 1;
+    const sx = Math.max(0, Math.round(rect.x * dpr));
+    const sy = Math.max(0, Math.round(rect.y * dpr));
+    const sw = Math.min(img.width - sx, Math.round(rect.w * dpr));
+    const sh = Math.min(img.height - sy, Math.round(rect.h * dpr));
+    if (sw < 8 || sh < 8) {
+      mountOverlay({
+        kind: 'warn',
+        title: 'Selection too small',
+        message: 'Drag a larger rectangle around the size chart.',
+        retry: () => enterCropMode({ reason: 'manual' }),
+        onDismiss: showFab,
+      });
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D context unavailable');
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    const cropped = _stripDataPrefix(canvas.toDataURL('image/jpeg', 0.88));
+    log('crop sent', { sx, sy, sw, sh, dpr, len: cropped?.length || 0 });
+
+    await _sendForAnalysis({
+      chart_html: null,
+      chart_screenshot_b64: cropped,
+      garment_type: generic.detectGarmentType(document),
+    });
   } catch (e) {
     mountOverlay({
       kind: 'error',
-      title: 'Analysis failed',
+      title: 'Couldn\'t process the crop',
       message: e?.message || String(e),
-      retry: () => enterPickMode({ reason: 'manual' }),
+      retry: () => enterCropMode({ reason: 'manual' }),
       onDismiss: showFab,
     });
   }
+}
+
+function _loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e?.message || 'image load failed');
+    img.src = src;
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -470,7 +556,7 @@ mountAnchorButton();
 ensureFab();
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !_pickActive) {
+  if (e.key === 'Escape' && !_cropActive) {
     dismissOverlay();
     showFab();
   }

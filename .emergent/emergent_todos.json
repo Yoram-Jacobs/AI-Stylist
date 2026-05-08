@@ -1,26 +1,22 @@
 [
   {
-    "content": "Add 'Click the size chart' pick mode (hover highlight + click capture)",
+    "content": "Backend: add Gemma extraction prompt (image -> structured JSON)",
     "status": "completed"
   },
   {
-    "content": "Auto-enter pick mode when auto-detect fails (no more dead-end warning)",
+    "content": "Backend: orchestrate two-pass — Gemma extract → Python heuristic decide",
     "status": "completed"
   },
   {
-    "content": "Pick handler: convert <img>/table/iframe-region to backend payload",
+    "content": "Frontend: replace pick-mode with crop-mode (drag rectangle + Apply)",
     "status": "completed"
   },
   {
-    "content": "Add CSS for pick banner + hover outline",
+    "content": "Frontend: SW receives rect, crops the captured screenshot, returns base64",
     "status": "completed"
   },
   {
-    "content": "Console diagnostics dump for failing pages",
-    "status": "completed"
-  },
-  {
-    "content": "Build + repackage extension",
+    "content": "Verify backend two-pass with TestClient + frontend lint+build",
     "status": "completed"
   }
 ]

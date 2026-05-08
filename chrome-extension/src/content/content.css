@@ -120,10 +120,45 @@
   transition: opacity 80ms ease;
 }
 /* While pick mode is active, give the page a subtle "crosshair" cursor. */
-body:has(#dressapp-pick-banner) { cursor: crosshair !important; }
-body:has(#dressapp-pick-banner) * { cursor: crosshair !important; }
-body:has(#dressapp-pick-banner) #dressapp-pick-banner,
-body:has(#dressapp-pick-banner) #dressapp-pick-banner * { cursor: pointer !important; }
+/* ---- crop mode (drag-rectangle UX) ---- */
+.dressapp-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  background: rgba(15, 23, 42, 0.42);
+  pointer-events: none;
+}
+.dressapp-crop-rect {
+  position: fixed;
+  z-index: 2147483646;
+  display: none;
+  pointer-events: none;
+  border: 2px dashed #0ea5e9;
+  background: rgba(14, 165, 233, 0.10);
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.32);
+  border-radius: 4px;
+  /* The big inset shadow above effectively dims everything outside
+     the rectangle while the inside stays untouched, giving users a
+     clear focus area without us touching the page DOM. */
+}
+.dressapp-crop-apply {
+  border: 0; cursor: pointer;
+  background: #0ea5e9; color: #0f172a;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; border-radius: 8px;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+.dressapp-crop-apply:hover { filter: brightness(1.05); transform: translateY(-1px); }
+.dressapp-crop-apply:active { transform: translateY(0); }
+.dressapp-crop-apply:focus-visible { outline: 2px solid #67e8f9; outline-offset: 2px; }
+.dressapp-crop-apply:disabled {
+  cursor: not-allowed; filter: saturate(0.4) brightness(0.85);
+}
+
+body:has(#dressapp-crop-banner) { cursor: crosshair !important; }
+body:has(#dressapp-crop-banner) * { cursor: crosshair !important; }
+body:has(#dressapp-crop-banner) #dressapp-crop-banner,
+body:has(#dressapp-crop-banner) #dressapp-crop-banner * { cursor: pointer !important; }
 
 /* ---- overlay ---- */
 .dressapp-overlay-host {

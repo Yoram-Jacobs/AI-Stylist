@@ -321,6 +321,121 @@ async def _via_gemma(
     )
 
 
+# ----------------------- structured extraction -----------------------
+_EXTRACTION_PROMPT = """You are an OCR-and-structure-extraction assistant.
+
+Your single job: read the size chart in the input (HTML or screenshot)
+and emit it as a strict JSON object. **Do not** recommend a size, do
+**not** explain anything, do **not** add commentary or markdown — only
+the JSON envelope below.
+
+Schema (every field required):
+{
+  "headers": ["<column name>", ...],
+  "units":   "cm" | "in" | "mixed" | "unknown",
+  "rows": [
+    {"label": "<size label e.g. 'S' or 'EU 38'>",
+     "values": ["<cell text>", "<cell text>", ...]}
+  ]
+}
+
+Rules:
+* The first column is the size label; put it in ``label`` and EXCLUDE
+  it from ``values``. ``values`` aligns 1-to-1 with ``headers`` AFTER
+  dropping the size-label header (i.e. ``len(values) == len(headers)``).
+* Keep cell text exactly as printed — preserve ranges like "86-90",
+  decimals like "33.5", and unit suffixes if present in the cell.
+* If the chart shows two unit systems (cm and in side-by-side),
+  prefer the **cm** columns and set ``units`` to "cm".
+* If the screenshot contains material other than the table (product
+  photos, ads, buttons), ignore them and OCR the table only.
+* If you cannot find a usable table, return {"headers":[],"units":"unknown","rows":[]}.
+
+Output: JSON only, no prose."""
+
+
+async def _extract_chart_structured(
+    *, image_b64: str | None, chart_text: str,
+) -> dict[str, Any] | None:
+    """Pass-1: ask Gemma to OCR the chart into a strict JSON envelope.
+
+    Returns ``{"headers": [...], "units": "cm", "rows": [...]}`` on
+    success, or ``None`` if Gemma is unconfigured / errored / returned
+    a non-conforming payload.
+    """
+    if not settings.EYES_GEMMA_SPACE_URL:
+        return None
+    if not image_b64 and not chart_text:
+        return None
+    user_text_parts: list[str] = []
+    if chart_text:
+        user_text_parts.append("Chart text (HTML stripped):\n" + chart_text)
+    if image_b64:
+        user_text_parts.append("Screenshot of the chart is attached as an image.")
+    user_text = "\n\n".join(user_text_parts) or "Extract the size chart from the attached screenshot."
+    try:
+        raw = await _via_gemma(
+            system_prompt=_EXTRACTION_PROMPT,
+            user_text=user_text,
+            image_b64=image_b64,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.info("gemma extraction failed: %s", exc)
+        return None
+    parsed = _coerce_response(raw)
+    if not isinstance(parsed, dict):
+        return None
+    rows = parsed.get("rows")
+    headers = parsed.get("headers")
+    if not isinstance(rows, list) or not rows:
+        return None
+    if not isinstance(headers, list):
+        headers = []
+    # Defensive: sanitise rows.
+    cleaned_rows: list[dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        label = r.get("label")
+        values = r.get("values") or []
+        if label is None or not isinstance(values, list):
+            continue
+        cleaned_rows.append({
+            "label": str(label).strip()[:24],
+            "values": [str(v).strip() for v in values],
+        })
+    if not cleaned_rows:
+        return None
+    return {
+        "headers": [str(h).strip() for h in headers][:16],
+        "units": str(parsed.get("units") or "unknown").lower()[:8],
+        "rows": cleaned_rows,
+    }
+
+
+def _structured_to_text(struct: dict[str, Any]) -> str:
+    """Turn a structured chart envelope into the tab-separated text
+    representation that ``_heuristic_match`` parses cleanly.
+
+    Format::
+
+        Size  <header1>  <header2>  ...
+        S     <value1>   <value2>   ...
+        M     ...
+
+    Tabs separate cells (so the heuristic's header-row detection
+    splits on ``\\s{2,}|\\t|\\|`` reliably).
+    """
+    lines: list[str] = []
+    headers = struct.get("headers") or []
+    if headers:
+        lines.append("\t".join(["Size"] + [str(h) for h in headers]))
+    for r in struct.get("rows") or []:
+        cells = [str(r.get("label", ""))] + [str(v) for v in (r.get("values") or [])]
+        lines.append("\t".join(cells))
+    return "\n".join(lines)
+
+
 async def _via_qwen(
     *, system_prompt: str, user_text: str, image_b64: str | None = None,
 ) -> str:
@@ -720,18 +835,64 @@ async def analyze_chart(
         user_preferred_units=payload.user_preferred_units,
     )
 
-    # Step 1 — Eyes (Gemma) when wired.
-    # We deliberately skip the ``active_provider`` gate here: Gemma is
-    # the cheapest and most chart-friendly engine, and if it's
-    # configured we want it for *every* size analysis regardless of
-    # what the global Eyes provider is set to. Failures fall through
-    # to Qwen-VL.
     active_provider = (await get_active_provider()).lower()  # for telemetry only
     parsed: dict[str, Any] | None = None
     source = "fallback"
     provider_errors: list[str] = []
 
-    if settings.EYES_GEMMA_SPACE_URL:
+    # Step 0 — structured extraction via Gemma (image OCR, JSON-only).
+    # When this succeeds, we feed the *cleaned* chart text into the
+    # Python heuristic and skip the LLM "decision" call entirely:
+    # Gemma does what it's good at (reading), Python does the math.
+    # On failure we silently fall through to the legacy Gemma → Qwen
+    # → heuristic stack so we never regress an existing working path.
+    structured: dict[str, Any] | None = None
+    if (
+        payload.chart_screenshot_b64 or payload.chart_html or payload.chart_text
+    ) and settings.EYES_GEMMA_SPACE_URL:
+        t_extract = time.time()
+        try:
+            structured = await _extract_chart_structured(
+                image_b64=payload.chart_screenshot_b64,
+                chart_text=chart_text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            provider_errors.append(f"gemma-extract: {str(exc)[:200]}")
+            structured = None
+        provider_activity.record(
+            "gemma", ok=structured is not None,
+            latency_ms=int((time.time() - t_extract) * 1000),
+            extra={"op": "size-chart/extract"},
+        )
+        if structured:
+            extracted_text = _structured_to_text(structured)
+            log.info(
+                "gemma extracted %d rows / %d headers",
+                len(structured.get("rows") or []),
+                len(structured.get("headers") or []),
+            )
+            decided = _heuristic_match(
+                chart_text=extracted_text, measurements=measurements,
+            )
+            if decided is not None:
+                # Hand-craft a richer reasoning string for this path so
+                # the user sees that Gemma actually read their chart
+                # rather than the heuristic guessing on raw HTML.
+                if decided.get("reasoning", "").startswith("Heuristic match:"):
+                    decided["reasoning"] = decided["reasoning"].replace(
+                        "AI sizing engines were unavailable; this is a regex-based estimate.",
+                        "Chart extracted by Gemma-4 (Eyes); size chosen by DressApp's bigger-on-tie rule.",
+                    )
+                # Adopt the units Gemma reported when available.
+                if structured.get("units") in {"cm", "in", "mixed", "unknown"}:
+                    decided["size_chart_units"] = structured["units"]
+                decided["confidence"] = max(decided.get("confidence", 0.0), 0.7)
+                parsed = decided
+                source = "gemma+heuristic"
+
+    # Step 1 — Eyes (Gemma) decision call when extraction didn't yield.
+
+    if parsed is None and settings.EYES_GEMMA_SPACE_URL:
         try:
             raw = await _via_gemma(
                 system_prompt=_SYSTEM_PROMPT,
