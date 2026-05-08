@@ -1,22 +1,18 @@
 [
   {
-    "content": "Add shopping-site host_permissions for captureVisibleTab",
+    "content": "Improve detectChartImage: catch description-tab images + largest-visible fallback",
     "status": "completed"
   },
   {
-    "content": "Surface real capture/analyze error in overlay warning + console",
+    "content": "Score chart candidates so product photos are demoted",
     "status": "completed"
   },
   {
-    "content": "Rewrite backend Qwen leg to use Qwen-VL multimodal w/ screenshot",
+    "content": "Add optional_host_permissions <all_urls> + request flow on FAB click",
     "status": "completed"
   },
   {
-    "content": "Improve prompt: explicit step-by-step reasoning + screenshot guidance + bigger-on-tie",
-    "status": "completed"
-  },
-  {
-    "content": "Rebuild + repackage extension; smoke-test backend",
+    "content": "Rebuild + repackage extension",
     "status": "completed"
   }
 ]

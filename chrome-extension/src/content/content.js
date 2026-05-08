@@ -130,6 +130,32 @@ function _stripDataPrefix(dataUrl) {
   return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
 }
 
+/**
+ * Capture the visible viewport via the SW. If that fails because the
+ * <all_urls> host permission isn't granted, ask the user for it
+ * inline (this runs inside the FAB click event, which is a verified
+ * user gesture — required by chrome.permissions.request) and retry.
+ *
+ * Returns a base64 JPEG string, or null on permanent failure.
+ */
+async function _captureViewportWithPermission() {
+  let cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
+  if (cap?.ok && cap.image_b64) return cap.image_b64;
+  if (cap?.needs_permission || /<all_urls>|activeTab/i.test(cap?.error || '')) {
+    try {
+      const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
+      if (granted) {
+        cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
+        if (cap?.ok && cap.image_b64) return cap.image_b64;
+      }
+    } catch (e) {
+      log('permissions.request failed', e);
+    }
+  }
+  log('captureVisibleTab unavailable', cap?.error);
+  return null;
+}
+
 // ---------------------------------------------------------------------
 // Visible-region prioritisation: prefer open modals & active panels
 // ---------------------------------------------------------------------
@@ -210,26 +236,25 @@ async function onAnalyze(ev) {
       chartImg = hit?.node || null;
     }
 
-    // 3. Visible-tab screenshot fallback.
+    // 3. Visible-tab screenshot fallback (requires <all_urls>).
     let chart_screenshot_b64 = null;
     if (chartImg) {
       chart_screenshot_b64 = await imageToB64Jpeg(chartImg);
       if (!chart_screenshot_b64) {
-        const cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
-        if (cap?.ok && cap.image_b64) chart_screenshot_b64 = cap.image_b64;
-        else log('captureVisibleTab failed (image fallback)', cap?.error);
+        // CORS-blocked image — try the viewport-capture fallback.
+        chart_screenshot_b64 = await _captureViewportWithPermission();
       }
     } else if (!chartEl) {
-      const cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
-      if (cap?.ok && cap.image_b64) {
-        chart_screenshot_b64 = cap.image_b64;
-      } else {
-        const why = cap?.error || 'screenshot permission denied';
-        log('captureVisibleTab failed', why);
+      chart_screenshot_b64 = await _captureViewportWithPermission();
+      if (!chart_screenshot_b64) {
         mountOverlay({
           kind: 'warn',
           title: 'No size chart visible',
-          message: `Open the store's size-guide modal (or Description tab) so the chart is on-screen, then click DressApp again. (${why})`,
+          message:
+            'Open the store\'s size-guide modal or Description tab so the ' +
+            'chart is on-screen, then click DressApp again. If the chart ' +
+            'is rendered as an image and the page blocks screenshots, ' +
+            'right-click → "Open image in new tab" and try DressApp there.',
           retry: () => onAnalyze(),
           onDismiss: showFab,
         });

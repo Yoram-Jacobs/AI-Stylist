@@ -60,6 +60,9 @@
     "scripting",
     "tabs"
   ],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "host_permissions": [
     "https://dressapp.co/*",
     "https://*.dressapp.co/*",

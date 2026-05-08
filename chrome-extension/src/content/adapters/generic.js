@@ -1,27 +1,29 @@
 /**
  * Generic size-chart + anchor detector.
  *
- * Used as the fallback adapter when the URL doesn't match a
- * site-specific one. Strategy:
- *   * ``detectChart`` — find the most chart-like ``<table>`` in the
- *     document. We score on the presence of size keywords, row count,
- *     and overall text length.
- *   * ``detectChartImage`` — many shopping sites publish their size
- *     chart as a single image inside the size-guide modal (H&M,
- *     AliExpress, some Amazon listings). We look for ``<img>`` whose
- *     ``alt``, ``src``, or surrounding text contains size keywords.
- *   * ``detectAnchor`` — find a place to mount the DressApp button.
- *     The classic anchor is a ``<select>`` for size, but more and more
- *     sites use button "pill" groups; we cover both.
- *   * ``detectGarmentType`` — heuristic noun extraction from H1 / OG
- *     title so the LLM has more context.
+ * Layered strategy, cheapest first. The content script calls each
+ * detector in turn; the first non-null wins.
  *
- * Returning ``null`` is allowed; the content script falls back to a
- * visible-tab screenshot when both ``detectChart`` and
- * ``detectChartImage`` fail.
+ *   * ``detectChart``         — table-shaped HTML chart (best signal)
+ *   * ``detectChartImage``    — chart rendered as a single <img>
+ *   * ``detectAnchor``        — where to mount the inline pill button
+ *   * ``detectGarmentType``   — extract a noun for the LLM prompt
+ *
+ * The image detector is the workhorse on AliExpress / H&M / Amazon
+ * sellers who publish their chart as a single uploaded JPG. We score
+ * candidates by:
+ *   1. Strong textual signal (alt / aria / heading mentions "size guide")
+ *   2. Inside an open dialog or visible "size guide"-classed container
+ *   3. Inside the active Description / Specifications tab
+ *   4. Largest visible image with chart-like aspect ratio that ISN'T
+ *      inside a product-photo carousel
+ *
+ * Returning ``null`` is allowed; the content script then falls back to
+ * a viewport screenshot (when permitted) before giving up.
  */
-const HINT_KEYWORDS = ['size', 'sizing', 'chest', 'bust', 'waist', 'hip', 'hips', 'inseam', 'shoulders', 'sleeve', 'length'];
-const STRONG_KEYWORDS = ['size guide', 'size chart', 'sizing chart', 'size table'];
+const HINT_KEYWORDS = ['size', 'sizing', 'chest', 'bust', 'waist', 'hip', 'hips', 'inseam', 'shoulders', 'shoulder', 'sleeve', 'length', 'bottom'];
+const STRONG_KEYWORDS = ['size guide', 'size chart', 'sizing chart', 'size table', 'jacket size', 'measurement chart'];
+const GALLERY_HINTS = /(gallery|carousel|thumb|hero|slick|swiper|pdp-images|product-images|main-image|primary-image|image-list)/i;
 
 export function detectChart(_doc = document) {
   let best = null;
@@ -32,67 +34,102 @@ export function detectChart(_doc = document) {
     let score = 0;
     HINT_KEYWORDS.forEach((k) => { if (txt.includes(k)) score += 8; });
     score += Math.min(50, tbl.querySelectorAll('tr').length * 5);
-    if (txt.length < 40) score = 0; // tiny tables are probably not size charts
-    // Demote tables that are clearly not chart-shaped (e.g. detail
-    // sheets) by penalising tables without numeric tokens.
+    if (txt.length < 40) score = 0;
     if (!/\d/.test(txt)) score -= 20;
-    if (score > bestScore) {
-      bestScore = score;
-      best = tbl;
-    }
+    if (score > bestScore) { bestScore = score; best = tbl; }
   });
   return best && bestScore >= 30 ? best : null;
 }
 
 /**
- * Look for an image-based size chart. Returns an <img> element or null.
+ * Returns the <img> element most likely to be a size chart, or null.
  *
- * Heuristics:
- *   1. Any image whose ``alt`` or ``aria-label`` contains "size chart"
- *      / "size guide" / "size table".
- *   2. Any image inside a container (modal/dialog/section) whose
- *      heading text contains those phrases.
- *   3. As a last resort, the largest visible image whose ``src``
- *      contains ``size`` / ``chart`` / ``sizing``.
+ * We score every visible <img> on the page and pick the highest-scoring
+ * one above a threshold. Scoring is permissive on purpose because many
+ * legit chart images carry no semantic metadata at all (Aliexpress &
+ * Amazon sellers upload a JPG that happens to contain the table).
  */
 export function detectChartImage(_doc = document) {
-  const allImgs = Array.from(_doc.querySelectorAll('img')).filter(_isVisible);
-  if (allImgs.length === 0) return null;
+  const imgs = Array.from(_doc.querySelectorAll('img')).filter(_isVisible);
+  if (imgs.length === 0) return null;
 
-  // Strategy 1: alt/aria
-  for (const img of allImgs) {
-    const meta = `${img.alt || ''} ${img.getAttribute('aria-label') || ''}`.toLowerCase();
-    if (STRONG_KEYWORDS.some((k) => meta.includes(k))) return img;
+  const scored = imgs.map((img) => ({ img, score: _scoreChartImage(img) }));
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored[0];
+  return top && top.score >= 6 ? top.img : null;
+}
+
+function _scoreChartImage(img) {
+  let score = 0;
+
+  // --- bail-out conditions -------------------------------------------
+  const r = img.getBoundingClientRect();
+  const area = Math.max(0, r.width) * Math.max(0, r.height);
+  if (area < 30_000) return -1;            // too small to be a chart
+  if (r.width < 160 || r.height < 120) return -1;
+  const aspect = r.width / r.height;
+  if (aspect < 0.4 || aspect > 4.0) return -1; // banners / vertical strips
+
+  // --- positive signals ----------------------------------------------
+  const alt = (img.alt || '').toLowerCase();
+  const aria = (img.getAttribute('aria-label') || '').toLowerCase();
+  const meta = `${alt} ${aria}`;
+  if (STRONG_KEYWORDS.some((k) => meta.includes(k))) score += 30;
+  HINT_KEYWORDS.forEach((k) => { if (meta.includes(k)) score += 2; });
+
+  const src = (img.currentSrc || img.src || '').toLowerCase();
+  if (/(size|sizing|chart|measure)/.test(src)) score += 8;
+
+  // Boost for being inside an open modal / size-guide-named container.
+  if (img.closest('[role="dialog"], [aria-modal="true"], dialog[open]')) score += 14;
+  if (img.closest('[class*=size-guide i], [class*=sizeGuide], [class*=size-chart i], [id*=size-guide i], [id*=sizeChart i]')) score += 18;
+
+  // Boost for being inside the visible Description / Specifications
+  // tab — the most common home for chart-as-image listings.
+  const descScope = img.closest('[id*=description i], [class*=description i], [id*=detail i], [class*=detail i], [role="tabpanel"]');
+  if (descScope && _isVisible(descScope) && _intersectsViewport(descScope)) score += 10;
+
+  // Surrounding text containing measurement keywords (cheap, very
+  // effective on stores that publish chart-as-image but DO put the
+  // word "size chart" in a heading near it).
+  const ctx = _nearbyText(img, 1200).toLowerCase();
+  let kwHits = 0;
+  HINT_KEYWORDS.forEach((k) => { if (ctx.includes(k)) kwHits += 1; });
+  score += Math.min(kwHits * 1.5, 9);
+  if (STRONG_KEYWORDS.some((k) => ctx.includes(k))) score += 12;
+
+  // Visible & in-viewport bonus (the user clicks the FAB while looking
+  // at the chart, so it's almost always on screen).
+  if (_intersectsViewport(img)) score += 6;
+
+  // Penalise images that are obviously product photos.
+  if (img.closest('a[href]')) score -= 4;
+  if (img.closest('button')) score -= 4;
+  let cur = img;
+  for (let i = 0; i < 6 && cur; i += 1) {
+    const cls = `${cur.className || ''} ${cur.id || ''}`;
+    if (typeof cls === 'string' && GALLERY_HINTS.test(cls)) { score -= 14; break; }
+    cur = cur.parentElement;
   }
 
-  // Strategy 2: nearest heading inside an enclosing modal/section.
-  const containers = _doc.querySelectorAll(
-    '[role="dialog"], [aria-modal="true"], [class*=size-guide i], [class*=sizeGuide], [id*=size-guide i], [class*=size-chart i]',
-  );
-  for (const container of containers) {
-    const h = container.querySelector('h1, h2, h3, [class*=title]');
-    const heading = (h?.innerText || '').toLowerCase();
-    if (STRONG_KEYWORDS.some((k) => heading.includes(k))) {
-      const img = container.querySelector('img');
-      if (img && _isVisible(img)) return img;
-    }
-  }
+  // Finally, a faint preference for larger images so that, all else
+  // equal, we pick the bigger candidate.
+  score += Math.min(area / 200_000, 4);
+  return score;
+}
 
-  // Strategy 3: src-based + sizable.
-  let best = null;
-  let bestArea = 0;
-  for (const img of allImgs) {
-    const src = (img.currentSrc || img.src || '').toLowerCase();
-    if (!/(size|chart|sizing)/.test(src)) continue;
-    const r = img.getBoundingClientRect();
-    const area = Math.max(0, r.width) * Math.max(0, r.height);
-    if (area > bestArea) {
-      bestArea = area;
-      best = img;
-    }
+function _nearbyText(el, maxChars) {
+  // Pull text from the nearest "container" ancestor — a heading, a
+  // figcaption, or an enclosing div with a manageable text payload.
+  let cur = el.parentElement;
+  let collected = '';
+  for (let i = 0; i < 4 && cur; i += 1) {
+    const t = (cur.innerText || '').slice(0, maxChars);
+    if (t.length > collected.length) collected = t;
+    if (collected.length >= maxChars) break;
+    cur = cur.parentElement;
   }
-  // Demand at least 200x150 to avoid icons.
-  return bestArea >= 30_000 ? best : null;
+  return collected;
 }
 
 function _isVisible(el) {
@@ -103,10 +140,12 @@ function _isVisible(el) {
   if (!cs) return true;
   return cs.visibility !== 'hidden' && cs.display !== 'none' && parseFloat(cs.opacity || '1') > 0.05;
 }
+function _intersectsViewport(el) {
+  const r = el.getBoundingClientRect();
+  return r.bottom > 0 && r.top < (window.innerHeight || 1e6);
+}
 
 export function detectAnchor(_doc = document) {
-  // Order matters: prefer the closest analog of a "pick your size"
-  // control so the button shows up next to user attention.
   const candidates = [
     'select[name*=size i]',
     'select[id*=size i]',
@@ -126,9 +165,6 @@ export function detectAnchor(_doc = document) {
     const el = _doc.querySelector(sel);
     if (el && _isVisible(el)) return el;
   }
-  // Final fallback: any element on the page whose own innerText starts
-  // with the word "Size" (the size label above the picker on Amazon /
-  // Zara mobile).
   const all = _doc.querySelectorAll('label, h2, h3, span, div');
   for (const el of all) {
     const txt = (el.innerText || '').trim().toLowerCase();
@@ -138,15 +174,11 @@ export function detectAnchor(_doc = document) {
 }
 
 export function detectGarmentType(_doc = document) {
-  // Heuristic: parse the page H1 / breadcrumb / og:title for clothing
-  // category words. Helps the LLM resolve sizing for ambiguous charts
-  // (e.g. the same EU 38 means different cm depending on garment).
   const sources = [
     _doc.querySelector('meta[property="og:title"]')?.content,
     _doc.querySelector('h1')?.innerText,
     _doc.title,
   ].filter(Boolean).join(' ').toLowerCase();
-
   const dict = ['shirt','t-shirt','tshirt','blouse','dress','skirt','pants','trousers','jeans','shorts','jacket','coat','hoodie','sweater','jumper','suit','blazer','cardigan','swimwear','bra','underwear','briefs','bralette','socks','leggings','tights','tank','top'];
   for (const word of dict) {
     if (sources.includes(word)) return word;
