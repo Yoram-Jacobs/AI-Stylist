@@ -372,7 +372,12 @@ async def _via_qwen(
 _RANGE_RE = re.compile(
     r"(?P<lo>\d{2,3}(?:[.,]\d)?)\s*[-–—~/]\s*(?P<hi>\d{2,3}(?:[.,]\d)?)",
 )
-_MEASUREMENT_FIELDS = ("chest", "bust", "waist", "hips", "hip")
+# Single-number cell — used when a chart row holds exact garment
+# dimensions (e.g. "S 68 100 50") rather than user-measurement ranges.
+# We require at least 2 digits so we don't capture stray inches like
+# "8" or label suffixes like "S2".
+_SINGLE_NUM_RE = re.compile(r"\b(\d{2,3}(?:[.,]\d)?)\b")
+_MEASUREMENT_FIELDS = ("chest", "bust", "waist", "hips", "hip", "shoulder", "shoulders", "inseam", "sleeve", "length", "bottom")
 
 
 def _heuristic_match(*, chart_text: str,
@@ -413,18 +418,43 @@ def _heuristic_match(*, chart_text: str,
         return None
 
     # 2) Parse rows from the chart text. Each row needs a label and
-    #    at least one numeric range.
+    #    at least one numeric range. We also capture the *header row*
+    #    when one is present (the line that names the columns), so we
+    #    can map user fields to chart columns by header keyword
+    #    rather than by positional convention. This is what lets us
+    #    handle "Size  Length  Bust  Shoulder" charts correctly.
     label_re = re.compile(r"^\s*([A-Za-z0-9./-]{1,8})\b")
+    HEADER_TOKENS = {
+        "size", "us", "uk", "eu", "cm", "in", "inches", "centimeters",
+    }
+    headers: list[str] | None = None  # column headers if we identified one
     rows: list[dict[str, Any]] = []
     for ln in chart_text.splitlines():
         ln = ln.strip()
         if not ln:
             continue
+        # Header detection: a line that has no numeric ranges but
+        # *does* contain at least two measurement-keyword tokens. The
+        # column tokens are split on tabs / multiple spaces / pipes.
+        if not _RANGE_RE.search(ln) and not re.search(r"\d{2,}", ln):
+            tokens = [
+                t.strip().lower()
+                for t in re.split(r"\t|\s{2,}|\|", ln)
+                if t.strip()
+            ]
+            kw_hits = sum(
+                1 for t in tokens
+                if any(k in t for k in _MEASUREMENT_FIELDS)
+                or t in HEADER_TOKENS
+            )
+            if kw_hits >= 2 and headers is None:
+                headers = tokens
+                continue
         m = label_re.match(ln)
         if not m:
             continue
         label = m.group(1)
-        if label.lower() in {"size", "us", "uk", "eu", "cm", "in", "size:"}:
+        if label.lower() in HEADER_TOKENS or label.lower() == "size:":
             continue
         ranges: list[tuple[float, float]] = []
         for lo_s, hi_s in _RANGE_RE.findall(ln):
@@ -435,6 +465,19 @@ def _heuristic_match(*, chart_text: str,
                     ranges.append((lo_f, hi_f))
             except ValueError:
                 continue
+        # If no a-b ranges were found, treat each isolated number as a
+        # point range (lo == hi). Common for stores that publish exact
+        # garment dimensions (e.g. AliExpress "JACKET SIZE" tables).
+        if not ranges:
+            # Strip the leading size label so we don't capture "2" out of
+            # "2XL" as a measurement.
+            tail = ln[m.end():]
+            for n_s in _SINGLE_NUM_RE.findall(tail):
+                try:
+                    n_f = float(n_s.replace(",", "."))
+                    ranges.append((n_f, n_f))
+                except ValueError:
+                    continue
         if ranges:
             rows.append({"label": label, "ranges": ranges})
     if not rows:
@@ -444,14 +487,15 @@ def _heuristic_match(*, chart_text: str,
     matched_field = max(user_vals, key=user_vals.get)
 
     # 3b) Map each user measurement to the chart's column index.
-    # Convention: most charts list columns in increasing-min order
-    # (waist has the smallest values, chest is in the middle, hips
-    # are the largest). We rank the chart's columns by their minimum
-    # value across rows and assign them by field-name category:
     #
-    #   waist        -> smallest-min column
-    #   chest / bust -> middle column
-    #   hip  / hips  -> largest-min column
+    # Strategy A — header-based (when we found a header row):
+    #   For each user field, find the header token whose text contains
+    #   a synonym of that field. e.g. user "chest" matches header
+    #   "Bust"; user "hip" matches "Bottom" via the bottom→hip alias.
+    #
+    # Strategy B — rank-based (fallback when no header row was found):
+    #   Rank columns by minimum value; pair user fields by typical
+    #   garment ordering (waist < chest/bust < hips).
     #
     # If the candidate column doesn't even contain the user's value,
     # we fall back to whichever column's union range does.
@@ -462,13 +506,49 @@ def _heuristic_match(*, chart_text: str,
             if j < ncols:
                 columns[j].append(rng)
 
+    # Synonym map: user-side measurement field -> chart-header keywords.
+    _FIELD_SYNONYMS: dict[str, tuple[str, ...]] = {
+        "chest":     ("chest", "bust"),
+        "bust":      ("bust", "chest"),
+        "waist":     ("waist"),
+        "hip":       ("hip", "hips", "bottom", "bottom hem"),
+        "hips":      ("hip", "hips", "bottom", "bottom hem"),
+        "shoulder":  ("shoulder", "shoulders"),
+        "shoulders": ("shoulder", "shoulders"),
+        "inseam":    ("inseam", "inside leg"),
+        "sleeve":    ("sleeve", "sleeve length"),
+        "length":    ("length", "back length", "body length"),
+        "height":    ("height",),
+    }
+
+    def _header_index_for(field: str) -> int:
+        """Find the chart column whose header best matches ``field``.
+
+        Headers are aligned to ranges by *position*: the first header
+        token after the size-label column corresponds to the first
+        numeric range, etc. We therefore drop the leading "size"-ish
+        header token, then return the offset of the matching token.
+        """
+        if not headers:
+            return -1
+        # Drop the first header token if it's the size-label column.
+        body = list(headers)
+        if body and (body[0] in HEADER_TOKENS or "size" in body[0]):
+            body = body[1:]
+        synonyms = _FIELD_SYNONYMS.get(field.lower(), (field.lower(),))
+        for j, htext in enumerate(body):
+            for syn in synonyms:
+                if syn in htext:
+                    return j
+        return -1
+
+    # Rank-based fallback.
     col_ranks: list[int] = sorted(
         range(ncols),
         key=lambda j: (
             min(lo for lo, _ in columns[j]) if columns[j] else float("inf")
         ),
     )
-
     _FIELD_RANK = {
         "waist": 0,
         "chest": 1, "bust": 1,
@@ -478,25 +558,34 @@ def _heuristic_match(*, chart_text: str,
     }
 
     def _assign_column(field: str, v: float) -> int:
+        # Prefer header-based assignment when it agrees.
+        idx = _header_index_for(field)
+        if 0 <= idx < ncols:
+            ranges = columns[idx]
+            if ranges:
+                col_max = max(hi for _, hi in ranges)
+                # Generous tolerance: oversized garments (e.g. 100 cm
+                # bust at S) intentionally don't contain the user's
+                # 95 cm chest, so accept any column whose UPPER bound
+                # is >= v even if the lower bound is above.
+                if col_max >= v:
+                    return idx
+        # Rank-based fallback.
         rank = _FIELD_RANK.get(field.lower(), 1)
         if rank >= len(col_ranks):
             rank = len(col_ranks) - 1
         candidate = col_ranks[rank]
         ranges = columns[candidate]
-        if ranges:
-            col_min = min(lo for lo, _ in ranges)
-            col_max = max(hi for _, hi in ranges)
-            if col_min <= v <= col_max:
-                return candidate
-        # Fallback: any column whose union contains v.
+        if ranges and max(hi for _, hi in ranges) >= v:
+            return candidate
+        # Final fallback: any column whose union upper bound >= v.
         for j, rng_list in enumerate(columns):
             if not rng_list:
                 continue
-            col_min = min(lo for lo, _ in rng_list)
             col_max = max(hi for _, hi in rng_list)
-            if col_min <= v <= col_max:
+            if col_max >= v:
                 return j
-        return candidate  # nothing else fit; trust the rank-based pick
+        return candidate
 
     field_to_col: dict[str, int] = {
         f: _assign_column(f, v) for f, v in user_vals.items()
@@ -515,11 +604,21 @@ def _heuristic_match(*, chart_text: str,
         return True
 
     def _row_is_tight(row: dict[str, Any]) -> bool:
+        """A row is "tight" iff at least one user measurement sits
+        within ``TIE_BUFFER_CM`` of the upper bound of a *real* range
+        that contains it.
+
+        Single-number cells (lo == hi) represent exact garment
+        dimensions, not user-measurement brackets — bumping in that
+        case would over-recommend on perfect fits, so we skip them.
+        """
         for f, v in user_vals.items():
             j = field_to_col.get(f, -1)
             if j < 0 or j >= len(row["ranges"]):
                 continue
             lo, hi = row["ranges"][j]
+            if hi == lo:
+                continue  # exact value, don't bump
             if lo <= v <= hi and (hi - v) < TIE_BUFFER_CM:
                 return True
         return False
@@ -621,16 +720,18 @@ async def analyze_chart(
         user_preferred_units=payload.user_preferred_units,
     )
 
-    # Step 1 — Eyes (Gemma) when active and wired.
-    active_provider = (await get_active_provider()).lower()
+    # Step 1 — Eyes (Gemma) when wired.
+    # We deliberately skip the ``active_provider`` gate here: Gemma is
+    # the cheapest and most chart-friendly engine, and if it's
+    # configured we want it for *every* size analysis regardless of
+    # what the global Eyes provider is set to. Failures fall through
+    # to Qwen-VL.
+    active_provider = (await get_active_provider()).lower()  # for telemetry only
     parsed: dict[str, Any] | None = None
     source = "fallback"
-    err_first: str | None = None
+    provider_errors: list[str] = []
 
-    if (
-        active_provider == "gemma"
-        and settings.EYES_GEMMA_SPACE_URL
-    ):
+    if settings.EYES_GEMMA_SPACE_URL:
         try:
             raw = await _via_gemma(
                 system_prompt=_SYSTEM_PROMPT,
@@ -643,10 +744,10 @@ async def analyze_chart(
             provider_activity.record(
                 "gemma", ok=parsed is not None,
                 latency_ms=int((time.time() - t0) * 1000),
-                extra={"op": "size-chart"},
+                extra={"op": "size-chart", "active_provider": active_provider},
             )
         except Exception as exc:  # noqa: BLE001
-            err_first = f"gemma: {exc}"
+            provider_errors.append(f"gemma: {str(exc)[:200]}")
             provider_activity.record(
                 "gemma", ok=False,
                 error=str(exc)[:240],
@@ -671,7 +772,8 @@ async def analyze_chart(
                 extra={"op": "size-chart", "with_image": bool(payload.chart_screenshot_b64)},
             )
         except Exception as exc:  # noqa: BLE001
-            log.info("qwen fallback failed: %s; first=%s", exc, err_first)
+            provider_errors.append(f"qwen: {str(exc)[:200]}")
+            log.info("qwen fallback failed: %s; provider_errors=%s", exc, provider_errors)
             provider_activity.record(
                 "qwen", ok=False,
                 error=str(exc)[:240],
@@ -688,20 +790,37 @@ async def analyze_chart(
             source = "heuristic"
 
     if parsed is None:
-        # Nothing worked. Return a 200 with a graceful "couldn't tell"
-        # so the extension can show the user a friendly message
-        # instead of a Sentry-grade error toast.
+        # Nothing worked. Surface why for easier debugging while keeping
+        # the contract a 200 (so the extension can show a friendly
+        # toast). The provider error list helps the user / support
+        # know whether the LLM stack is misconfigured vs. genuinely
+        # unable to read the chart.
+        why_parts: list[str] = []
+        if not provider_errors:
+            why_parts.append(
+                "AI sizing engines were not configured for this deployment."
+            )
+        else:
+            why_parts.append(
+                "AI sizing engines couldn't read this chart"
+                + (
+                    " (" + "; ".join(provider_errors) + ")"
+                    if any("not configured" in e for e in provider_errors)
+                    else ""
+                )
+                + "."
+            )
+        why_parts.append(
+            "Try selecting the size table area manually with the pick "
+            "tool, or open the page on a different device."
+        )
         return AnalyzeChartOut(
             recommended_size=None,
             confidence=0.0,
             garment_type=payload.garment_type,
             size_chart_units=None,
             matched_columns=[],
-            reasoning=(
-                "We couldn't determine a size from this chart. "
-                "Try selecting the size table area manually, or open "
-                "the page on a different device and try again."
-            ),
+            reasoning=" ".join(why_parts),
             alternatives=[],
             source="none",
             elapsed_ms=int((time.time() - t0) * 1000),

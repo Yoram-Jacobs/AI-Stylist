@@ -281,6 +281,10 @@ async function _sendForAnalysis({ chart_html, chart_screenshot_b64, garment_type
     result: r.result,
     store: payload.store,
     onDismiss: showFab,
+    // If the recommendation came back without a size, give the user
+    // a way to retry by picking the chart manually — the backend's
+    // ``reasoning`` field already tells them *why* it couldn't pick.
+    retry: r.result?.recommended_size ? null : () => enterPickMode({ reason: 'manual' }),
   });
 }
 
