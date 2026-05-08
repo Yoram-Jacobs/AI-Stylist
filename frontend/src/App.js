@@ -26,6 +26,7 @@ import TransactionLanding from '@/pages/TransactionLanding';
 import Admin from '@/pages/Admin';
 import ExpertsDirectory from '@/pages/ExpertsDirectory';
 import AdsManager from '@/pages/AdsManager';
+import ExtensionConnect from '@/pages/ExtensionConnect';
 
 function App() {
   return (
@@ -50,6 +51,12 @@ function App() {
             {/* OAuth callback — outside PublicOnly so it can install the
                 token and forward, regardless of current auth state. */}
             <Route path="/auth/callback" element={<AuthCallback />} />
+            {/*
+             * Chrome-extension auth bridge: rendered standalone (no
+             * AppLayout chrome) so it works when opened from the
+             * extension popup as a tiny window.
+             */}
+            <Route path="/extension/connect" element={<ExtensionConnect />} />
             <Route element={<AppLayout />}>
               <Route path="/home" element={<Home />} />
               <Route path="/closet" element={<Closet />} />

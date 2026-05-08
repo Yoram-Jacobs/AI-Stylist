@@ -13,6 +13,7 @@ from app.api.v1 import (
     payments,
     professionals,
     share,
+    sizes,
     stylist,
     transactions,
     trends,
@@ -29,6 +30,7 @@ api_v1_router.include_router(stylist.router)
 api_v1_router.include_router(google_auth.auth_router)
 api_v1_router.include_router(google_auth.calendar_router)
 api_v1_router.include_router(trends.router)
+api_v1_router.include_router(sizes.router)
 api_v1_router.include_router(share.router)
 api_v1_router.include_router(professionals.router)
 api_v1_router.include_router(ads.router)

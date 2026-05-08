@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Wave 3 shipped + Phase O Wave O.1 shipped + SPA eager-load caching shipped)**
+# DressApp — Development Plan (Core-first) **UPDATED (Chrome Extension Phase X shipped in repo + backend fixes)**
 
 ## 1) Objectives
 
@@ -79,6 +79,49 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
   - instant returns to `/market` and `/experts`
   - stale-while-revalidate works
   - no console errors attributable to app code
+
+### ✅ Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO (manual Chrome E2E pending)**
+**Primary objective achieved:** A Manifest V3 Chrome extension exists end-to-end (popup UI, content scripts, site adapters, auth handoff, background service worker, backend endpoint, and a production `dist/` build).
+
+**What shipped**
+- ✅ Extension scaffold + architecture (React + Vite + MV3, CRXJS bundling)
+- ✅ Popup UI (DressApp-themed Tailwind):
+  - loading / disconnected / connected / error states
+  - Connect flow opens `https://<backend>/extension/connect?ext_id=<id>&v=1`
+  - displays `/api/v1/users/me` measurement summary
+  - sign-out wipes token in `chrome.storage.local`
+- ✅ Content script injection on supported stores:
+  - mounts a “DressApp size” button next to detected size anchors
+  - extracts size chart HTML and calls backend analysis
+  - renders an in-page overlay tooltip with the recommendation
+- ✅ Store adapters present for: **Zara, ASOS, Shein, H&M, Amazon, AliExpress** (+ generic fallback)
+- ✅ Secure token handoff page shipped in web app:
+  - `frontend/src/pages/ExtensionConnect.jsx`
+  - extension receives `{type:'DRESSAPP_EXT_TOKEN', token, backend, user}`
+  - content-script `auth-bridge.js` forwards handoff to SW
+- ✅ Service worker provides single-source-of-truth auth + API calls:
+  - caches `/users/me` for popup responsiveness
+  - isolates bearer token from content/popup scripts
+- ✅ Manifest, icons, and `dist/` build:
+  - icons generated and present in `/app/chrome-extension/icons/`
+  - `yarn build` produces `/app/chrome-extension/dist/` and valid manifest rewrites
+
+**Backend integration (verified)**
+- ✅ `POST /api/v1/sizes/analyze-chart` exists and is routed
+- ✅ Unauthenticated requests return **401** (expected)
+- ✅ Authed behavior verified via `TestClient` with mocked `get_current_user`:
+  - returns **200** and a structured recommendation
+  - heuristic fallback works when LLM providers unavailable
+
+**Backend stability fixes performed during Phase X**
+- ✅ `HFImageService` now tolerates older `huggingface_hub` clients (no `provider` kwarg)
+- ✅ `sizes.py` provider activity tracking fixed:
+  - corrected import path (`from app.services import provider_activity`)
+  - corrected call signature to `provider_activity.record(provider, ...)`
+
+**Known limitations / pending**
+- ⏳ Manual E2E testing inside Chrome (load unpacked, validate connect + overlay + chart scraping on real product pages)
+- ⏳ Chrome Web Store publishing (deferred)
 
 ---
 
@@ -355,26 +398,73 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 
 ---
 
+### Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO / E2E PENDING**
+
+#### X.0 — Repository layout (shipped)
+- ✅ `/app/chrome-extension/` (Vite + React + Tailwind + CRXJS)
+  - `src/background/service-worker.js`
+  - `src/content/content.js`, `overlay.js`, `auth-bridge.js`, `content.css`
+  - `src/content/adapters/` (Zara, ASOS, Shein, H&M, Amazon, AliExpress + generic)
+  - `src/popup/*` (React popup)
+  - `manifest.json` (MV3, externally_connectable, content scripts)
+  - `icons/` (16/32/48/128)
+  - `dist/` (production build output)
+
+#### X.1 — Auth handshake (shipped)
+- ✅ Web app page: `/extension/connect` (`ExtensionConnect.jsx`)
+- ✅ Token handoff payload: `{type:'DRESSAPP_EXT_TOKEN', token, backend, user, version}`
+- ✅ Extension receives and persists token in `chrome.storage.local`
+
+#### X.2 — Backend endpoint (shipped + verified)
+- ✅ `POST /api/v1/sizes/analyze-chart`
+  - inputs: `chart_html` or `chart_text` or `chart_screenshot_b64`
+  - uses active Eyes provider (`gemma`) and falls back to Qwen where available
+  - last resort heuristic regex match for robustness
+  - returns structured recommendation payload
+- ✅ Verified behaviors:
+  - 401 unauthenticated
+  - 200 authenticated (TestClient + dependency override)
+
+#### X.3 — Build & packaging (shipped)
+- ✅ `yarn build` produces valid `dist/` folder
+- ✅ Icons included and referenced by manifest
+
+#### X.4 — Pending validation & release (next)
+- ⏳ Manual Chrome E2E:
+  - Load unpacked from `/app/chrome-extension/dist`
+  - Connect via popup → verify token stored → `/users/me` loads
+  - On each supported store: button injection → chart detection → overlay recommendation
+- ⏳ Publish to Chrome Web Store (deferred)
+  - listing metadata
+  - privacy disclosure (measurements are used transiently)
+  - final allow-list for `externally_connectable` origins
+
+---
+
 ## 3) Next Actions (immediate)
 
 ### P0 — Next wave candidates
-1. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
-2. Swap reservation semantics hardening:
+1. **Phase X E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
+2. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
+3. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
-3. Swap payment support (optional): PayPal capture for swap shipping (only if community requests).
 
 ### P1
-4. Transactions page quality-of-life:
+4. Extension hardening:
+   - screenshot capture fallback for charts that are images/modals (if needed)
+   - adapter selector tuning for store DOM changes
+5. Transactions page quality-of-life:
    - search by listing title
    - per-kind empty states and summaries
 
 ### P2
-5. Object storage migration (Mongo base64 bloat → R2/S3).
-6. Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.
+6. Object storage migration (Mongo base64 bloat → R2/S3).
+7. Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.
+8. Chrome Web Store publishing (deferred until Phase X E2E passes).
 
 ### P3
-7. Refactor `AddItem.jsx` into modules.
+9. Refactor `AddItem.jsx` into modules.
 
 ---
 
@@ -422,9 +512,26 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 - ⏳ Wave O.3:
   - Fine-tuned Gemma4-E4B can be toggled in as primary once hosted.
 
+### Phase X — Chrome Extension (Shopping Assistant)
+- ✅ Build artifacts exist:
+  - `chrome-extension/dist/manifest.json` is valid MV3
+  - popup UI loads
+  - background SW routes auth + API calls
+  - content scripts + overlay inject successfully
+  - icons present
+- ✅ Backend endpoint works:
+  - 401 unauthenticated
+  - 200 authenticated
+  - heuristic fallback returns a safe response
+- ⏳ Manual E2E in Chrome passes:
+  - Connect flow persists token and `/users/me` renders in popup
+  - Button injection appears next to size selector (or reasonable anchor) on each supported site
+  - Overlay shows recommendation from real backend call
+
 ---
 
 ## Out of scope (deferred)
 - Swap PayPal capture at propose-time (Wave 4+ if community requests it)
 - Refund policy for captured donation shipping
 - Transactions search by listing title (future QoL)
+- Chrome Web Store publishing (until Phase X manual E2E is complete)

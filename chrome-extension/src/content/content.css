@@ -1,0 +1,77 @@
+/* DressApp content-script styles. Scoped under specific class names
+   so we don't accidentally restyle the host shopping site. We also
+   avoid Tailwind here (no preprocessor on raw content scripts) — the
+   payload is tiny and stable. */
+
+.dressapp-anchor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 8px 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #0f172a;
+  background: #0f172a;
+  color: #ffffff;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: transform 120ms ease, background 120ms ease;
+}
+.dressapp-anchor-btn:hover { background: #1e293b; transform: translateY(-1px); }
+.dressapp-anchor-btn:active { transform: translateY(0); }
+.dressapp-anchor-btn .dressapp-dot { width: 6px; height: 6px; border-radius: 999px; background: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.25); }
+
+/* ---- overlay ---- */
+.dressapp-overlay-host {
+  position: fixed; right: 16px; bottom: 16px; z-index: 2147483646;
+  font-family: 'Figtree', system-ui, sans-serif;
+}
+.dressapp-overlay-card {
+  position: relative;
+  width: 320px; max-width: 92vw;
+  background: #ffffff; color: #0f172a;
+  border: 1px solid #e2e8f0; border-radius: 16px;
+  box-shadow: 0 16px 32px -16px rgba(15,23,42,.25);
+  padding: 16px 16px 14px;
+  animation: dressapp-pop 180ms ease;
+}
+@keyframes dressapp-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.dressapp-overlay-close {
+  position: absolute; top: 8px; right: 10px;
+  background: transparent; border: 0; cursor: pointer;
+  font-size: 18px; line-height: 1; color: #64748b;
+}
+.dressapp-overlay-close:hover { color: #0f172a; }
+.dressapp-overlay-title { font-size: 14px; font-weight: 600; margin: 0 0 6px; padding-right: 18px; }
+.dressapp-overlay-title strong { font-weight: 700; }
+.dressapp-overlay-body p { margin: 4px 0; font-size: 13px; line-height: 1.45; color: #334155; }
+.dressapp-overlay-body small { display: block; margin-top: 6px; font-size: 11px; color: #64748b; }
+.dressapp-overlay-cta {
+  display: inline-block; margin-top: 8px;
+  padding: 6px 10px; border-radius: 8px;
+  background: #0f172a; color: #ffffff !important;
+  text-decoration: none; font-size: 12px; font-weight: 500;
+}
+.dressapp-confidence { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 600; vertical-align: middle; }
+.dressapp-alts { margin-top: 8px; font-size: 11px; color: #475569; }
+.dressapp-alts span { margin-right: 6px; }
+.dressapp-alts em { color: #94a3b8; font-style: normal; }
+
+.dressapp-overlay-spinner {
+  position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 12px;
+  background: #0f172a; color: #ffffff;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 12px; box-shadow: 0 8px 16px -8px rgba(15,23,42,.4);
+}
+.dressapp-spinner {
+  width: 14px; height: 14px; border-radius: 999px;
+  border: 2px solid rgba(255,255,255,.25); border-top-color: #ffffff;
+  animation: dressapp-spin 700ms linear infinite;
+}
+@keyframes dressapp-spin { to { transform: rotate(360deg); } }
