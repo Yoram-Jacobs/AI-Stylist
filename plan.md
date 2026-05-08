@@ -1,4 +1,4 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Chrome Extension Phase X shipped in repo + backend fixes)**
+# DressApp — Development Plan (Core-first) **UPDATED (Chrome Extension Phase X.5 hardening shipped + backend endpoint verified 100%)**
 
 ## 1) Objectives
 
@@ -80,10 +80,10 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
   - stale-while-revalidate works
   - no console errors attributable to app code
 
-### ✅ Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO (manual Chrome E2E pending)**
+### ✅ Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO (manual Chrome E2E pending; backend verified)**
 **Primary objective achieved:** A Manifest V3 Chrome extension exists end-to-end (popup UI, content scripts, site adapters, auth handoff, background service worker, backend endpoint, and a production `dist/` build).
 
-**What shipped**
+**What shipped (X.0–X.3)**
 - ✅ Extension scaffold + architecture (React + Vite + MV3, CRXJS bundling)
 - ✅ Popup UI (DressApp-themed Tailwind):
   - loading / disconnected / connected / error states
@@ -103,21 +103,36 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
   - caches `/users/me` for popup responsiveness
   - isolates bearer token from content/popup scripts
 - ✅ Manifest, icons, and `dist/` build:
-  - icons generated and present in `/app/chrome-extension/icons/`
+  - icons present in `/app/chrome-extension/icons/`
   - `yarn build` produces `/app/chrome-extension/dist/` and valid manifest rewrites
 
 **Backend integration (verified)**
 - ✅ `POST /api/v1/sizes/analyze-chart` exists and is routed
 - ✅ Unauthenticated requests return **401** (expected)
-- ✅ Authed behavior verified via `TestClient` with mocked `get_current_user`:
-  - returns **200** and a structured recommendation
-  - heuristic fallback works when LLM providers unavailable
+- ✅ Authed behavior verified by automated testing agent (`iteration_20.json`): **9/9 tests passed (100%)**
+  - schema contract validated
+  - screenshot-only requests return 200 (graceful `source='none'` when LLMs unavailable)
+  - heuristic fallback returns a recommendation when possible
+- ✅ `GET /api/v1/users/me` verified with valid token (used by popup)
 
 **Backend stability fixes performed during Phase X**
 - ✅ `HFImageService` now tolerates older `huggingface_hub` clients (no `provider` kwarg)
 - ✅ `sizes.py` provider activity tracking fixed:
   - corrected import path (`from app.services import provider_activity`)
   - corrected call signature to `provider_activity.record(provider, ...)`
+
+**✅ Phase X.5 — Extension hardening (modal/image charts + screenshot fallback + testability) — SHIPPED**
+- ✅ Image-based chart detection (`detectChartImage`) for charts rendered as single images inside modals/sections.
+- ✅ Screenshot fallback when HTML/image extraction fails:
+  - added SW handler `CAPTURE_VISIBLE_TAB` using `chrome.tabs.captureVisibleTab`
+  - added `tabs` permission to manifest
+  - content script now sends `chart_screenshot_b64` (JPEG base64, no prefix) to backend
+- ✅ Broader anchor detection:
+  - supports size pill/button groups and accessibility roles (e.g. `role=radiogroup`, fieldsets)
+- ✅ Overlay UX + testability:
+  - retry CTA and stable `data-testid` selectors on overlay elements
+  - spinner/close elements covered by `data-testid`
+- ✅ Build remains clean (`yarn build`) and JS lint is clean.
 
 **Known limitations / pending**
 - ⏳ Manual E2E testing inside Chrome (load unpacked, validate connect + overlay + chart scraping on real product pages)
@@ -421,22 +436,26 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
   - uses active Eyes provider (`gemma`) and falls back to Qwen where available
   - last resort heuristic regex match for robustness
   - returns structured recommendation payload
-- ✅ Verified behaviors:
-  - 401 unauthenticated
-  - 200 authenticated (TestClient + dependency override)
+- ✅ Verified by automated testing agent (`iteration_20.json`): **9/9 tests passed**.
 
 #### X.3 — Build & packaging (shipped)
 - ✅ `yarn build` produces valid `dist/` folder
 - ✅ Icons included and referenced by manifest
 
-#### X.4 — Pending validation & release (next)
+#### X.5 — Hardening for real-world store DOMs (shipped)
+- ✅ Detect image-based charts (size guide as `img`) and pass as `chart_screenshot_b64`
+- ✅ Visible-tab capture fallback (`CAPTURE_VISIBLE_TAB`) for OCR cases
+- ✅ Broader anchor detection (size pill groups/buttons/roles)
+- ✅ Overlay retry + dismiss + `data-testid` selectors
+
+#### X.6 — Pending validation & release (next)
 - ⏳ Manual Chrome E2E:
   - Load unpacked from `/app/chrome-extension/dist`
   - Connect via popup → verify token stored → `/users/me` loads
-  - On each supported store: button injection → chart detection → overlay recommendation
+  - On each supported store: button injection → chart detection (HTML/image/screenshot) → overlay recommendation
 - ⏳ Publish to Chrome Web Store (deferred)
   - listing metadata
-  - privacy disclosure (measurements are used transiently)
+  - privacy disclosure (measurements used transiently; screenshots sent only for chart OCR)
   - final allow-list for `externally_connectable` origins
 
 ---
@@ -444,16 +463,17 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 ## 3) Next Actions (immediate)
 
 ### P0 — Next wave candidates
-1. **Phase X E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
+1. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
 2. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
 3. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
 
 ### P1
-4. Extension hardening:
-   - screenshot capture fallback for charts that are images/modals (if needed)
+4. Extension quality improvements (post-E2E):
+   - add optional “Select chart area” interaction if needed for very custom charts
    - adapter selector tuning for store DOM changes
+   - tighten origin allow-lists for production (extension id allow-list + externally_connectable)
 5. Transactions page quality-of-life:
    - search by listing title
    - per-kind empty states and summaries
@@ -461,7 +481,7 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 ### P2
 6. Object storage migration (Mongo base64 bloat → R2/S3).
 7. Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.
-8. Chrome Web Store publishing (deferred until Phase X E2E passes).
+8. Chrome Web Store publishing (deferred until Phase X.6 manual E2E passes).
 
 ### P3
 9. Refactor `AddItem.jsx` into modules.
@@ -519,10 +539,17 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
   - background SW routes auth + API calls
   - content scripts + overlay inject successfully
   - icons present
-- ✅ Backend endpoint works:
+- ✅ Backend endpoint works (automated):
   - 401 unauthenticated
   - 200 authenticated
+  - screenshot-only requests return 200
   - heuristic fallback returns a safe response
+  - verified by testing agent `iteration_20.json` (9/9 pass)
+- ✅ Hardening shipped:
+  - image-based chart detection
+  - visible-tab screenshot capture fallback
+  - broader anchor detection
+  - overlay retry/dismiss + stable `data-testid`s
 - ⏳ Manual E2E in Chrome passes:
   - Connect flow persists token and `/users/me` renders in popup
   - Button injection appears next to size selector (or reasonable anchor) on each supported site
@@ -534,4 +561,4 @@ Out-of-band hotfix wave for the user-reported "items stuck on Private / can't de
 - Swap PayPal capture at propose-time (Wave 4+ if community requests it)
 - Refund policy for captured donation shipping
 - Transactions search by listing title (future QoL)
-- Chrome Web Store publishing (until Phase X manual E2E is complete)
+- Chrome Web Store publishing (until Phase X.6 manual E2E is complete)
