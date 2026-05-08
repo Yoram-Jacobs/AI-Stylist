@@ -1,14 +1,14 @@
 [
   {
-    "content": "cropAndAnalyze: also extract overlapping <table> HTML and send chart_html",
+    "content": "Backend: heuristic-first when chart_text is non-empty (skip LLMs)",
     "status": "completed"
   },
   {
-    "content": "Tighten Qwen-VL request timeout so heuristic kicks in fast on dead engines",
+    "content": "Backend: include output preview + vision_disabled in Gemma error",
     "status": "completed"
   },
   {
-    "content": "Build + repackage extension",
+    "content": "Smoke-test backend flow + lint",
     "status": "completed"
   }
 ]

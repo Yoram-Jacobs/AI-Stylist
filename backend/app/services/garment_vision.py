@@ -126,8 +126,21 @@ async def _call_gemma_space(
 
     output = (body or {}).get("output")
     if not output or not isinstance(output, str):
+        # Surface the empty-output condition together with the
+        # adjacent metadata so logs immediately reveal whether the
+        # Space ran in vision_disabled mode or just generated zero
+        # tokens. Common Phase-1 case: vision_disabled=true while
+        # the caller passed only an image (no text grounding).
+        meta = {
+            "output_type": type(output).__name__,
+            "output_preview": (str(output)[:120] if output is not None else None),
+            "vision_disabled": (body or {}).get("vision_disabled"),
+            "vision_used": (body or {}).get("vision_used"),
+            "tokens_completion": (body or {}).get("tokens_completion"),
+            "finish_reason": (body or {}).get("finish_reason"),
+        }
         raise RuntimeError(
-            f"Gemma Space empty/invalid output: keys={list((body or {}).keys())}"
+            f"Gemma Space empty/invalid output ({meta})"
         )
     if body.get("vision_disabled"):
         # Phase-1 expected state — log once per call so we can spot

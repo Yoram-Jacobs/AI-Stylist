@@ -839,6 +839,24 @@ async def analyze_chart(
     source = "fallback"
     provider_errors: list[str] = []
 
+    # Fast path: when the extension forwarded an HTML/text chart,
+    # run the deterministic heuristic *before* touching any LLM.
+    # This typically resolves in <50 ms and avoids the long tail of
+    # Gemma / Qwen latency for the most common case (a real <table>
+    # in a Size-Guide modal). LLMs only run when the heuristic
+    # genuinely can't fit the user.
+    if chart_text:
+        decided = _heuristic_match(
+            chart_text=chart_text, measurements=measurements,
+        )
+        if decided is not None:
+            parsed = decided
+            source = "heuristic"
+            log.info(
+                "size-chart resolved by heuristic-first in %d ms",
+                int((time.time() - t0) * 1000),
+            )
+
     # Step 0 — structured extraction via Gemma (image OCR, JSON-only).
     # When this succeeds, we feed the *cleaned* chart text into the
     # Python heuristic and skip the LLM "decision" call entirely:
@@ -847,8 +865,10 @@ async def analyze_chart(
     # → heuristic stack so we never regress an existing working path.
     structured: dict[str, Any] | None = None
     if (
-        payload.chart_screenshot_b64 or payload.chart_html or payload.chart_text
-    ) and settings.EYES_GEMMA_SPACE_URL:
+        parsed is None
+        and (payload.chart_screenshot_b64 or payload.chart_html or payload.chart_text)
+        and settings.EYES_GEMMA_SPACE_URL
+    ):
         t_extract = time.time()
         try:
             structured = await _extract_chart_structured(
