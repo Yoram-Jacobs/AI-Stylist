@@ -2,11 +2,12 @@
 // Centralised so a typo in a string literal can't silently break
 // the SW <-> popup <-> content-script wire.
 export const messages = {
-  AUTH_STATUS:        'AUTH_STATUS',
-  RECEIVE_HANDOFF:    'RECEIVE_HANDOFF',
-  CLEAR_AUTH:         'CLEAR_AUTH',
-  FETCH_ME:           'FETCH_ME',
-  ANALYZE_CHART:      'ANALYZE_CHART',
+  AUTH_STATUS:          'AUTH_STATUS',
+  RECEIVE_HANDOFF:      'RECEIVE_HANDOFF',
+  CLEAR_AUTH:           'CLEAR_AUTH',
+  FETCH_ME:             'FETCH_ME',
+  ANALYZE_CHART:        'ANALYZE_CHART',
+  CAPTURE_VISIBLE_TAB:  'CAPTURE_VISIBLE_TAB',
 };
 
 /** Promise-wrapper around chrome.runtime.sendMessage so callers can

@@ -74,14 +74,34 @@ async function handleAnalyze(payload) {
   }
 }
 
+async function handleCaptureVisibleTab() {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
+      format: 'jpeg', quality: 70,
+    });
+    if (typeof dataUrl !== 'string') {
+      return { ok: false, error: 'captureVisibleTab returned no data' };
+    }
+    const i = dataUrl.indexOf(',');
+    return { ok: true, image_b64: i >= 0 ? dataUrl.slice(i + 1) : dataUrl };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e?.message || 'captureVisibleTab failed',
+      needs_permission: /<all_urls>|activeTab/i.test(e?.message || ''),
+    };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Dispatch table.
   const handlers = {
-    [messages.RECEIVE_HANDOFF]: () => handleHandoff(msg.payload || msg),
-    [messages.AUTH_STATUS]:     () => handleAuthStatus(),
-    [messages.CLEAR_AUTH]:      () => handleClearAuth(),
-    [messages.FETCH_ME]:        () => handleFetchMe(),
-    [messages.ANALYZE_CHART]:   () => handleAnalyze(msg.payload),
+    [messages.RECEIVE_HANDOFF]:     () => handleHandoff(msg.payload || msg),
+    [messages.AUTH_STATUS]:         () => handleAuthStatus(),
+    [messages.CLEAR_AUTH]:          () => handleClearAuth(),
+    [messages.FETCH_ME]:            () => handleFetchMe(),
+    [messages.ANALYZE_CHART]:       () => handleAnalyze(msg.payload),
+    [messages.CAPTURE_VISIBLE_TAB]: () => handleCaptureVisibleTab(),
   };
   const handler = handlers[msg?.type];
   if (!handler) {

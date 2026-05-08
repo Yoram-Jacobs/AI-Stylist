@@ -25,6 +25,176 @@
 .dressapp-anchor-btn:active { transform: translateY(0); }
 .dressapp-anchor-btn .dressapp-dot { width: 6px; height: 6px; border-radius: 999px; background: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.25); }
 
+/* ---- floating action button (always visible) ---- */
+.dressapp-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2147483645; /* below overlay (..46) but above page chrome */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 10px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(15,23,42,.0);
+  background: #0f172a;
+  color: #ffffff;
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 10px 24px -10px rgba(15,23,42,.45), 0 2px 4px -1px rgba(15,23,42,.25);
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease, background 160ms ease;
+  opacity: 0.96;
+}
+.dressapp-fab:hover { background: #1e293b; transform: translateY(-1px); opacity: 1; box-shadow: 0 14px 28px -10px rgba(15,23,42,.55); }
+.dressapp-fab:active { transform: translateY(0); }
+.dressapp-fab:focus-visible { outline: 2px solid #0ea5e9; outline-offset: 2px; }
+.dressapp-fab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 999px;
+  background: rgba(14,165,233,.18);
+  color: #67e8f9;
+}
+.dressapp-fab-label { padding-right: 2px; }
+
+/* ---- pick mode ---- */
+.dressapp-pick-banner {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px 10px 16px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+  font-family: 'Figtree', system-ui, sans-serif;
+  box-shadow: 0 14px 28px -10px rgba(15,23,42,.55);
+  max-width: 92vw;
+  pointer-events: auto;
+  animation: dressapp-banner-in 160ms ease-out;
+}
+@keyframes dressapp-banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.dressapp-pick-banner .dressapp-pick-text {
+  display: flex; flex-direction: column; gap: 1px;
+  line-height: 1.25;
+}
+.dressapp-pick-banner .dressapp-pick-text strong {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+}
+.dressapp-pick-banner .dressapp-pick-text span {
+  font-size: 12px; color: #cbd5e1;
+}
+.dressapp-pick-cancel {
+  border: 0; cursor: pointer;
+  background: rgba(248, 250, 252, 0.12);
+  color: #f8fafc;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  padding: 6px 10px; border-radius: 8px;
+  transition: background 120ms ease;
+}
+.dressapp-pick-cancel:hover { background: rgba(248, 250, 252, 0.22); }
+.dressapp-pick-cancel:focus-visible { outline: 2px solid #67e8f9; outline-offset: 2px; }
+
+.dressapp-pick-hover {
+  position: fixed;
+  z-index: 2147483646;
+  pointer-events: none;
+  border: 2px solid #0ea5e9;
+  background: rgba(14, 165, 233, 0.10);
+  border-radius: 4px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.0);
+  display: none;
+  transition: opacity 80ms ease;
+}
+/* While pick mode is active, give the page a subtle "crosshair" cursor. */
+/* ---- crop mode (drag-rectangle UX) ---- */
+.dressapp-crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  background: rgba(15, 23, 42, 0.42);
+  pointer-events: none;
+}
+.dressapp-crop-rect {
+  position: fixed;
+  z-index: 2147483646;
+  display: none;
+  pointer-events: none;
+  border: 2px dashed #0ea5e9;
+  background: rgba(14, 165, 233, 0.10);
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.32);
+  border-radius: 4px;
+}
+.dressapp-crop-rect::before {
+  /* Make the interior of the rectangle "grabbable" for drag-to-move
+     without blocking pointer events outside the rect. */
+  content: '';
+  position: absolute;
+  inset: 8px; /* leave room for the corner handles */
+  cursor: move;
+  pointer-events: auto;
+}
+.dressapp-crop-handle {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: #0ea5e9;
+  border: 2px solid #f8fafc;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  pointer-events: auto;
+}
+.dressapp-crop-handle-nw { left: -7px; top: -7px;  cursor: nwse-resize; }
+.dressapp-crop-handle-n  { left: 50%;  top: -7px;  transform: translateX(-50%); cursor: ns-resize; }
+.dressapp-crop-handle-ne { right: -7px;top: -7px;  cursor: nesw-resize; }
+.dressapp-crop-handle-e  { right: -7px;top: 50%;   transform: translateY(-50%); cursor: ew-resize; }
+.dressapp-crop-handle-se { right: -7px;bottom: -7px; cursor: nwse-resize; }
+.dressapp-crop-handle-s  { left: 50%;  bottom: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.dressapp-crop-handle-sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.dressapp-crop-handle-w  { left: -7px; top: 50%;  transform: translateY(-50%); cursor: ew-resize; }
+
+.dressapp-crop-size {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.10);
+  color: #cbd5e1;
+  font-family: 'Source Code Pro', ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.dressapp-crop-apply {
+  border: 0; cursor: pointer;
+  background: #0ea5e9; color: #0f172a;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 12px; border-radius: 8px;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+.dressapp-crop-apply:hover { filter: brightness(1.05); transform: translateY(-1px); }
+.dressapp-crop-apply:active { transform: translateY(0); }
+.dressapp-crop-apply:focus-visible { outline: 2px solid #67e8f9; outline-offset: 2px; }
+.dressapp-crop-apply:disabled {
+  cursor: not-allowed; filter: saturate(0.4) brightness(0.85);
+}
+
+body:has(#dressapp-crop-banner) { cursor: crosshair !important; }
+body:has(#dressapp-crop-banner) * { cursor: crosshair !important; }
+body:has(#dressapp-crop-banner) #dressapp-crop-banner,
+body:has(#dressapp-crop-banner) #dressapp-crop-banner * { cursor: pointer !important; }
+
 /* ---- overlay ---- */
 .dressapp-overlay-host {
   position: fixed; right: 16px; bottom: 16px; z-index: 2147483646;
@@ -60,6 +230,9 @@
 .dressapp-alts { margin-top: 8px; font-size: 11px; color: #475569; }
 .dressapp-alts span { margin-right: 6px; }
 .dressapp-alts em { color: #94a3b8; font-style: normal; }
+
+.dressapp-overlay-actions { margin-top: 10px; display: flex; gap: 8px; }
+.dressapp-overlay-actions .dressapp-overlay-cta { cursor: pointer; border: 0; }
 
 .dressapp-overlay-spinner {
   position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;

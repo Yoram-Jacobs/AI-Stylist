@@ -1,30 +1,14 @@
 [
   {
-    "content": "Backend: POST /api/v1/sizes/analyze-chart endpoint",
+    "content": "cropAndAnalyze: also extract overlapping <table> HTML and send chart_html",
     "status": "completed"
   },
   {
-    "content": "Frontend: ExtensionConnect.jsx page (token handoff)",
+    "content": "Tighten Qwen-VL request timeout so heuristic kicks in fast on dead engines",
     "status": "completed"
   },
   {
-    "content": "Frontend: body-measurements editor (already exists in ProfileDetailsCard)",
+    "content": "Build + repackage extension",
     "status": "completed"
-  },
-  {
-    "content": "Extension: package.json + vite.config + manifest + tailwind",
-    "status": "in_progress"
-  },
-  {
-    "content": "Extension: popup + background + lib",
-    "status": "pending"
-  },
-  {
-    "content": "Extension: content script + 6 adapters + generic + overlay",
-    "status": "pending"
-  },
-  {
-    "content": "Extension: README + restart backend",
-    "status": "pending"
   }
 ]
