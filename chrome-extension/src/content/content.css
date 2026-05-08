@@ -137,9 +137,44 @@
   background: rgba(14, 165, 233, 0.10);
   box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.32);
   border-radius: 4px;
-  /* The big inset shadow above effectively dims everything outside
-     the rectangle while the inside stays untouched, giving users a
-     clear focus area without us touching the page DOM. */
+}
+.dressapp-crop-rect::before {
+  /* Make the interior of the rectangle "grabbable" for drag-to-move
+     without blocking pointer events outside the rect. */
+  content: '';
+  position: absolute;
+  inset: 8px; /* leave room for the corner handles */
+  cursor: move;
+  pointer-events: auto;
+}
+.dressapp-crop-handle {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: #0ea5e9;
+  border: 2px solid #f8fafc;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.45);
+  pointer-events: auto;
+}
+.dressapp-crop-handle-nw { left: -7px; top: -7px;  cursor: nwse-resize; }
+.dressapp-crop-handle-n  { left: 50%;  top: -7px;  transform: translateX(-50%); cursor: ns-resize; }
+.dressapp-crop-handle-ne { right: -7px;top: -7px;  cursor: nesw-resize; }
+.dressapp-crop-handle-e  { right: -7px;top: 50%;   transform: translateY(-50%); cursor: ew-resize; }
+.dressapp-crop-handle-se { right: -7px;bottom: -7px; cursor: nwse-resize; }
+.dressapp-crop-handle-s  { left: 50%;  bottom: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.dressapp-crop-handle-sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.dressapp-crop-handle-w  { left: -7px; top: 50%;  transform: translateY(-50%); cursor: ew-resize; }
+
+.dressapp-crop-size {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.10);
+  color: #cbd5e1;
+  font-family: 'Source Code Pro', ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 .dressapp-crop-apply {
   border: 0; cursor: pointer;

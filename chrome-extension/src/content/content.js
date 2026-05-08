@@ -329,7 +329,7 @@ function enterCropMode({ reason = 'manual' } = {}) {
   hideFab();
   dismissOverlay();
 
-  // Banner with Apply / Cancel.
+  // Banner with size readout + Apply / Cancel.
   const banner = document.createElement('div');
   banner.id = CROP_BANNER_ID;
   banner.className = 'dressapp-pick-banner';
@@ -338,79 +338,139 @@ function enterCropMode({ reason = 'manual' } = {}) {
   banner.innerHTML = `
     <div class="dressapp-pick-text">
       <strong>Drag a box around the size chart</strong>
-      <span>${reason === 'auto-failed' ? "We couldn't find it automatically." : 'Drag to select; release; then click Apply.'}</span>
+      <span data-role="hint">${reason === 'auto-failed' ? "We couldn't find it automatically." : 'Drag to select. Drag the corners or edges to adjust. Click Apply.'}</span>
     </div>
+    <span class="dressapp-crop-size" data-testid="dressapp-crop-size" hidden>0×0</span>
     <button type="button" class="dressapp-pick-cancel" data-testid="dressapp-crop-cancel">Cancel</button>
     <button type="button" class="dressapp-crop-apply" data-testid="dressapp-crop-apply" disabled>Apply</button>
   `;
   document.body.appendChild(banner);
 
-  // Dim overlay covering the whole viewport (the rect is "cut out"
-  // visually with a brighter inner box on top).
+  // Dim overlay covering the whole viewport.
   const dim = document.createElement('div');
   dim.id = CROP_OVERLAY_ID;
   dim.className = 'dressapp-crop-overlay';
   dim.setAttribute('aria-hidden', 'true');
   document.body.appendChild(dim);
 
-  // The rectangle the user is drawing.
+  // The crop rectangle. Once the user has finished drawing it, we
+  // mount 8 resize handles (NW/N/NE/E/SE/S/SW/W) inside it and let
+  // them drag the rect around as a whole as well.
   const rectEl = document.createElement('div');
   rectEl.id = CROP_RECT_ID;
   rectEl.className = 'dressapp-crop-rect';
   rectEl.setAttribute('aria-hidden', 'true');
+  rectEl.setAttribute('data-testid', 'dressapp-crop-rect');
+  // Handles. Pointer-events:auto on each handle so they can be grabbed
+  // even though the parent rect itself is non-interactive when idle.
+  const HANDLE_KEYS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  HANDLE_KEYS.forEach((k) => {
+    const h = document.createElement('div');
+    h.className = `dressapp-crop-handle dressapp-crop-handle-${k}`;
+    h.dataset.handle = k;
+    rectEl.appendChild(h);
+  });
   document.body.appendChild(rectEl);
-
-  let dragging = false;
-  let startX = 0, startY = 0;
-  let curRect = null;
 
   const applyBtn = banner.querySelector('[data-testid="dressapp-crop-apply"]');
   const cancelBtn = banner.querySelector('[data-testid="dressapp-crop-cancel"]');
+  const sizeReadout = banner.querySelector('[data-testid="dressapp-crop-size"]');
+  const hintEl = banner.querySelector('[data-role="hint"]');
 
-  function isOurChrome(t) {
-    return t === banner || banner.contains(t);
+  // Single rect-state object so each gesture mutates it in-place.
+  let rect = null;            // { x, y, w, h } in CSS pixels
+  let mode = 'idle';          // 'idle' | 'draw' | 'move' | 'resize-<handle>'
+  let anchor = null;          // gesture-specific reference state
+
+  function isOurChrome(t) { return banner === t || banner.contains(t); }
+  function isOurRect(t)   { return rectEl === t || rectEl.contains(t); }
+
+  function commitRect(next) {
+    rect = _normaliseRect(next);
+    rectEl.style.left = `${rect.x}px`;
+    rectEl.style.top = `${rect.y}px`;
+    rectEl.style.width = `${rect.w}px`;
+    rectEl.style.height = `${rect.h}px`;
+    rectEl.style.display = 'block';
+    const big = rect.w >= 24 && rect.h >= 16;
+    applyBtn.disabled = !big;
+    sizeReadout.hidden = !big;
+    sizeReadout.textContent = `${Math.round(rect.w)}×${Math.round(rect.h)}`;
+    if (big && hintEl) hintEl.textContent = 'Drag corners or edges to refine. Click Apply.';
   }
 
   function onDown(e) {
-    if (isOurChrome(e.target)) return;
     if (e.button !== 0) return;
+    if (isOurChrome(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    curRect = { x: startX, y: startY, w: 0, h: 0 };
-    _drawRect(curRect);
-    rectEl.style.display = 'block';
-    applyBtn.disabled = true;
+
+    // Resize handle?
+    if (e.target?.classList?.contains('dressapp-crop-handle')) {
+      mode = `resize-${e.target.dataset.handle}`;
+      anchor = { startX: e.clientX, startY: e.clientY, base: { ...rect } };
+      return;
+    }
+    // Inside the rect (drag-to-move)?
+    if (rect && isOurRect(e.target)) {
+      mode = 'move';
+      anchor = { startX: e.clientX, startY: e.clientY, base: { ...rect } };
+      return;
+    }
+    // Anywhere else: start drawing a fresh rectangle.
+    mode = 'draw';
+    anchor = { startX: e.clientX, startY: e.clientY };
+    commitRect({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
   }
+
   function onMove(e) {
-    if (!dragging) return;
-    const x = Math.min(startX, e.clientX);
-    const y = Math.min(startY, e.clientY);
-    const w = Math.abs(e.clientX - startX);
-    const h = Math.abs(e.clientY - startY);
-    curRect = { x, y, w, h };
-    _drawRect(curRect);
-  }
-  function onUp() {
-    if (!dragging) return;
-    dragging = false;
-    if (curRect && curRect.w >= 24 && curRect.h >= 16) {
-      applyBtn.disabled = false;
-    } else {
-      curRect = null;
-      rectEl.style.display = 'none';
-      applyBtn.disabled = true;
+    if (mode === 'idle') return;
+    if (mode === 'draw') {
+      const { startX, startY } = anchor;
+      commitRect({
+        x: Math.min(startX, e.clientX),
+        y: Math.min(startY, e.clientY),
+        w: Math.abs(e.clientX - startX),
+        h: Math.abs(e.clientY - startY),
+      });
+      return;
+    }
+    if (mode === 'move') {
+      const dx = e.clientX - anchor.startX;
+      const dy = e.clientY - anchor.startY;
+      const b = anchor.base;
+      const x = Math.max(0, Math.min(window.innerWidth - b.w, b.x + dx));
+      const y = Math.max(0, Math.min(window.innerHeight - b.h, b.y + dy));
+      commitRect({ x, y, w: b.w, h: b.h });
+      return;
+    }
+    if (mode.startsWith('resize-')) {
+      const handle = mode.slice('resize-'.length);
+      const dx = e.clientX - anchor.startX;
+      const dy = e.clientY - anchor.startY;
+      const b = anchor.base;
+      let { x, y, w, h } = b;
+      if (handle.includes('w')) { x = b.x + dx; w = b.w - dx; }
+      if (handle.includes('e')) { w = b.w + dx; }
+      if (handle.includes('n')) { y = b.y + dy; h = b.h - dy; }
+      if (handle.includes('s')) { h = b.h + dy; }
+      commitRect({ x, y, w, h });
     }
   }
 
-  function _drawRect(r) {
-    rectEl.style.left = `${r.x}px`;
-    rectEl.style.top = `${r.y}px`;
-    rectEl.style.width = `${r.w}px`;
-    rectEl.style.height = `${r.h}px`;
+  function onUp() {
+    if (mode === 'idle') return;
+    // If the user did a tiny click without dragging, treat it as a
+    // false-start and reset the rect so the next drag starts fresh.
+    if (mode === 'draw' && rect && (rect.w < 8 || rect.h < 8)) {
+      rect = null;
+      rectEl.style.display = 'none';
+      applyBtn.disabled = true;
+      sizeReadout.hidden = true;
+    }
+    mode = 'idle';
+    anchor = null;
   }
 
   function onKey(e) {
@@ -418,7 +478,7 @@ function enterCropMode({ reason = 'manual' } = {}) {
       e.preventDefault();
       cleanup();
       showFab();
-    } else if (e.key === 'Enter' && curRect && !applyBtn.disabled) {
+    } else if (e.key === 'Enter' && rect && !applyBtn.disabled) {
       e.preventDefault();
       void doApply();
     }
@@ -436,8 +496,8 @@ function enterCropMode({ reason = 'manual' } = {}) {
   }
 
   async function doApply() {
-    if (!curRect) return;
-    const r = curRect;
+    if (!rect) return;
+    const r = rect;
     cleanup();
     await cropAndAnalyze(r);
   }
@@ -458,6 +518,21 @@ function enterCropMode({ reason = 'manual' } = {}) {
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('mouseup', onUp, true);
   document.addEventListener('keydown', onKey, true);
+}
+
+/**
+ * Clamp a rect to the viewport, keep w/h non-negative, and ensure
+ * the rect always has positive dimensions so handle math stays sane
+ * when the user drags one edge past its opposite (the rect "flips").
+ */
+function _normaliseRect({ x, y, w, h }) {
+  if (w < 0) { x += w; w = -w; }
+  if (h < 0) { y += h; h = -h; }
+  x = Math.max(0, x);
+  y = Math.max(0, y);
+  w = Math.min(window.innerWidth - x, Math.max(0, w));
+  h = Math.min(window.innerHeight - y, Math.max(0, h));
+  return { x, y, w, h };
 }
 
 /**
@@ -509,7 +584,15 @@ async function cropAndAnalyze(rect) {
     if (!ctx) throw new Error('Canvas 2D context unavailable');
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
     const cropped = _stripDataPrefix(canvas.toDataURL('image/jpeg', 0.88));
-    log('crop sent', { sx, sy, sw, sh, dpr, len: cropped?.length || 0 });
+    if (window.localStorage?.getItem('dressapp_debug')) {
+      console.info(LOG_PREFIX, 'crop sent', {
+        cssRect: rect,
+        sourceImg: { w: img.width, h: img.height },
+        cropPx: { sx, sy, sw, sh },
+        dpr,
+        b64Len: cropped?.length || 0,
+      });
+    }
 
     await _sendForAnalysis({
       chart_html: null,

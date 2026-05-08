@@ -1,22 +1,18 @@
 [
   {
-    "content": "Backend: add Gemma extraction prompt (image -> structured JSON)",
+    "content": "Make crop rectangle resizable (8 handles + drag-to-move) after first draw",
     "status": "completed"
   },
   {
-    "content": "Backend: orchestrate two-pass — Gemma extract → Python heuristic decide",
+    "content": "Show crop size in pixels next to Apply button so user has feedback",
     "status": "completed"
   },
   {
-    "content": "Frontend: replace pick-mode with crop-mode (drag rectangle + Apply)",
+    "content": "Console diagnostic on Apply with dpr / src / cropped pixel size",
     "status": "completed"
   },
   {
-    "content": "Frontend: SW receives rect, crops the captured screenshot, returns base64",
-    "status": "completed"
-  },
-  {
-    "content": "Verify backend two-pass with TestClient + frontend lint+build",
+    "content": "Rebuild + repackage extension",
     "status": "completed"
   }
 ]
