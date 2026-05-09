@@ -1,18 +1,18 @@
 [
   {
-    "content": "Route size analysis through _hf_chat_json (same chain as closet vision)",
+    "content": "Backend: Add Gemini vision fallback in sizes.py `_via_eyes` so when Gemma returns vision_disabled/empty, Gemini Flash takes over (mirroring closet flow)",
     "status": "completed"
   },
   {
-    "content": "Tighten universal prompt: single-shot \"read this chart, recommend size\"",
+    "content": "Extension: Extend `_extractHtmlInRect` to capture div-based size charts (role=table/grid + heuristic chart-likeness scan) — fixes AliExpress-style modals",
     "status": "completed"
   },
   {
-    "content": "Keep heuristic-first only as a fast-path for clean HTML",
+    "content": "Rebuild extension bundle (yarn build) and refresh dressapp-extension.zip",
     "status": "completed"
   },
   {
-    "content": "Backend lint + smoke test",
+    "content": "Verify backend with curl + restart, confirm services healthy",
     "status": "completed"
   }
 ]

@@ -53,6 +53,7 @@ import logging
 import re
 import asyncio
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -63,6 +64,19 @@ from app.services.auth import get_current_user
 from app.services.eyes_override import get_active_provider
 from app.services.garment_vision import _call_gemma_space, _hf_chat_json
 from app.services import provider_activity
+
+# Gemini vision fallback — used when the Eyes (Gemma) endpoint returns
+# vision_disabled or otherwise fails to OCR an image-only chart. We
+# import inside the module so the size endpoint stays usable in dev
+# environments where ``emergentintegrations`` may not be installed.
+try:
+    from emergentintegrations.llm.chat import (  # type: ignore
+        ImageContent, LlmChat, UserMessage,
+    )
+    _HAS_LLM_CHAT = True
+except Exception:  # noqa: BLE001
+    ImageContent = LlmChat = UserMessage = None  # type: ignore
+    _HAS_LLM_CHAT = False
 
 log = logging.getLogger(__name__)
 
@@ -462,22 +476,122 @@ async def _via_eyes(
     the chart, match the user's measurements to a row, and apply
     DressApp's bigger-on-tie rule — in one shot. No table extraction
     pass, no per-store HTML adapters required.
+
+    On any failure from the chain above (most commonly Gemma's
+    Phase-1 ``vision_disabled`` empty-output state), this helper
+    falls through to **Gemini 2.5 Flash** via ``LlmChat`` — the same
+    multimodal model the closet's ``GarmentVisionService`` uses when
+    ``GARMENT_VISION_PROVIDER=gemini``. That mirrors the user's
+    expectation: "Gemma is the primary, Gemini is the fallback."
     """
     # 20 s soft cap so a stuck call still falls through to the
     # heuristic gracefully on the production deployment where users
     # are watching a spinner.
-    return await asyncio.wait_for(
-        _hf_chat_json(
-            model=settings.GARMENT_VISION_MODEL or "Qwen/Qwen2-VL-7B-Instruct",
+    try:
+        return await asyncio.wait_for(
+            _hf_chat_json(
+                model=settings.GARMENT_VISION_MODEL or "Qwen/Qwen2-VL-7B-Instruct",
+                system_prompt=system_prompt,
+                user_text=user_text,
+                image_b64_jpeg=image_b64 or "",
+                max_tokens=1500,
+                temperature=0.1,
+                timeout=settings.EYES_GEMMA_TIMEOUT_S or 30.0,
+            ),
+            timeout=20.0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Gemma vision_disabled, Gemma 5xx, HF endpoint missing — any
+        # failure ends up here. Try Gemini directly with the image
+        # before giving up. This is the SAME path the closet
+        # "Add Item" flow uses successfully on every deploy.
+        log.info(
+            "eyes chain failed (%s); attempting Gemini vision fallback",
+            str(exc)[:160],
+        )
+        return await _via_gemini_vision(
             system_prompt=system_prompt,
             user_text=user_text,
-            image_b64_jpeg=image_b64 or "",
-            max_tokens=1500,
-            temperature=0.1,
-            timeout=settings.EYES_GEMMA_TIMEOUT_S or 30.0,
-        ),
-        timeout=20.0,
+            image_b64=image_b64,
+            primary_error=str(exc)[:240],
+        )
+
+
+async def _via_gemini_vision(
+    *,
+    system_prompt: str,
+    user_text: str,
+    image_b64: str | None,
+    primary_error: str,
+) -> str:
+    """Direct Gemini 2.5 Flash call with optional image attachment.
+
+    Mirrors the closet pipeline's ``GarmentVisionService.analyze``
+    Gemini branch. Used only when the primary Eyes chain fails — the
+    most common cause being our self-hosted Gemma Space replying with
+    ``vision_disabled=true`` (Phase-1) on an image-only request.
+
+    Raises ``RuntimeError`` if Gemini cannot be reached either, so
+    the caller can surface a meaningful error to the user.
+    """
+    if not _HAS_LLM_CHAT or LlmChat is None:
+        raise RuntimeError(
+            f"primary Eyes chain failed ({primary_error}); "
+            "Gemini fallback unavailable (emergentintegrations not installed)."
+        )
+    api_key = settings.gemini_chat_key
+    if not api_key:
+        raise RuntimeError(
+            f"primary Eyes chain failed ({primary_error}); "
+            "Gemini fallback unavailable (no GEMINI_API_KEY / EMERGENT_LLM_KEY)."
+        )
+
+    # Use Gemini 2.5 Flash — same multimodal model the closet uses.
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"size-chart-{uuid.uuid4().hex[:12]}",
+        system_message=system_prompt,
     )
+    chat.with_model("gemini", "gemini-2.5-flash")
+
+    file_contents = []
+    if image_b64:
+        file_contents.append(ImageContent(image_b64))
+
+    msg = UserMessage(text=user_text, file_contents=file_contents)
+    t0 = time.time()
+    try:
+        # 25 s budget; the size endpoint already spent ~20 s on the
+        # primary chain so we want the user to get an answer (or a
+        # clean failure) within ~45 s total.
+        raw = await asyncio.wait_for(chat.send_message(msg), timeout=25.0)
+    except Exception as exc:  # noqa: BLE001
+        provider_activity.record(
+            "garment-vision",
+            ok=False,
+            error=f"gemini-fallback: {exc!r}",
+            latency_ms=int((time.time() - t0) * 1000),
+            extra={"provider": "gemini", "op": "size-chart/fallback"},
+        )
+        raise RuntimeError(
+            f"primary Eyes chain failed ({primary_error}); "
+            f"Gemini fallback also failed ({exc})"
+        ) from exc
+    provider_activity.record(
+        "garment-vision",
+        ok=True,
+        latency_ms=int((time.time() - t0) * 1000),
+        extra={
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "op": "size-chart/fallback",
+        },
+    )
+    log.info(
+        "size-chart Gemini fallback OK (primary failed: %s)",
+        primary_error[:120],
+    )
+    return raw or ""
 
 
 # --------------------------- numeric fallback ------------------------
@@ -811,11 +925,34 @@ async def analyze_chart(
 
     # Materialise the chart text the LLM sees. Priority:
     #   1. parsed HTML  ->  2. caller-supplied plain text  ->  3. ""
-    chart_text = ""
+    #
+    # The Chrome extension forwards BOTH fields when it captures a
+    # div-based size chart (e.g. AliExpress, Shein). Server-side we
+    # strip the HTML to text first, but if that produces a poorly-
+    # structured blob (one cell per line — common for nested-div
+    # layouts that don't have <tr> markers), we fall back to the
+    # extension's ``innerText`` capture which preserves the visual
+    # row structure browsers reflow into. The heuristic gets one
+    # try on each candidate; whichever wins, wins.
+    chart_text_html = ""
+    chart_text_innertext = ""
     if payload.chart_html:
-        chart_text = _html_to_text(payload.chart_html)
-    elif payload.chart_text:
-        chart_text = payload.chart_text.strip()[:8000]
+        chart_text_html = _html_to_text(payload.chart_html)
+    if payload.chart_text:
+        chart_text_innertext = payload.chart_text.strip()[:8000]
+
+    # Pick the best initial chart_text to forward to the LLM. Prefer
+    # whichever blob has more lines containing a numeric token —
+    # that's the rough proxy for "looks like a table".
+    def _row_density(t: str) -> int:
+        if not t:
+            return 0
+        return sum(1 for ln in t.splitlines() if re.search(r"\d{2,}", ln))
+
+    if _row_density(chart_text_innertext) > _row_density(chart_text_html):
+        chart_text = chart_text_innertext
+    else:
+        chart_text = chart_text_html or chart_text_innertext
 
     if not chart_text and not payload.chart_screenshot_b64:
         raise HTTPException(
@@ -843,17 +980,26 @@ async def analyze_chart(
     # Gemma / Qwen latency for the most common case (a real <table>
     # in a Size-Guide modal). LLMs only run when the heuristic
     # genuinely can't fit the user.
-    if chart_text:
+    #
+    # Try both candidates (HTML-stripped + raw innerText) so a div-
+    # based chart that flattens poorly under one path still resolves
+    # under the other.
+    candidate_texts: list[str] = []
+    for t in (chart_text, chart_text_html, chart_text_innertext):
+        if t and t not in candidate_texts:
+            candidate_texts.append(t)
+    for cand in candidate_texts:
         decided = _heuristic_match(
-            chart_text=chart_text, measurements=measurements,
+            chart_text=cand, measurements=measurements,
         )
         if decided is not None:
             parsed = decided
             source = "heuristic"
             log.info(
-                "size-chart resolved by heuristic-first in %d ms",
-                int((time.time() - t0) * 1000),
+                "size-chart resolved by heuristic-first in %d ms (cand_len=%d)",
+                int((time.time() - t0) * 1000), len(cand),
             )
+            break
 
     # Step 0 — structured extraction via Gemma (image OCR, JSON-only).
     # Useful when only the cropped image is available AND the Gemma
@@ -947,13 +1093,18 @@ async def analyze_chart(
             )
 
     # Step 2 — heuristic regex match (fallback for screenshot-only
-    # payloads when no engine was configured / available).
+    # payloads when no engine was configured / available). Already
+    # ran heuristic-first above, but we retry with every candidate
+    # text in case the LLM stuffed structured text into ``raw`` we
+    # haven't surfaced — defensive belt-and-braces.
     if parsed is None:
-        parsed = _heuristic_match(
-            chart_text=chart_text, measurements=measurements,
-        )
-        if parsed:
-            source = "heuristic"
+        for cand in candidate_texts or [""]:
+            parsed = _heuristic_match(
+                chart_text=cand, measurements=measurements,
+            )
+            if parsed is not None:
+                source = "heuristic"
+                break
 
     if parsed is None:
         # Nothing worked. Surface why for easier debugging while keeping
