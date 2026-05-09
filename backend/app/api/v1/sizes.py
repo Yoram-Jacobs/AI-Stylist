@@ -61,7 +61,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.services.auth import get_current_user
 from app.services.eyes_override import get_active_provider
-from app.services.garment_vision import _call_gemma_space
+from app.services.garment_vision import _call_gemma_space, _hf_chat_json
 from app.services import provider_activity
 
 log = logging.getLogger(__name__)
@@ -437,46 +437,44 @@ def _structured_to_text(struct: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _via_qwen(
+async def _via_eyes(
     *, system_prompt: str, user_text: str, image_b64: str | None = None,
 ) -> str:
-    """Vision-aware fallback: DashScope Qwen-VL multimodal endpoint.
+    """Single-call vision/text route through DressApp's existing Eyes
+    pipeline — the same plumbing the closet "Add Item" flow uses.
 
-    Wrapped in ``asyncio.wait_for`` with an explicit cap so a sluggish
-    DashScope round-trip doesn't keep the entire size endpoint hanging
-    for the user-facing 30 s. If the call exceeds the budget we raise
-    ``TimeoutError`` and let the orchestrator fall through to the
-    heuristic, which now reads any HTML the extension forwards
-    alongside the screenshot.
+    ``garment_vision._hf_chat_json`` resolves the active provider in
+    priority order:
+
+      1. Self-hosted Gemma-4 (Hetzner) when ``EYES_PROVIDER=gemma``
+         and ``EYES_GEMMA_SPACE_URL`` is set.
+      2. ``GARMENT_VISION_ENDPOINT_URL`` (HF Inference / DashScope
+         legacy endpoint) — typically a multimodal Qwen-VL deploy.
+      3. The HF Inference Providers default route when ``HF_TOKEN``
+         is available.
+
+    Whatever works for closet item OCR will work here. The model is
+    selected via the same ``EYES_BRAIN_MODEL`` environment variable
+    the closet flow honours, so admins don't have to maintain a
+    separate "size brain" config.
+
+    The size-analysis prompt is universal: it asks the model to OCR
+    the chart, match the user's measurements to a row, and apply
+    DressApp's bigger-on-tie rule — in one shot. No table extraction
+    pass, no per-store HTML adapters required.
     """
-    if not getattr(settings, "DASHSCOPE_API_KEY", None):
-        raise RuntimeError("DASHSCOPE_API_KEY not configured for Qwen fallback.")
-    try:
-        from app.services.qwen_client import (
-            QwenMessage, encode_image, get_qwen_client,
-        )
-    except ImportError as exc:
-        raise RuntimeError("qwen_client unavailable.") from exc
-
-    client = get_qwen_client()
-    images: list[str] = []
-    if image_b64:
-        images.append(encode_image(image_b64))
-
-    messages = [
-        QwenMessage(role="system", text=system_prompt),
-        QwenMessage(role="user", text=user_text, images=images),
-    ]
-    # 20 s budget: long enough for a one-shot multimodal call against a
-    # warm DashScope instance, short enough that a stuck connection
-    # doesn't strangle the size endpoint.
+    # 20 s soft cap so a stuck call still falls through to the
+    # heuristic gracefully on the production deployment where users
+    # are watching a spinner.
     return await asyncio.wait_for(
-        client.chat(
-            messages,
-            model=settings.QWEN_BRAIN_MODEL,
+        _hf_chat_json(
+            model=settings.GARMENT_VISION_MODEL or "Qwen/Qwen2-VL-7B-Instruct",
+            system_prompt=system_prompt,
+            user_text=user_text,
+            image_b64_jpeg=image_b64 or "",
             max_tokens=1500,
             temperature=0.1,
-            response_format_json=True,
+            timeout=settings.EYES_GEMMA_TIMEOUT_S or 30.0,
         ),
         timeout=20.0,
     )
@@ -858,15 +856,17 @@ async def analyze_chart(
             )
 
     # Step 0 — structured extraction via Gemma (image OCR, JSON-only).
-    # When this succeeds, we feed the *cleaned* chart text into the
-    # Python heuristic and skip the LLM "decision" call entirely:
-    # Gemma does what it's good at (reading), Python does the math.
-    # On failure we silently fall through to the legacy Gemma → Qwen
-    # → heuristic stack so we never regress an existing working path.
+    # Useful when only the cropped image is available AND the Gemma
+    # endpoint is the *only* configured engine — extraction yields a
+    # clean structured chart for the deterministic Python heuristic.
+    # When ``_via_eyes`` also supports vision (Step 1), this path is
+    # mostly redundant but harmless: if the image route from Step 1
+    # would have given the right answer, this gets us there faster.
     structured: dict[str, Any] | None = None
     if (
         parsed is None
-        and (payload.chart_screenshot_b64 or payload.chart_html or payload.chart_text)
+        and payload.chart_screenshot_b64
+        and not chart_text  # only useful when we *don't* already have HTML
         and settings.EYES_GEMMA_SPACE_URL
     ):
         t_extract = time.time()
@@ -909,59 +909,45 @@ async def analyze_chart(
                 parsed = decided
                 source = "gemma+heuristic"
 
-    # Step 1 — Eyes (Gemma) decision call when extraction didn't yield.
-
-    if parsed is None and settings.EYES_GEMMA_SPACE_URL:
-        try:
-            raw = await _via_gemma(
-                system_prompt=_SYSTEM_PROMPT,
-                user_text=user_prompt,
-                image_b64=payload.chart_screenshot_b64,
-            )
-            parsed = _coerce_response(raw)
-            if parsed:
-                source = "gemma"
-            provider_activity.record(
-                "gemma", ok=parsed is not None,
-                latency_ms=int((time.time() - t0) * 1000),
-                extra={"op": "size-chart", "active_provider": active_provider},
-            )
-        except Exception as exc:  # noqa: BLE001
-            provider_errors.append(f"gemma: {str(exc)[:200]}")
-            provider_activity.record(
-                "gemma", ok=False,
-                error=str(exc)[:240],
-                latency_ms=int((time.time() - t0) * 1000),
-                extra={"op": "size-chart"},
-            )
-
-    # Step 2 — Qwen-VL fallback (multimodal: forwards screenshot to OCR).
+    # Step 1 — Single-shot vision call through the closet pipeline's
+    # Eyes chain (Gemma → HF endpoint → DashScope, whichever is wired
+    # for this deployment). Universal — works on any store regardless
+    # of HTML structure because the model reads the chart picture and
+    # produces a recommendation in one pass.
     if parsed is None:
         try:
-            raw = await _via_qwen(
+            raw = await _via_eyes(
                 system_prompt=_SYSTEM_PROMPT,
                 user_text=user_prompt,
                 image_b64=payload.chart_screenshot_b64,
             )
             parsed = _coerce_response(raw)
             if parsed:
-                source = "qwen"
+                source = "eyes"
             provider_activity.record(
-                "qwen", ok=parsed is not None,
+                "eyes", ok=parsed is not None,
                 latency_ms=int((time.time() - t0) * 1000),
-                extra={"op": "size-chart", "with_image": bool(payload.chart_screenshot_b64)},
+                extra={
+                    "op": "size-chart",
+                    "with_image": bool(payload.chart_screenshot_b64),
+                    "active_provider": active_provider,
+                },
             )
         except Exception as exc:  # noqa: BLE001
-            provider_errors.append(f"qwen: {str(exc)[:200]}")
-            log.info("qwen fallback failed: %s; provider_errors=%s", exc, provider_errors)
+            provider_errors.append(f"eyes: {str(exc)[:200]}")
+            log.info(
+                "eyes call failed: %s; provider_errors=%s",
+                exc, provider_errors,
+            )
             provider_activity.record(
-                "qwen", ok=False,
+                "eyes", ok=False,
                 error=str(exc)[:240],
                 latency_ms=int((time.time() - t0) * 1000),
                 extra={"op": "size-chart"},
             )
 
-    # Step 3 — heuristic regex match.
+    # Step 2 — heuristic regex match (fallback for screenshot-only
+    # payloads when no engine was configured / available).
     if parsed is None:
         parsed = _heuristic_match(
             chart_text=chart_text, measurements=measurements,

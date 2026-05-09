@@ -1,14 +1,18 @@
 [
   {
-    "content": "Backend: heuristic-first when chart_text is non-empty (skip LLMs)",
+    "content": "Route size analysis through _hf_chat_json (same chain as closet vision)",
     "status": "completed"
   },
   {
-    "content": "Backend: include output preview + vision_disabled in Gemma error",
+    "content": "Tighten universal prompt: single-shot \"read this chart, recommend size\"",
     "status": "completed"
   },
   {
-    "content": "Smoke-test backend flow + lint",
+    "content": "Keep heuristic-first only as a fast-path for clean HTML",
+    "status": "completed"
+  },
+  {
+    "content": "Backend lint + smoke test",
     "status": "completed"
   }
 ]
