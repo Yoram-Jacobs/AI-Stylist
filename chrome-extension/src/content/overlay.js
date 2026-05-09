@@ -175,6 +175,36 @@ function _renderRecommendation(title, body, r) {
   why.textContent = r.reasoning || 'Based on your measurements.';
   body.appendChild(why);
 
+  // Soft data-quality warnings. The model surfaces these when one of
+  // the user's stored measurements looks obviously implausible vs.
+  // the chart's range (e.g. shoulders=75 cm on a chart that maxes
+  // at 50 cm). Render them as a stack of yellow callouts above the
+  // meta line so they're impossible to miss.
+  if (Array.isArray(r.warnings) && r.warnings.length) {
+    const warnBox = document.createElement('div');
+    warnBox.className = 'dressapp-warnings';
+    warnBox.setAttribute('data-testid', 'dressapp-overlay-warnings');
+    warnBox.setAttribute('role', 'alert');
+    r.warnings.forEach((w, idx) => {
+      if (!w) return;
+      const item = document.createElement('div');
+      item.className = 'dressapp-warning-item';
+      item.setAttribute('data-testid', `dressapp-overlay-warning-${idx}`);
+      // Leading icon (vector, no emoji).
+      const icon = document.createElement('span');
+      icon.className = 'dressapp-warning-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.textContent = '!';
+      item.appendChild(icon);
+      const txt = document.createElement('span');
+      txt.className = 'dressapp-warning-text';
+      txt.textContent = String(w);
+      item.appendChild(txt);
+      warnBox.appendChild(item);
+    });
+    body.appendChild(warnBox);
+  }
+
   const matched = (r.matched_columns || []).join(' · ') || 'your stored measurements';
   const meta = document.createElement('small');
   meta.className = 'dressapp-meta';

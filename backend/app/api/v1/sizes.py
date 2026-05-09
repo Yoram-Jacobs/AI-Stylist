@@ -116,6 +116,16 @@ class AnalyzeChartOut(BaseModel):
     matched_columns: list[str]
     reasoning: str
     alternatives: list[dict[str, Any]] = []
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Soft data-quality warnings. Surfaced to the user above the "
+            "recommendation when one of their stored body measurements "
+            "looks obviously implausible vs. the chart's own range "
+            "(e.g. ``shoulders=55 cm`` when the chart maxes out at "
+            "``50 cm``). Each entry is a short, user-facing sentence."
+        ),
+    )
     source: str
     elapsed_ms: int
     has_measurements: bool
@@ -136,6 +146,7 @@ INPUT
 -----
 * An IMAGE of a size chart (a table with size labels and numbers).
 * The USER'S BODY MEASUREMENTS in centimeters (e.g. chest, waist, hips, shoulders, height).
+* Possibly the USER'S CLOTHING SIZES they normally buy (``shirt_size``, ``pants_size``, ``shoe_size``).
 * Optional context: garment type, store name, page title.
 
 WHAT TO DO
@@ -153,6 +164,34 @@ WHAT TO DO
 4. **Tie-break: when the user's value is within 0.5 cm of the upper bound of the chosen size, pick the next size UP** (loose is wearable, tight is not). Surface the smaller size as an alternative with `fit: "snug"`.
 5. If the chart is in inches, convert mentally (1 in = 2.54 cm) and report units accordingly.
 
+ANOMALY DETECTION (always run before picking the size)
+--------------------------------------------------------
+Users sometimes mistype their measurements. Before applying the body-circumference rule, compare each provided body value to the corresponding chart column's range:
+
+- If the user's value exceeds the chart's column maximum by more than **15%** OR is below the column minimum by more than **15%** (after unit conversion), treat that single measurement as a likely **data-entry mistake**:
+    1. **Skip that measurement** when picking the recommended size — do NOT let one obviously-wrong value veto a perfectly good fit on the other columns.
+    2. **Drop that column from ``matched_columns``**.
+    3. **Append a short, friendly warning to ``warnings``** in this exact shape:
+       ``"Your <field> (<value> cm) looks higher/lower than expected for this kind of garment. Please re-measure — DressApp ignored it for this recommendation."``
+- If, after skipping anomalies, you still have at least one usable body circumference, use it. Otherwise fall through to the CLOTHING-SIZE FALLBACK rule.
+- ``height`` and ``weight`` are never anomaly-checked against the chart (they're not garment dimensions).
+
+Examples of what this rule catches:
+* User stored ``shoulders: 55 cm`` but the chart maxes at ``50 cm`` (4XL) — exceeds by 10%, **borderline** (no warning, used as-is) UNLESS the user is also obviously not a 4XL by other columns (in which case warn).
+* User stored ``shoulders: 75 cm`` (likely typed in inches) and the chart maxes at ``50 cm`` — exceeds by 50%, **definite anomaly**: skip + warn.
+* User stored ``waist: 12 cm`` (likely missing a digit) — far below any plausible chart minimum, skip + warn.
+
+CLOTHING-SIZE FALLBACK (apply when body circumferences are missing)
+---------------------------------------------------------------------
+If the user has NO usable body circumferences for the columns shown (e.g. only ``height``, ``weight``, ``shirt_size``, ``pants_size``, ``shoe_size`` are filled in), DO NOT give up. Use these signals instead:
+
+- ``shirt_size`` is authoritative for tops / shirts / jackets / dresses (where the chart shows Bust / Chest / Shoulder / Sleeve / Length). If the chart's first column lists labels like S, M, L, XL — pick the row whose label matches ``shirt_size`` (case-insensitive). If the chart uses EU/numeric labels (38, 40, 50, 52...), translate the user's letter size using the standard mapping: XS≈34/44, S≈36/46, M≈38/48, L≈40/50, XL≈42/52, XXL≈44/54, XXXL≈46/56. Adjust by ±1 if the store is known to run small/large.
+- ``pants_size`` is authoritative for trousers / shorts / jeans / skirts (where the chart shows Waist / Hip / Inseam). Match the numeric value or letter against the size column.
+- ``shoe_size`` is authoritative for footwear charts.
+- ``height`` and ``weight`` alone are NEVER sufficient — but if combined with ``shirt_size`` or ``pants_size`` they confirm the choice. If ONLY ``height``/``weight`` are present, you may still produce a low-confidence (≤0.4) recommendation by mapping height to a size band (e.g., 170-178cm + average build → M).
+
+When using the clothing-size fallback, set ``confidence`` between 0.55 and 0.80 (lower than a real measurement match), set ``matched_columns`` to ``["shirt_size"]`` (or pants/shoe), and explain in ``reasoning`` that the recommendation is based on the user's usual size, suggesting they add body measurements for a tighter fit.
+
 OUTPUT
 ------
 Return ONLY this JSON object. No prose, no markdown, no backticks.
@@ -164,11 +203,14 @@ Return ONLY this JSON object. No prose, no markdown, no backticks.
   "size_chart_units": "cm" | "in" | "mixed" | "unknown",
   "matched_columns": ["chest", "waist", ...],
   "reasoning": "<one short paragraph, 1-3 sentences>",
-  "alternatives": [{"size":"S","fit":"snug"}, {"size":"L","fit":"loose"}]
+  "alternatives": [{"size":"S","fit":"snug"}, {"size":"L","fit":"loose"}],
+  "warnings": ["Your shoulders (75 cm) looks higher than expected ...", ...]
 }
 
-If you cannot find a usable chart in the image (only product photos, occluded, blurry), return:
-{"recommended_size": null, "confidence": 0.0, "garment_type": null, "size_chart_units": "unknown", "matched_columns": [], "reasoning": "<what was missing>", "alternatives": []}
+ONLY return ``recommended_size: null`` if BOTH of these are true:
+  (a) the image really doesn't contain a usable size chart (only product photos, occluded, blurry), AND
+  (b) the user has no usable size signal at all (no body circumferences AND no shirt/pants/shoe size).
+In every other case you MUST return a best-effort size with appropriate confidence.
 """
 
 
@@ -198,6 +240,11 @@ _MEASUREMENT_ALIASES: dict[str, tuple[str, ...]] = {
     "height":     ("height", "body_height", "stature"),
     "weight":     ("weight", "body_weight"),
     "length":     ("length", "back_length", "body_length"),
+    # Clothing-size fallbacks — kept under their own keys so the
+    # prompt's CLOTHING-SIZE FALLBACK rule can find them.
+    "shirt_size": ("shirt_size", "shirts_size", "top_size", "tshirt_size"),
+    "pants_size": ("pants_size", "pant_size", "trouser_size", "trousers_size"),
+    "shoe_size":  ("shoe_size", "shoes_size", "footwear_size"),
 }
 
 
@@ -247,17 +294,45 @@ def _build_user_prompt(
     # gave ``chest`` and the chart says ``Bust Size`` — semantically
     # identical, but the model wouldn't risk the inference.
     expanded = _expand_measurement_aliases(measurements)
-    measurements_str = json.dumps(expanded, ensure_ascii=False)
+
+    # Split body circumferences from clothing-size fallbacks so the
+    # model can tell which signal to trust. ``shirt_size`` etc. are
+    # the right answer when the user has no tape-measure data.
+    _CLOTHING_SIZE_KEYS = {
+        "shirt_size", "pants_size", "shoe_size",
+        "shirts_size", "pant_size", "trouser_size",
+    }
+    _CONTEXT_ONLY_KEYS = {"height", "weight", "body_height", "stature", "body_weight"}
+    body_dims = {
+        k: v for k, v in expanded.items()
+        if k not in _CLOTHING_SIZE_KEYS and k not in _CONTEXT_ONLY_KEYS
+    }
+    clothing_sizes = {
+        k: v for k, v in expanded.items() if k in _CLOTHING_SIZE_KEYS
+    }
+    context_dims = {
+        k: v for k, v in expanded.items() if k in _CONTEXT_ONLY_KEYS
+    }
+
+    body_dims_str = json.dumps(body_dims, ensure_ascii=False)
+    clothing_sizes_str = json.dumps(clothing_sizes, ensure_ascii=False)
+    context_dims_str = json.dumps(context_dims, ensure_ascii=False)
 
     parts: list[str] = [
-        f"USER MEASUREMENTS (cm, JSON — every chart-column synonym is pre-expanded):\n{measurements_str}",
+        f"USER BODY CIRCUMFERENCES (cm, JSON — every chart-column synonym is pre-expanded):\n{body_dims_str}",
+        f"USER CLOTHING SIZES THEY NORMALLY BUY:\n{clothing_sizes_str}",
+        f"USER HEIGHT / WEIGHT CONTEXT:\n{context_dims_str}",
         (
-            "IMPORTANT: the measurements above already include every common "
-            "synonym (e.g. ``chest`` = ``bust``; ``shoulder`` = ``shoulder_width``; "
-            "``hip`` = ``bottom``). If a chart column matches ANY of these names "
-            "(case-insensitive substring is enough), use the user's value. Do "
-            "**NOT** reply that 'measurements were not provided' when at least "
-            "one column has a matching key."
+            "IMPORTANT:\n"
+            "- BODY CIRCUMFERENCES already include every common synonym "
+            "(``chest`` = ``bust``; ``shoulder`` = ``shoulder_width``; "
+            "``hip`` = ``bottom``). Case-insensitive substring is enough.\n"
+            "- If BODY CIRCUMFERENCES is empty `{}` but CLOTHING SIZES has "
+            "``shirt_size``/``pants_size``, USE THAT as the primary signal "
+            "(see CLOTHING-SIZE FALLBACK in your system prompt).\n"
+            "- Do **NOT** reply that 'measurements were not provided' if "
+            "any of the three sections above contain at least one key. "
+            "Always emit a best-effort recommendation."
         ),
     ]
     ctx_lines: list[str] = []
@@ -349,6 +424,27 @@ def _normalise(parsed: dict[str, Any], *, source: str, elapsed_ms: int,
                 "size": str(alt["size"]),
                 "fit": str(alt.get("fit") or "alt"),
             })
+
+    # Soft data-quality warnings emitted by the model when a stored
+    # body measurement looks obviously implausible vs. the chart
+    # range (e.g. ``shoulders=75`` on a chart that maxes at 50 cm).
+    # Coerced to short user-facing strings; dropped if the model
+    # forgot the field or returned junk.
+    raw_warnings = parsed.get("warnings") or []
+    if isinstance(raw_warnings, str):
+        raw_warnings = [raw_warnings]
+    if not isinstance(raw_warnings, list):
+        raw_warnings = []
+    cleaned_warnings: list[str] = []
+    for w in raw_warnings:
+        if not w:
+            continue
+        s = str(w).strip()
+        if s and s not in cleaned_warnings:
+            cleaned_warnings.append(s[:280])
+        if len(cleaned_warnings) >= 4:
+            break
+
     try:
         confidence = float(parsed.get("confidence") or 0.0)
     except (TypeError, ValueError):
@@ -363,6 +459,7 @@ def _normalise(parsed: dict[str, Any], *, source: str, elapsed_ms: int,
         matched_columns=matched,
         reasoning=str(parsed.get("reasoning") or "")[:1200],
         alternatives=cleaned_alts,
+        warnings=cleaned_warnings,
         source=source,
         elapsed_ms=elapsed_ms,
         has_measurements=has_measurements,
@@ -654,13 +751,6 @@ async def analyze_chart(
 
     measurements = (user or {}).get("body_measurements") or {}
     has_measurements = bool(measurements)
-    log.info(
-        "size analyze: user=%s email=%s has_measurements=%s keys=%s",
-        (user or {}).get("id"),
-        (user or {}).get("email"),
-        has_measurements,
-        list(measurements.keys()) if has_measurements else [],
-    )
     if not has_measurements:
         log.info(
             "size analyze called without measurements (user=%s)",
@@ -811,6 +901,7 @@ async def analyze_chart(
             matched_columns=[],
             reasoning=" ".join(why_parts),
             alternatives=[],
+            warnings=[],
             source="none",
             elapsed_ms=int((time.time() - t0) * 1000),
             has_measurements=has_measurements,

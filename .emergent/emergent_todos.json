@@ -1,14 +1,22 @@
 [
   {
-    "content": "Add server-side measurement alias expansion (chest→bust, shoulder→shoulder_width, hip→bottom, etc.) before sending to Gemini",
+    "content": "Add anomaly-detection rule to system prompt (compare user values to chart's column range; skip outliers)",
     "status": "completed"
   },
   {
-    "content": "Update prompt to forbid 'no measurements provided' when an alias matches",
+    "content": "Add structured `warnings: list[str]` field to AnalyzeChartOut and normalize/coerce it in the response handler",
     "status": "completed"
   },
   {
-    "content": "Verify with smoke test — dev user gets XL @ 1.0 confidence in 15s",
+    "content": "Render warnings prominently in the recommendation overlay (chrome-extension)",
     "status": "completed"
+  },
+  {
+    "content": "Smoke-test with lokoprod profile: shoulders=55 should be flagged but chest=92/sleeve=46 should still drive the match",
+    "status": "completed"
+  },
+  {
+    "content": "[future] Fix 'Save changes' always-active button on profile form",
+    "status": "pending"
   }
 ]

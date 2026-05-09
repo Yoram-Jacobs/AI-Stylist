@@ -231,6 +231,40 @@ body:has(#dressapp-crop-banner) #dressapp-crop-banner * { cursor: pointer !impor
 .dressapp-alts span { margin-right: 6px; }
 .dressapp-alts em { color: #94a3b8; font-style: normal; }
 
+/* Data-quality warnings — surfaced when the model detects an
+ * implausible body measurement vs. the chart's range. Amber palette,
+ * stacked vertically, role="alert" so screen readers announce them. */
+.dressapp-warnings {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dressapp-warning-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.dressapp-warning-icon {
+  flex: 0 0 auto;
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1;
+}
+.dressapp-warning-text { flex: 1 1 auto; }
+
 .dressapp-overlay-actions { margin-top: 10px; display: flex; gap: 8px; }
 .dressapp-overlay-actions .dressapp-overlay-cta { cursor: pointer; border: 0; }
 
