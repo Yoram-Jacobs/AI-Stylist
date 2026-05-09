@@ -139,14 +139,26 @@ function _stripDataPrefix(dataUrl) {
  * Capture a JPEG screenshot of the active tab's viewport.
  *
  * Returns either a base64 string (success) or
- * ``{ error: string, needs_permission?: boolean }`` (failure) so the
- * caller can surface a meaningful diagnostic to the user instead of
- * the generic "couldn't capture this region" toast.
+ * ``{ error: string, needs_permission?: boolean, stale_context?: boolean }``
+ * (failure) so the caller can surface a meaningful diagnostic to the
+ * user instead of the generic "couldn't capture this region" toast.
  */
 async function _captureViewportWithPermission() {
   let cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
   if (cap?.ok && cap.image_b64) return cap.image_b64;
-  if (cap?.needs_permission || /<all_urls>|activeTab|host permission/i.test(cap?.error || '')) {
+
+  // Orphaned content script after extension reload — the SW connection
+  // is dead. Page reload fixes it. Surface a distinct flag so the
+  // caller can render a tailored "reload this tab" message.
+  const errMsg = cap?.error || '';
+  if (/extension context invalidated|message port closed|receiving end does not exist/i.test(errMsg)) {
+    return {
+      error: errMsg,
+      stale_context: true,
+    };
+  }
+
+  if (cap?.needs_permission || /<all_urls>|activeTab|host permission/i.test(errMsg)) {
     try {
       const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
       if (granted) {
@@ -602,6 +614,7 @@ async function cropAndAnalyze(rect) {
     const screenshot = typeof cap === 'string' ? cap : null;
     const captureError = typeof cap === 'string' ? null : (cap?.error || 'no screenshot');
     const needsPermission = typeof cap === 'string' ? false : !!cap?.needs_permission;
+    const staleContext = typeof cap === 'string' ? false : !!cap?.stale_context;
     let cropped = null;
     if (screenshot) {
       try {
@@ -639,17 +652,28 @@ async function cropAndAnalyze(rect) {
     if (!cropped) {
       // Surface the actual underlying error so we can debug what's
       // blocking captureVisibleTab. Three known causes:
-      //   1. User denied the <all_urls> permission prompt.
-      //   2. Site has DRM / privileged content that blocks capture.
-      //   3. SW lifecycle issue (resolved tab id mismatch).
-      const explainer = needsPermission
-        ? 'Click the DressApp toolbar icon, approve the optional "all sites" permission, then try again.'
-        : `Browser blocked the screenshot: ${captureError}. Try reloading the tab and re-running the crop.`;
+      //   1. Extension was reloaded → orphaned content script (stale_context).
+      //   2. User denied the <all_urls> permission prompt.
+      //   3. SW lifecycle issue / privileged content blocking capture.
+      let title = 'Couldn\'t capture this region';
+      let explainer;
+      let retry = () => enterCropMode({ reason: 'manual' });
+      if (staleContext) {
+        title = 'DressApp was just updated';
+        explainer = 'Reload this tab (press F5 / ⌘R) so DressApp can re-attach to the page, then retry the crop.';
+        // The retry button should reload the page since reattaching
+        // an orphaned content script isn't possible from inside it.
+        retry = () => { try { location.reload(); } catch { /* noop */ } };
+      } else if (needsPermission) {
+        explainer = 'Click the DressApp toolbar icon, approve the optional "all sites" permission, then try again.';
+      } else {
+        explainer = `Browser blocked the screenshot: ${captureError}. Try reloading the tab and re-running the crop.`;
+      }
       mountOverlay({
         kind: 'warn',
-        title: 'Couldn\'t capture this region',
+        title,
         message: explainer,
-        retry: () => enterCropMode({ reason: 'manual' }),
+        retry,
         onDismiss: showFab,
       });
       return;

@@ -1,18 +1,18 @@
 [
   {
-    "content": "Backend: Rewrite sizes.py to use a screenshot-only flow — Gemini 2.5 Flash as primary vision (skip Gemma since vision_disabled in Phase 1), with a tight OCR-focused prompt",
+    "content": "Diagnose why pass 1 still hit OLD code: extension was talking to dressapp.co (prod) by default, not preview",
     "status": "completed"
   },
   {
-    "content": "Extension: Remove HTML extraction logic — send only the cropped screenshot",
+    "content": "Build extension with VITE_DRESSAPP_BACKEND pointed at preview backend",
     "status": "completed"
   },
   {
-    "content": "Rewrite system prompt to be laser-focused on chart OCR + measurement matching (no fashion language)",
+    "content": "Add 'stale_context' detection in content script for cleaner UX after extension reload",
     "status": "completed"
   },
   {
-    "content": "Rebuild extension, restart backend, run end-to-end smoke test with a real chart image",
-    "status": "completed"
+    "content": "Document reinstall + reconnect steps for user",
+    "status": "in_progress"
   }
 ]
