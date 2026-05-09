@@ -1,18 +1,18 @@
 [
   {
-    "content": "Backend: Add Gemini vision fallback in sizes.py `_via_eyes` so when Gemma returns vision_disabled/empty, Gemini Flash takes over (mirroring closet flow)",
+    "content": "Backend: Rewrite sizes.py to use a screenshot-only flow — Gemini 2.5 Flash as primary vision (skip Gemma since vision_disabled in Phase 1), with a tight OCR-focused prompt",
     "status": "completed"
   },
   {
-    "content": "Extension: Extend `_extractHtmlInRect` to capture div-based size charts (role=table/grid + heuristic chart-likeness scan) — fixes AliExpress-style modals",
+    "content": "Extension: Remove HTML extraction logic — send only the cropped screenshot",
     "status": "completed"
   },
   {
-    "content": "Rebuild extension bundle (yarn build) and refresh dressapp-extension.zip",
+    "content": "Rewrite system prompt to be laser-focused on chart OCR + measurement matching (no fashion language)",
     "status": "completed"
   },
   {
-    "content": "Verify backend with curl + restart, confirm services healthy",
+    "content": "Rebuild extension, restart backend, run end-to-end smoke test with a real chart image",
     "status": "completed"
   }
 ]

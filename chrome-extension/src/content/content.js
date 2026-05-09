@@ -224,17 +224,48 @@ async function onAnalyze(ev) {
       return;
     }
 
+    // Snapshot-only flow: per product direction we no longer ship
+    // raw HTML to the backend. If we detected a chart element, take
+    // a viewport screenshot tightly cropped to its bounding rect.
+    // If we detected a chart image, encode it directly. The backend
+    // then OCRs + sizes via Gemini 2.5 Flash in one shot.
     let chart_screenshot_b64 = null;
     if (chartImg) {
       chart_screenshot_b64 = await imageToB64Jpeg(chartImg);
       if (!chart_screenshot_b64) {
         chart_screenshot_b64 = await _captureViewportWithPermission();
       }
+    } else if (chartEl) {
+      // Try to capture the chart element's CSS rect as a tight crop.
+      try {
+        const r = chartEl.getBoundingClientRect();
+        const rect = {
+          x: Math.max(0, Math.floor(r.left)),
+          y: Math.max(0, Math.floor(r.top)),
+          w: Math.ceil(r.width),
+          h: Math.ceil(r.height),
+        };
+        if (rect.w >= 32 && rect.h >= 32) {
+          // Reuse the manual-crop pipeline so behavior is identical.
+          await cropAndAnalyze(rect);
+          return;
+        }
+      } catch {
+        /* fall through to manual crop */
+      }
+      // Element rect unavailable — fall back to manual crop UX.
+      dismissOverlay();
+      enterCropMode({ reason: 'auto-no-rect' });
+      return;
+    }
+
+    if (!chart_screenshot_b64) {
+      dismissOverlay();
+      enterCropMode({ reason: 'auto-no-image' });
+      return;
     }
 
     await _sendForAnalysis({
-      chart_html: chartEl ? chartEl.outerHTML.slice(0, 60_000) : null,
-      chart_text: chartEl ? (chartEl.innerText || '').slice(0, 8_000) : null,
       chart_screenshot_b64,
       garment_type: generic.detectGarmentType(document),
     });
@@ -249,11 +280,9 @@ async function onAnalyze(ev) {
   }
 }
 
-async function _sendForAnalysis({ chart_html, chart_text, chart_screenshot_b64, garment_type }) {
+async function _sendForAnalysis({ chart_screenshot_b64, garment_type }) {
   mountSpinner();
   const payload = {
-    chart_html,
-    chart_text,
     chart_screenshot_b64,
     garment_type: garment_type ?? generic.detectGarmentType(document),
     store: HOST.replace(/^www\./, ''),
@@ -261,8 +290,6 @@ async function _sendForAnalysis({ chart_html, chart_text, chart_screenshot_b64, 
     page_title: document.title,
   };
   log('analyze payload (preview)', {
-    chart_html_len: payload.chart_html?.length || 0,
-    chart_text_len: payload.chart_text?.length || 0,
     chart_screenshot_len: payload.chart_screenshot_b64?.length || 0,
     garment_type: payload.garment_type,
   });
@@ -539,166 +566,19 @@ function _normaliseRect({ x, y, w, h }) {
 }
 
 /**
- * Find the best HTML chart-shaped node whose bounding box overlaps
- * the crop rectangle. We score `<table>` elements by intersection
- * area + the existing `generic.detectChart` chart-likeness signal,
- * which lets us send the underlying structured HTML alongside the
- * cropped screenshot. The backend can then run its instant heuristic
- * on the text without waiting on the LLM.
- *
- * Returns the matching element's outerHTML (capped at 60 KB) or null.
- */
-function _extractHtmlInRect(rect) {
-  const cx2 = rect.x + rect.w;
-  const cy2 = rect.y + rect.h;
-
-  // Phase 1: classic <table>, [role="table"], [role="grid"] elements.
-  // These are the "happy path" — semantic markup that the backend
-  // heuristic understands directly.
-  const SEMANTIC_SEL = 'table, [role="table"], [role="grid"]';
-  const semantic = Array.from(document.querySelectorAll(SEMANTIC_SEL));
-  let best = null;
-  let bestScore = 0;
-  for (const t of semantic) {
-    if (!t.isConnected) continue;
-    const r = t.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    const ix = Math.max(0, Math.min(r.right, cx2) - Math.max(r.left, rect.x));
-    const iy = Math.max(0, Math.min(r.bottom, cy2) - Math.max(r.top, rect.y));
-    const inter = ix * iy;
-    if (inter <= 0) continue;
-    const txt = (t.innerText || '').toLowerCase();
-    const looksChart = /\b(size|chest|bust|waist|hip|shoulder|sleeve|length)\b/.test(txt) && /\d/.test(txt);
-    const score = inter * (looksChart ? 4 : 1);
-    if (score > bestScore) {
-      bestScore = score;
-      best = t;
-    }
-  }
-  if (best) {
-    return {
-      html: best.outerHTML.slice(0, 60_000),
-      text: (best.innerText || '').slice(0, 8_000),
-    };
-  }
-
-  // Phase 2: div-based grid layouts (AliExpress, Shein, many modern
-  // SPAs). These render the chart as nested <div>s, sometimes with
-  // CSS grid / flexbox, and there is no semantic table at all.
-  //
-  // Strategy: find the *smallest* element fully containing the user's
-  // crop rectangle whose innerText looks like a size chart — i.e.
-  // contains size-keyword headers AND multiple numeric tokens AND
-  // multiple size-label tokens (S / M / L / XS / EU 38 / etc.).
-  // We walk up from the deepest element at the rect's center to
-  // avoid grabbing the entire <body>.
-  return _extractDivChartHtml(rect, cx2, cy2);
-}
-
-/**
- * Look for a div-based size chart whose bounding rect overlaps the
- * user's crop box. Walks upward from the element at the crop's
- * center until we find one whose innerText scores as a chart.
- *
- * Capped at 60 KB outerHTML so we never blow past the backend
- * payload limit.
- */
-function _extractDivChartHtml(rect, cx2, cy2) {
-  const cx = rect.x + rect.w / 2;
-  const cy = rect.y + rect.h / 2;
-  let node = null;
-  try {
-    node = document.elementFromPoint(cx, cy);
-  } catch {
-    node = null;
-  }
-  if (!node) return null;
-
-  const SIZE_LABEL_RE = /\b(?:XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL|EU\s?\d{2}|US\s?\d{1,2}|UK\s?\d{1,2}|\d{2,3}\s?cm)\b/gi;
-  const KEYWORD_RE = /\b(size|chest|bust|waist|hip|hips|shoulder|shoulders|sleeve|length|inseam|bottom)\b/gi;
-  const NUM_RE = /\b\d{2,3}(?:[.,]\d)?\b/g;
-
-  function _scoreText(txt) {
-    if (!txt) return 0;
-    const lower = txt.toLowerCase();
-    const labels = (lower.match(SIZE_LABEL_RE) || []).length;
-    const keywords = (lower.match(KEYWORD_RE) || []).length;
-    const nums = (lower.match(NUM_RE) || []).length;
-    // Need at least: 2 keyword headers, 2 size labels, 4 numbers.
-    if (keywords < 2 || labels < 2 || nums < 4) return 0;
-    // Score weighted toward numeric density (real charts have lots
-    // of numbers vs. surrounding marketing copy).
-    return keywords * 3 + labels * 2 + nums;
-  }
-
-  let cur = node;
-  let bestEl = null;
-  let bestScore = 0;
-  let bestSize = Infinity;
-  // Walk up at most 12 levels — enough to escape the leaf cell into
-  // the chart container without ever reaching <body>.
-  for (let depth = 0; depth < 12 && cur && cur !== document.body; depth++) {
-    const r = cur.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) {
-      // Must reasonably overlap the crop box (not just a single cell).
-      const ix = Math.max(0, Math.min(r.right, cx2) - Math.max(r.left, rect.x));
-      const iy = Math.max(0, Math.min(r.bottom, cy2) - Math.max(r.top, rect.y));
-      const inter = ix * iy;
-      const cropArea = Math.max(1, rect.w * rect.h);
-      const overlapPct = inter / cropArea;
-      if (overlapPct > 0.25) {
-        const txt = cur.innerText || '';
-        // Skip absurdly large containers (likely the whole page).
-        if (txt.length < 12_000) {
-          const sc = _scoreText(txt);
-          if (sc > 0) {
-            // Prefer the *smallest* container that still scores —
-            // otherwise we'd always pick body. Score must beat the
-            // current best by a clear margin to override size.
-            const elArea = r.width * r.height;
-            if (sc > bestScore || (sc >= bestScore && elArea < bestSize)) {
-              bestEl = cur;
-              bestScore = sc;
-              bestSize = elArea;
-            }
-          }
-        }
-      }
-    }
-    cur = cur.parentElement;
-  }
-  if (!bestEl) return null;
-  try {
-    return {
-      html: bestEl.outerHTML.slice(0, 60_000),
-      text: (bestEl.innerText || '').slice(0, 8_000),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Capture the viewport, crop to the user's CSS-pixel rectangle, send
  * the result for analysis. The crop happens locally in a canvas so we
  * never ship the surrounding (potentially-sensitive) viewport content
  * to the backend — only the bounded chart region.
+ *
+ * Per product direction we ship the **screenshot only** (no HTML
+ * extraction). The backend's Gemini 2.5 Flash vision call OCRs the
+ * chart and returns the size recommendation in one shot.
  */
 async function cropAndAnalyze(rect) {
   mountSpinner();
   try {
-    // 1) Try to also pull the HTML table the user just framed. When
-    //    the chart is HTML (e.g. AliExpress Size Guide modal), this
-    //    lets the backend's heuristic answer in <50 ms without
-    //    waiting on the LLM stack. We also collect the chart's
-    //    visual ``innerText`` — for div-based layouts the HTML
-    //    flattens poorly server-side, but the rendered text
-    //    preserves row structure, so the heuristic can parse it.
-    const extracted = _extractHtmlInRect(rect);
-    const chart_html = extracted?.html || null;
-    const chart_text = extracted?.text || null;
-
-    // 2) Capture and crop the viewport screenshot for the LLM path.
+    // Capture and crop the viewport screenshot for the vision call.
     const screenshot = await _captureViewportWithPermission();
     let cropped = null;
     if (screenshot) {
@@ -727,7 +607,6 @@ async function cropAndAnalyze(rect) {
             cropPx: { sx, sy, sw, sh },
             dpr,
             b64Len: cropped?.length || 0,
-            chartHtmlLen: chart_html?.length || 0,
           });
         }
       } catch (e) {
@@ -735,11 +614,11 @@ async function cropAndAnalyze(rect) {
       }
     }
 
-    if (!chart_html && !chart_text && !cropped) {
+    if (!cropped) {
       mountOverlay({
         kind: 'warn',
         title: 'Couldn\'t capture this region',
-        message: 'DressApp needs either a visible HTML table inside the box or the optional "all sites" permission for a screenshot. Click the DressApp toolbar icon, approve the permission, then try again.',
+        message: 'DressApp needs the optional "all sites" permission to capture a screenshot. Click the DressApp toolbar icon, approve the permission, then try again.',
         retry: () => enterCropMode({ reason: 'manual' }),
         onDismiss: showFab,
       });
@@ -747,8 +626,6 @@ async function cropAndAnalyze(rect) {
     }
 
     await _sendForAnalysis({
-      chart_html,
-      chart_text,
       chart_screenshot_b64: cropped,
       garment_type: generic.detectGarmentType(document),
     });
