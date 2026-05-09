@@ -39,12 +39,25 @@ async function handleHandoff(payload) {
 }
 
 async function handleAuthStatus() {
-  const s = await chrome.storage.local.get(['token', 'user', 'issued_at']);
-  return { ok: true, token: s.token || null, user: s.user || null, issued_at: s.issued_at || null };
+  const s = await chrome.storage.local.get(['token', 'user', 'issued_at', 'backend']);
+  return {
+    ok: true,
+    token: s.token || null,
+    user: s.user || null,
+    issued_at: s.issued_at || null,
+    backend: s.backend || null,
+  };
 }
 
 async function handleClearAuth() {
-  await chrome.storage.local.remove(['token', 'user', 'issued_at']);
+  // Wipe ALL auth-related state, including the cached ``backend`` URL.
+  // Leaving ``backend`` behind causes a subtle bug where the next
+  // reconnect (which the popup opens via the build-time ``authBaseUrl``)
+  // succeeds against, say, dressapp.co — but the persisted ``backend``
+  // value from a previous preview-environment session keeps routing
+  // every API call to the wrong host. Clearing it forces the next
+  // handoff to repopulate it cleanly.
+  await chrome.storage.local.remove(['token', 'user', 'issued_at', 'backend']);
   meCache = null;
   return { ok: true };
 }
