@@ -1,22 +1,14 @@
 [
   {
-    "content": "Add anomaly-detection rule to system prompt (compare user values to chart's column range; skip outliers)",
+    "content": "Rebuild extension explicitly targeting production (dressapp.co)",
     "status": "completed"
   },
   {
-    "content": "Add structured `warnings: list[str]` field to AnalyzeChartOut and normalize/coerce it in the response handler",
+    "content": "Update system prompt to distinguish CIRCUMFERENCE vs LENGTH measurements: length values are MAX (short-sleeve garments are fine, not anomalies)",
     "status": "completed"
   },
   {
-    "content": "Render warnings prominently in the recommendation overlay (chrome-extension)",
+    "content": "Re-verify smoke test: shoulders=55 still flagged, sleeve=46 vs short-sleeve chart should NOT flag",
     "status": "completed"
-  },
-  {
-    "content": "Smoke-test with lokoprod profile: shoulders=55 should be flagged but chest=92/sleeve=46 should still drive the match",
-    "status": "completed"
-  },
-  {
-    "content": "[future] Fix 'Save changes' always-active button on profile form",
-    "status": "pending"
   }
 ]

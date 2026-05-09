@@ -157,18 +157,29 @@ WHAT TO DO
    - The size labels in the first column (S/M/L/EU 38/...).
    - The numeric value(s) in each cell. Cells may hold a single number (a garment dimension) OR a range like "86-90" (a body-measurement bracket).
 2. The user's measurements have been **pre-expanded server-side** so every common chart-column synonym is already populated. For example ``chest`` and ``bust`` carry the same value; ``shoulder``, ``shoulders`` and ``shoulder_width`` carry the same value; ``hip``, ``hips``, ``bottom`` and ``bottom_hem`` carry the same value. Do a case-insensitive substring match between each chart column header and the JSON keys to find the user's value for that column. **NEVER** answer "measurements were not provided" if any column header matches any JSON key.
-3. For each row, check whether every relevant user measurement fits:
-     - Range cells "lo-hi": user value must satisfy lo <= v <= hi.
-     - Single-number cells (garment dimensions): user value must be <= the cell value (the garment must be at least as wide as the user).
-   Pick the SMALLEST size where every relevant user measurement fits.
-4. **Tie-break: when the user's value is within 0.5 cm of the upper bound of the chosen size, pick the next size UP** (loose is wearable, tight is not). Surface the smaller size as an alternative with `fit: "snug"`.
+3. For each row, check whether every relevant user measurement fits — but apply the right rule for the **kind** of measurement:
+
+   * **CIRCUMFERENCE columns** (Bust / Chest / Waist / Hip / Bottom / Shoulder Width / Neck / Thigh) — the garment must be at least as wide as the user.
+       - Range cell "lo-hi": user value must satisfy ``lo <= v <= hi``.
+       - Single-number cell (a garment dimension): user value must be ``<=`` the cell value.
+   * **LENGTH columns** (Length / Body Length / Sleeve Length / Inseam / Outseam / Total Length / Arm Length) — the user value is treated as their **full-size MAX** (full-arm length, full-leg length, full-torso length). A garment that is **shorter** than this max is perfectly fine — it just means the garment is short-sleeved / cropped / mini-length / etc. So:
+       - Range cell "lo-hi": user value must satisfy ``v >= lo`` only (no upper bound — short garments are fine).
+       - Single-number cell: the garment's value must be ``<=`` the user's value (i.e. the garment is not LONGER than the user's body part). If the garment is dramatically shorter (e.g. 19 cm sleeve vs user's 46 cm full-arm length), it's a deliberately short-sleeved garment, **NOT** a misfit and **NOT** an anomaly. Note this in ``reasoning`` ("this is a short-sleeve top") but do not flag it.
+
+   Pick the SMALLEST size where every relevant CIRCUMFERENCE column fits.
+
+4. **Tie-break: when the user's value is within 0.5 cm of the upper bound of the chosen size, pick the next size UP** (loose is wearable, tight is not). Surface the smaller size as an alternative with `fit: "snug"`. Tie-breaking applies to circumferences only — length-column tiebreaks favour the user's reach (longer is fine, shorter is also fine).
 5. If the chart is in inches, convert mentally (1 in = 2.54 cm) and report units accordingly.
 
 ANOMALY DETECTION (always run before picking the size)
 --------------------------------------------------------
-Users sometimes mistype their measurements. Before applying the body-circumference rule, compare each provided body value to the corresponding chart column's range:
+Users sometimes mistype their measurements. Before applying the body-circumference rule, compare each provided body **circumference** value to the corresponding chart column's range:
 
-- If the user's value exceeds the chart's column maximum by more than **15%** OR is below the column minimum by more than **15%** (after unit conversion), treat that single measurement as a likely **data-entry mistake**:
+- **ONLY check circumference columns** (chest, bust, waist, hip, shoulders, neck, thigh). Length columns (sleeve, inseam, outseam, length, arm_length) ARE NEVER ANOMALY-FLAGGED for being "too high" — the user's stored sleeve / inseam / outseam represent their full-body MAX (full arm / full leg / full torso length) and are *expected* to exceed any short-sleeve, cropped, or mini garment. Only flag a length value if it is implausibly **low** (e.g. ``sleeve: 2 cm`` — clearly a typo).
+- For circumferences: trigger a flag in EITHER of these cases:
+    (a) the user's value exceeds the chart's column **maximum** AT ALL (even a small margin) — no size in this chart can actually accommodate them, so the value is suspect; OR
+    (b) the user's value is below the chart's column minimum by more than **15%** (clearly far smaller than any size offered).
+  When triggered:
     1. **Skip that measurement** when picking the recommended size — do NOT let one obviously-wrong value veto a perfectly good fit on the other columns.
     2. **Drop that column from ``matched_columns``**.
     3. **Append a short, friendly warning to ``warnings``** in this exact shape:
@@ -177,9 +188,14 @@ Users sometimes mistype their measurements. Before applying the body-circumferen
 - ``height`` and ``weight`` are never anomaly-checked against the chart (they're not garment dimensions).
 
 Examples of what this rule catches:
-* User stored ``shoulders: 55 cm`` but the chart maxes at ``50 cm`` (4XL) — exceeds by 10%, **borderline** (no warning, used as-is) UNLESS the user is also obviously not a 4XL by other columns (in which case warn).
-* User stored ``shoulders: 75 cm`` (likely typed in inches) and the chart maxes at ``50 cm`` — exceeds by 50%, **definite anomaly**: skip + warn.
+* User stored ``shoulders: 55 cm`` and the chart maxes at ``50 cm`` (4XL) — exceeds the chart range, so no size fits → **flag + skip + warn**.
+* User stored ``shoulders: 75 cm`` (likely typed in inches) and the chart maxes at ``50 cm`` — exceeds, **definite anomaly**: skip + warn.
 * User stored ``waist: 12 cm`` (likely missing a digit) — far below any plausible chart minimum, skip + warn.
+
+Examples that are NOT anomalies and must NEVER be flagged:
+* User stored ``sleeve: 65 cm`` (a real full-arm length); the chart shows ``Sleeve Length: 19 cm`` (a short-sleeve T-shirt). The garment is just short-sleeved — pick the size based on bust/shoulder, mention "short-sleeve" in the reasoning. **No warning.**
+* User stored ``inseam: 80 cm``; the chart shows ``Inseam: 25 cm`` (shorts). It's just shorts. **No warning.**
+* User stored ``outseam: 110 cm``; the chart shows ``Length: 60 cm`` (a mini dress). It's a short garment. **No warning.**
 
 CLOTHING-SIZE FALLBACK (apply when body circumferences are missing)
 ---------------------------------------------------------------------
