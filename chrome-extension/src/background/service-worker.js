@@ -74,21 +74,32 @@ async function handleAnalyze(payload) {
   }
 }
 
-async function handleCaptureVisibleTab() {
+async function handleCaptureVisibleTab(sender) {
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {
-      format: 'jpeg', quality: 70,
-    });
+    // Use the sender tab's windowId explicitly so we never capture
+    // the wrong window when the SW wakes from sleep. ``activeTab`` +
+    // host_permissions on the listed stores cover the auth model.
+    const windowId = sender?.tab?.windowId;
+    const dataUrl = await chrome.tabs.captureVisibleTab(
+      windowId,
+      { format: 'jpeg', quality: 70 },
+    );
     if (typeof dataUrl !== 'string') {
       return { ok: false, error: 'captureVisibleTab returned no data' };
     }
     const i = dataUrl.indexOf(',');
     return { ok: true, image_b64: i >= 0 ? dataUrl.slice(i + 1) : dataUrl };
   } catch (e) {
+    const msg = e?.message || 'captureVisibleTab failed';
     return {
       ok: false,
-      error: e?.message || 'captureVisibleTab failed',
-      needs_permission: /<all_urls>|activeTab/i.test(e?.message || ''),
+      error: msg,
+      // Chrome surfaces the missing-permission state via two
+      // distinct strings depending on platform/version. Match all
+      // of them so the content script can prompt for an upgrade.
+      needs_permission:
+        /<all_urls>|activeTab|cannot access|no host permission|MAY_BE_REMOTELY_HOSTED/i
+          .test(msg),
     };
   }
 }
@@ -101,7 +112,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     [messages.CLEAR_AUTH]:          () => handleClearAuth(),
     [messages.FETCH_ME]:            () => handleFetchMe(),
     [messages.ANALYZE_CHART]:       () => handleAnalyze(msg.payload),
-    [messages.CAPTURE_VISIBLE_TAB]: () => handleCaptureVisibleTab(),
+    [messages.CAPTURE_VISIBLE_TAB]: () => handleCaptureVisibleTab(sender),
   };
   const handler = handlers[msg?.type];
   if (!handler) {

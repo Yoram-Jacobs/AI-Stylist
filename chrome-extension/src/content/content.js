@@ -135,22 +135,40 @@ function _stripDataPrefix(dataUrl) {
   return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
 }
 
+/**
+ * Capture a JPEG screenshot of the active tab's viewport.
+ *
+ * Returns either a base64 string (success) or
+ * ``{ error: string, needs_permission?: boolean }`` (failure) so the
+ * caller can surface a meaningful diagnostic to the user instead of
+ * the generic "couldn't capture this region" toast.
+ */
 async function _captureViewportWithPermission() {
   let cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
   if (cap?.ok && cap.image_b64) return cap.image_b64;
-  if (cap?.needs_permission || /<all_urls>|activeTab/i.test(cap?.error || '')) {
+  if (cap?.needs_permission || /<all_urls>|activeTab|host permission/i.test(cap?.error || '')) {
     try {
       const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
       if (granted) {
         cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
         if (cap?.ok && cap.image_b64) return cap.image_b64;
+      } else {
+        log('user denied <all_urls> permission');
+        return { error: 'denied', needs_permission: true };
       }
     } catch (e) {
       log('permissions.request failed', e);
+      return {
+        error: e?.message || 'permission request failed',
+        needs_permission: true,
+      };
     }
   }
   log('captureVisibleTab unavailable', cap?.error);
-  return null;
+  return {
+    error: cap?.error || 'unknown captureVisibleTab failure',
+    needs_permission: !!cap?.needs_permission,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -233,7 +251,8 @@ async function onAnalyze(ev) {
     if (chartImg) {
       chart_screenshot_b64 = await imageToB64Jpeg(chartImg);
       if (!chart_screenshot_b64) {
-        chart_screenshot_b64 = await _captureViewportWithPermission();
+        const cap = await _captureViewportWithPermission();
+        chart_screenshot_b64 = typeof cap === 'string' ? cap : null;
       }
     } else if (chartEl) {
       // Try to capture the chart element's CSS rect as a tight crop.
@@ -579,7 +598,10 @@ async function cropAndAnalyze(rect) {
   mountSpinner();
   try {
     // Capture and crop the viewport screenshot for the vision call.
-    const screenshot = await _captureViewportWithPermission();
+    const cap = await _captureViewportWithPermission();
+    const screenshot = typeof cap === 'string' ? cap : null;
+    const captureError = typeof cap === 'string' ? null : (cap?.error || 'no screenshot');
+    const needsPermission = typeof cap === 'string' ? false : !!cap?.needs_permission;
     let cropped = null;
     if (screenshot) {
       try {
@@ -615,10 +637,18 @@ async function cropAndAnalyze(rect) {
     }
 
     if (!cropped) {
+      // Surface the actual underlying error so we can debug what's
+      // blocking captureVisibleTab. Three known causes:
+      //   1. User denied the <all_urls> permission prompt.
+      //   2. Site has DRM / privileged content that blocks capture.
+      //   3. SW lifecycle issue (resolved tab id mismatch).
+      const explainer = needsPermission
+        ? 'Click the DressApp toolbar icon, approve the optional "all sites" permission, then try again.'
+        : `Browser blocked the screenshot: ${captureError}. Try reloading the tab and re-running the crop.`;
       mountOverlay({
         kind: 'warn',
         title: 'Couldn\'t capture this region',
-        message: 'DressApp needs the optional "all sites" permission to capture a screenshot. Click the DressApp toolbar icon, approve the permission, then try again.',
+        message: explainer,
         retry: () => enterCropMode({ reason: 'manual' }),
         onDismiss: showFab,
       });
