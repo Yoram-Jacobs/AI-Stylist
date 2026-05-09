@@ -594,6 +594,13 @@ async def analyze_chart(
 
     measurements = (user or {}).get("body_measurements") or {}
     has_measurements = bool(measurements)
+    log.info(
+        "size analyze: user=%s email=%s has_measurements=%s keys=%s",
+        (user or {}).get("id"),
+        (user or {}).get("email"),
+        has_measurements,
+        list(measurements.keys()) if has_measurements else [],
+    )
     if not has_measurements:
         log.info(
             "size analyze called without measurements (user=%s)",
