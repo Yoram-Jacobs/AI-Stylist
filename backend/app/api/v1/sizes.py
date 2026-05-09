@@ -136,6 +136,7 @@ INPUT
 -----
 * An IMAGE of a size chart (a table with size labels and numbers).
 * The USER'S BODY MEASUREMENTS in centimeters (e.g. chest, waist, hips, shoulders, height).
+* Possibly the USER'S CLOTHING SIZES they normally buy (``shirt_size``, ``pants_size``, ``shoe_size``).
 * Optional context: garment type, store name, page title.
 
 WHAT TO DO
@@ -153,6 +154,17 @@ WHAT TO DO
 4. **Tie-break: when the user's value is within 0.5 cm of the upper bound of the chosen size, pick the next size UP** (loose is wearable, tight is not). Surface the smaller size as an alternative with `fit: "snug"`.
 5. If the chart is in inches, convert mentally (1 in = 2.54 cm) and report units accordingly.
 
+CLOTHING-SIZE FALLBACK (apply when body circumferences are missing)
+---------------------------------------------------------------------
+If the user has NO usable body circumferences for the columns shown (e.g. only ``height``, ``weight``, ``shirt_size``, ``pants_size``, ``shoe_size`` are filled in), DO NOT give up. Use these signals instead:
+
+- ``shirt_size`` is authoritative for tops / shirts / jackets / dresses (where the chart shows Bust / Chest / Shoulder / Sleeve / Length). If the chart's first column lists labels like S, M, L, XL — pick the row whose label matches ``shirt_size`` (case-insensitive). If the chart uses EU/numeric labels (38, 40, 50, 52...), translate the user's letter size using the standard mapping: XS≈34/44, S≈36/46, M≈38/48, L≈40/50, XL≈42/52, XXL≈44/54, XXXL≈46/56. Adjust by ±1 if the store is known to run small/large.
+- ``pants_size`` is authoritative for trousers / shorts / jeans / skirts (where the chart shows Waist / Hip / Inseam). Match the numeric value or letter against the size column.
+- ``shoe_size`` is authoritative for footwear charts.
+- ``height`` and ``weight`` alone are NEVER sufficient — but if combined with ``shirt_size`` or ``pants_size`` they confirm the choice. If ONLY ``height``/``weight`` are present, you may still produce a low-confidence (≤0.4) recommendation by mapping height to a size band (e.g., 170-178cm + average build → M).
+
+When using the clothing-size fallback, set ``confidence`` between 0.55 and 0.80 (lower than a real measurement match), set ``matched_columns`` to ``["shirt_size"]`` (or pants/shoe), and explain in ``reasoning`` that the recommendation is based on the user's usual size, suggesting they add body measurements for a tighter fit.
+
 OUTPUT
 ------
 Return ONLY this JSON object. No prose, no markdown, no backticks.
@@ -167,8 +179,10 @@ Return ONLY this JSON object. No prose, no markdown, no backticks.
   "alternatives": [{"size":"S","fit":"snug"}, {"size":"L","fit":"loose"}]
 }
 
-If you cannot find a usable chart in the image (only product photos, occluded, blurry), return:
-{"recommended_size": null, "confidence": 0.0, "garment_type": null, "size_chart_units": "unknown", "matched_columns": [], "reasoning": "<what was missing>", "alternatives": []}
+ONLY return ``recommended_size: null`` if BOTH of these are true:
+  (a) the image really doesn't contain a usable size chart (only product photos, occluded, blurry), AND
+  (b) the user has no usable size signal at all (no body circumferences AND no shirt/pants/shoe size).
+In every other case you MUST return a best-effort size with appropriate confidence.
 """
 
 
@@ -198,6 +212,11 @@ _MEASUREMENT_ALIASES: dict[str, tuple[str, ...]] = {
     "height":     ("height", "body_height", "stature"),
     "weight":     ("weight", "body_weight"),
     "length":     ("length", "back_length", "body_length"),
+    # Clothing-size fallbacks — kept under their own keys so the
+    # prompt's CLOTHING-SIZE FALLBACK rule can find them.
+    "shirt_size": ("shirt_size", "shirts_size", "top_size", "tshirt_size"),
+    "pants_size": ("pants_size", "pant_size", "trouser_size", "trousers_size"),
+    "shoe_size":  ("shoe_size", "shoes_size", "footwear_size"),
 }
 
 
@@ -247,17 +266,45 @@ def _build_user_prompt(
     # gave ``chest`` and the chart says ``Bust Size`` — semantically
     # identical, but the model wouldn't risk the inference.
     expanded = _expand_measurement_aliases(measurements)
-    measurements_str = json.dumps(expanded, ensure_ascii=False)
+
+    # Split body circumferences from clothing-size fallbacks so the
+    # model can tell which signal to trust. ``shirt_size`` etc. are
+    # the right answer when the user has no tape-measure data.
+    _CLOTHING_SIZE_KEYS = {
+        "shirt_size", "pants_size", "shoe_size",
+        "shirts_size", "pant_size", "trouser_size",
+    }
+    _CONTEXT_ONLY_KEYS = {"height", "weight", "body_height", "stature", "body_weight"}
+    body_dims = {
+        k: v for k, v in expanded.items()
+        if k not in _CLOTHING_SIZE_KEYS and k not in _CONTEXT_ONLY_KEYS
+    }
+    clothing_sizes = {
+        k: v for k, v in expanded.items() if k in _CLOTHING_SIZE_KEYS
+    }
+    context_dims = {
+        k: v for k, v in expanded.items() if k in _CONTEXT_ONLY_KEYS
+    }
+
+    body_dims_str = json.dumps(body_dims, ensure_ascii=False)
+    clothing_sizes_str = json.dumps(clothing_sizes, ensure_ascii=False)
+    context_dims_str = json.dumps(context_dims, ensure_ascii=False)
 
     parts: list[str] = [
-        f"USER MEASUREMENTS (cm, JSON — every chart-column synonym is pre-expanded):\n{measurements_str}",
+        f"USER BODY CIRCUMFERENCES (cm, JSON — every chart-column synonym is pre-expanded):\n{body_dims_str}",
+        f"USER CLOTHING SIZES THEY NORMALLY BUY:\n{clothing_sizes_str}",
+        f"USER HEIGHT / WEIGHT CONTEXT:\n{context_dims_str}",
         (
-            "IMPORTANT: the measurements above already include every common "
-            "synonym (e.g. ``chest`` = ``bust``; ``shoulder`` = ``shoulder_width``; "
-            "``hip`` = ``bottom``). If a chart column matches ANY of these names "
-            "(case-insensitive substring is enough), use the user's value. Do "
-            "**NOT** reply that 'measurements were not provided' when at least "
-            "one column has a matching key."
+            "IMPORTANT:\n"
+            "- BODY CIRCUMFERENCES already include every common synonym "
+            "(``chest`` = ``bust``; ``shoulder`` = ``shoulder_width``; "
+            "``hip`` = ``bottom``). Case-insensitive substring is enough.\n"
+            "- If BODY CIRCUMFERENCES is empty `{}` but CLOTHING SIZES has "
+            "``shirt_size``/``pants_size``, USE THAT as the primary signal "
+            "(see CLOTHING-SIZE FALLBACK in your system prompt).\n"
+            "- Do **NOT** reply that 'measurements were not provided' if "
+            "any of the three sections above contain at least one key. "
+            "Always emit a best-effort recommendation."
         ),
     ]
     ctx_lines: list[str] = []
@@ -654,13 +701,6 @@ async def analyze_chart(
 
     measurements = (user or {}).get("body_measurements") or {}
     has_measurements = bool(measurements)
-    log.info(
-        "size analyze: user=%s email=%s has_measurements=%s keys=%s",
-        (user or {}).get("id"),
-        (user or {}).get("email"),
-        has_measurements,
-        list(measurements.keys()) if has_measurements else [],
-    )
     if not has_measurements:
         log.info(
             "size analyze called without measurements (user=%s)",

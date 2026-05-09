@@ -1,14 +1,18 @@
 [
   {
-    "content": "Add server-side measurement alias expansion (chest→bust, shoulder→shoulder_width, hip→bottom, etc.) before sending to Gemini",
+    "content": "Add CLOTHING-SIZE FALLBACK rule to system prompt (shirt_size / pants_size / shoe_size used when body circumferences missing)",
     "status": "completed"
   },
   {
-    "content": "Update prompt to forbid 'no measurements provided' when an alias matches",
+    "content": "Split user prompt into BODY CIRCUMFERENCES vs CLOTHING SIZES vs HEIGHT/WEIGHT context sections",
     "status": "completed"
   },
   {
-    "content": "Verify with smoke test — dev user gets XL @ 1.0 confidence in 15s",
+    "content": "Verify both paths: full circumferences (XL @ 0.9) and shirt_size-only (L @ 0.7)",
+    "status": "completed"
+  },
+  {
+    "content": "Remove temporary debug log added earlier",
     "status": "completed"
   }
 ]
