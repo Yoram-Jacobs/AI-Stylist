@@ -135,22 +135,52 @@ function _stripDataPrefix(dataUrl) {
   return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
 }
 
+/**
+ * Capture a JPEG screenshot of the active tab's viewport.
+ *
+ * Returns either a base64 string (success) or
+ * ``{ error: string, needs_permission?: boolean, stale_context?: boolean }``
+ * (failure) so the caller can surface a meaningful diagnostic to the
+ * user instead of the generic "couldn't capture this region" toast.
+ */
 async function _captureViewportWithPermission() {
   let cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
   if (cap?.ok && cap.image_b64) return cap.image_b64;
-  if (cap?.needs_permission || /<all_urls>|activeTab/i.test(cap?.error || '')) {
+
+  // Orphaned content script after extension reload — the SW connection
+  // is dead. Page reload fixes it. Surface a distinct flag so the
+  // caller can render a tailored "reload this tab" message.
+  const errMsg = cap?.error || '';
+  if (/extension context invalidated|message port closed|receiving end does not exist/i.test(errMsg)) {
+    return {
+      error: errMsg,
+      stale_context: true,
+    };
+  }
+
+  if (cap?.needs_permission || /<all_urls>|activeTab|host permission/i.test(errMsg)) {
     try {
       const granted = await chrome.permissions.request({ origins: ['<all_urls>'] });
       if (granted) {
         cap = await sendToBackground({ type: messages.CAPTURE_VISIBLE_TAB });
         if (cap?.ok && cap.image_b64) return cap.image_b64;
+      } else {
+        log('user denied <all_urls> permission');
+        return { error: 'denied', needs_permission: true };
       }
     } catch (e) {
       log('permissions.request failed', e);
+      return {
+        error: e?.message || 'permission request failed',
+        needs_permission: true,
+      };
     }
   }
   log('captureVisibleTab unavailable', cap?.error);
-  return null;
+  return {
+    error: cap?.error || 'unknown captureVisibleTab failure',
+    needs_permission: !!cap?.needs_permission,
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -224,16 +254,49 @@ async function onAnalyze(ev) {
       return;
     }
 
+    // Snapshot-only flow: per product direction we no longer ship
+    // raw HTML to the backend. If we detected a chart element, take
+    // a viewport screenshot tightly cropped to its bounding rect.
+    // If we detected a chart image, encode it directly. The backend
+    // then OCRs + sizes via Gemini 2.5 Flash in one shot.
     let chart_screenshot_b64 = null;
     if (chartImg) {
       chart_screenshot_b64 = await imageToB64Jpeg(chartImg);
       if (!chart_screenshot_b64) {
-        chart_screenshot_b64 = await _captureViewportWithPermission();
+        const cap = await _captureViewportWithPermission();
+        chart_screenshot_b64 = typeof cap === 'string' ? cap : null;
       }
+    } else if (chartEl) {
+      // Try to capture the chart element's CSS rect as a tight crop.
+      try {
+        const r = chartEl.getBoundingClientRect();
+        const rect = {
+          x: Math.max(0, Math.floor(r.left)),
+          y: Math.max(0, Math.floor(r.top)),
+          w: Math.ceil(r.width),
+          h: Math.ceil(r.height),
+        };
+        if (rect.w >= 32 && rect.h >= 32) {
+          // Reuse the manual-crop pipeline so behavior is identical.
+          await cropAndAnalyze(rect);
+          return;
+        }
+      } catch {
+        /* fall through to manual crop */
+      }
+      // Element rect unavailable — fall back to manual crop UX.
+      dismissOverlay();
+      enterCropMode({ reason: 'auto-no-rect' });
+      return;
+    }
+
+    if (!chart_screenshot_b64) {
+      dismissOverlay();
+      enterCropMode({ reason: 'auto-no-image' });
+      return;
     }
 
     await _sendForAnalysis({
-      chart_html: chartEl ? chartEl.outerHTML.slice(0, 60_000) : null,
       chart_screenshot_b64,
       garment_type: generic.detectGarmentType(document),
     });
@@ -248,10 +311,9 @@ async function onAnalyze(ev) {
   }
 }
 
-async function _sendForAnalysis({ chart_html, chart_screenshot_b64, garment_type }) {
+async function _sendForAnalysis({ chart_screenshot_b64, garment_type }) {
   mountSpinner();
   const payload = {
-    chart_html,
     chart_screenshot_b64,
     garment_type: garment_type ?? generic.detectGarmentType(document),
     store: HOST.replace(/^www\./, ''),
@@ -259,7 +321,6 @@ async function _sendForAnalysis({ chart_html, chart_screenshot_b64, garment_type
     page_title: document.title,
   };
   log('analyze payload (preview)', {
-    chart_html_len: payload.chart_html?.length || 0,
     chart_screenshot_len: payload.chart_screenshot_b64?.length || 0,
     garment_type: payload.garment_type,
   });
@@ -536,58 +597,24 @@ function _normaliseRect({ x, y, w, h }) {
 }
 
 /**
- * Find the best HTML chart-shaped node whose bounding box overlaps
- * the crop rectangle. We score `<table>` elements by intersection
- * area + the existing `generic.detectChart` chart-likeness signal,
- * which lets us send the underlying structured HTML alongside the
- * cropped screenshot. The backend can then run its instant heuristic
- * on the text without waiting on the LLM.
- *
- * Returns the matching element's outerHTML (capped at 60 KB) or null.
- */
-function _extractHtmlInRect(rect) {
-  const cx2 = rect.x + rect.w;
-  const cy2 = rect.y + rect.h;
-  const tables = Array.from(document.querySelectorAll('table'));
-  let best = null;
-  let bestArea = 0;
-  for (const t of tables) {
-    if (!t.isConnected) continue;
-    const r = t.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    const ix = Math.max(0, Math.min(r.right, cx2) - Math.max(r.left, rect.x));
-    const iy = Math.max(0, Math.min(r.bottom, cy2) - Math.max(r.top, rect.y));
-    const inter = ix * iy;
-    if (inter <= 0) continue;
-    // Bias toward tables that look chart-like (size keywords + numbers).
-    const txt = (t.innerText || '').toLowerCase();
-    const looksChart = /\b(size|chest|bust|waist|hip|shoulder|sleeve|length)\b/.test(txt) && /\d/.test(txt);
-    const score = inter * (looksChart ? 4 : 1);
-    if (score > bestArea) {
-      bestArea = score;
-      best = t;
-    }
-  }
-  return best ? best.outerHTML.slice(0, 60_000) : null;
-}
-
-/**
  * Capture the viewport, crop to the user's CSS-pixel rectangle, send
  * the result for analysis. The crop happens locally in a canvas so we
  * never ship the surrounding (potentially-sensitive) viewport content
  * to the backend — only the bounded chart region.
+ *
+ * Per product direction we ship the **screenshot only** (no HTML
+ * extraction). The backend's Gemini 2.5 Flash vision call OCRs the
+ * chart and returns the size recommendation in one shot.
  */
 async function cropAndAnalyze(rect) {
   mountSpinner();
   try {
-    // 1) Try to also pull the HTML table the user just framed. When
-    //    the chart is HTML (e.g. AliExpress Size Guide modal), this
-    //    lets the backend's heuristic answer in <50 ms without
-    //    waiting on the LLM stack.
-    const chart_html = _extractHtmlInRect(rect);
-
-    // 2) Capture and crop the viewport screenshot for the LLM path.
-    const screenshot = await _captureViewportWithPermission();
+    // Capture and crop the viewport screenshot for the vision call.
+    const cap = await _captureViewportWithPermission();
+    const screenshot = typeof cap === 'string' ? cap : null;
+    const captureError = typeof cap === 'string' ? null : (cap?.error || 'no screenshot');
+    const needsPermission = typeof cap === 'string' ? false : !!cap?.needs_permission;
+    const staleContext = typeof cap === 'string' ? false : !!cap?.stale_context;
     let cropped = null;
     if (screenshot) {
       try {
@@ -615,7 +642,6 @@ async function cropAndAnalyze(rect) {
             cropPx: { sx, sy, sw, sh },
             dpr,
             b64Len: cropped?.length || 0,
-            chartHtmlLen: chart_html?.length || 0,
           });
         }
       } catch (e) {
@@ -623,19 +649,37 @@ async function cropAndAnalyze(rect) {
       }
     }
 
-    if (!chart_html && !cropped) {
+    if (!cropped) {
+      // Surface the actual underlying error so we can debug what's
+      // blocking captureVisibleTab. Three known causes:
+      //   1. Extension was reloaded → orphaned content script (stale_context).
+      //   2. User denied the <all_urls> permission prompt.
+      //   3. SW lifecycle issue / privileged content blocking capture.
+      let title = 'Couldn\'t capture this region';
+      let explainer;
+      let retry = () => enterCropMode({ reason: 'manual' });
+      if (staleContext) {
+        title = 'DressApp was just updated';
+        explainer = 'Reload this tab (press F5 / ⌘R) so DressApp can re-attach to the page, then retry the crop.';
+        // The retry button should reload the page since reattaching
+        // an orphaned content script isn't possible from inside it.
+        retry = () => { try { location.reload(); } catch { /* noop */ } };
+      } else if (needsPermission) {
+        explainer = 'Click the DressApp toolbar icon, approve the optional "all sites" permission, then try again.';
+      } else {
+        explainer = `Browser blocked the screenshot: ${captureError}. Try reloading the tab and re-running the crop.`;
+      }
       mountOverlay({
         kind: 'warn',
-        title: 'Couldn\'t capture this region',
-        message: 'DressApp needs either a visible HTML table inside the box or the optional "all sites" permission for a screenshot. Click the DressApp toolbar icon, approve the permission, then try again.',
-        retry: () => enterCropMode({ reason: 'manual' }),
+        title,
+        message: explainer,
+        retry,
         onDismiss: showFab,
       });
       return;
     }
 
     await _sendForAnalysis({
-      chart_html,
       chart_screenshot_b64: cropped,
       garment_type: generic.detectGarmentType(document),
     });

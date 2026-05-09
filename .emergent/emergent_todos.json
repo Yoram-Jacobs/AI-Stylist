@@ -1,14 +1,18 @@
 [
   {
-    "content": "cropAndAnalyze: also extract overlapping <table> HTML and send chart_html",
+    "content": "Diagnose why pass 1 still hit OLD code: extension was talking to dressapp.co (prod) by default, not preview",
     "status": "completed"
   },
   {
-    "content": "Tighten Qwen-VL request timeout so heuristic kicks in fast on dead engines",
+    "content": "Build extension with VITE_DRESSAPP_BACKEND pointed at preview backend",
     "status": "completed"
   },
   {
-    "content": "Build + repackage extension",
+    "content": "Add 'stale_context' detection in content script for cleaner UX after extension reload",
     "status": "completed"
+  },
+  {
+    "content": "Document reinstall + reconnect steps for user",
+    "status": "in_progress"
   }
 ]
