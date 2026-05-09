@@ -116,6 +116,16 @@ class AnalyzeChartOut(BaseModel):
     matched_columns: list[str]
     reasoning: str
     alternatives: list[dict[str, Any]] = []
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Soft data-quality warnings. Surfaced to the user above the "
+            "recommendation when one of their stored body measurements "
+            "looks obviously implausible vs. the chart's own range "
+            "(e.g. ``shoulders=55 cm`` when the chart maxes out at "
+            "``50 cm``). Each entry is a short, user-facing sentence."
+        ),
+    )
     source: str
     elapsed_ms: int
     has_measurements: bool
@@ -154,6 +164,23 @@ WHAT TO DO
 4. **Tie-break: when the user's value is within 0.5 cm of the upper bound of the chosen size, pick the next size UP** (loose is wearable, tight is not). Surface the smaller size as an alternative with `fit: "snug"`.
 5. If the chart is in inches, convert mentally (1 in = 2.54 cm) and report units accordingly.
 
+ANOMALY DETECTION (always run before picking the size)
+--------------------------------------------------------
+Users sometimes mistype their measurements. Before applying the body-circumference rule, compare each provided body value to the corresponding chart column's range:
+
+- If the user's value exceeds the chart's column maximum by more than **15%** OR is below the column minimum by more than **15%** (after unit conversion), treat that single measurement as a likely **data-entry mistake**:
+    1. **Skip that measurement** when picking the recommended size — do NOT let one obviously-wrong value veto a perfectly good fit on the other columns.
+    2. **Drop that column from ``matched_columns``**.
+    3. **Append a short, friendly warning to ``warnings``** in this exact shape:
+       ``"Your <field> (<value> cm) looks higher/lower than expected for this kind of garment. Please re-measure — DressApp ignored it for this recommendation."``
+- If, after skipping anomalies, you still have at least one usable body circumference, use it. Otherwise fall through to the CLOTHING-SIZE FALLBACK rule.
+- ``height`` and ``weight`` are never anomaly-checked against the chart (they're not garment dimensions).
+
+Examples of what this rule catches:
+* User stored ``shoulders: 55 cm`` but the chart maxes at ``50 cm`` (4XL) — exceeds by 10%, **borderline** (no warning, used as-is) UNLESS the user is also obviously not a 4XL by other columns (in which case warn).
+* User stored ``shoulders: 75 cm`` (likely typed in inches) and the chart maxes at ``50 cm`` — exceeds by 50%, **definite anomaly**: skip + warn.
+* User stored ``waist: 12 cm`` (likely missing a digit) — far below any plausible chart minimum, skip + warn.
+
 CLOTHING-SIZE FALLBACK (apply when body circumferences are missing)
 ---------------------------------------------------------------------
 If the user has NO usable body circumferences for the columns shown (e.g. only ``height``, ``weight``, ``shirt_size``, ``pants_size``, ``shoe_size`` are filled in), DO NOT give up. Use these signals instead:
@@ -176,7 +203,8 @@ Return ONLY this JSON object. No prose, no markdown, no backticks.
   "size_chart_units": "cm" | "in" | "mixed" | "unknown",
   "matched_columns": ["chest", "waist", ...],
   "reasoning": "<one short paragraph, 1-3 sentences>",
-  "alternatives": [{"size":"S","fit":"snug"}, {"size":"L","fit":"loose"}]
+  "alternatives": [{"size":"S","fit":"snug"}, {"size":"L","fit":"loose"}],
+  "warnings": ["Your shoulders (75 cm) looks higher than expected ...", ...]
 }
 
 ONLY return ``recommended_size: null`` if BOTH of these are true:
@@ -396,6 +424,27 @@ def _normalise(parsed: dict[str, Any], *, source: str, elapsed_ms: int,
                 "size": str(alt["size"]),
                 "fit": str(alt.get("fit") or "alt"),
             })
+
+    # Soft data-quality warnings emitted by the model when a stored
+    # body measurement looks obviously implausible vs. the chart
+    # range (e.g. ``shoulders=75`` on a chart that maxes at 50 cm).
+    # Coerced to short user-facing strings; dropped if the model
+    # forgot the field or returned junk.
+    raw_warnings = parsed.get("warnings") or []
+    if isinstance(raw_warnings, str):
+        raw_warnings = [raw_warnings]
+    if not isinstance(raw_warnings, list):
+        raw_warnings = []
+    cleaned_warnings: list[str] = []
+    for w in raw_warnings:
+        if not w:
+            continue
+        s = str(w).strip()
+        if s and s not in cleaned_warnings:
+            cleaned_warnings.append(s[:280])
+        if len(cleaned_warnings) >= 4:
+            break
+
     try:
         confidence = float(parsed.get("confidence") or 0.0)
     except (TypeError, ValueError):
@@ -410,6 +459,7 @@ def _normalise(parsed: dict[str, Any], *, source: str, elapsed_ms: int,
         matched_columns=matched,
         reasoning=str(parsed.get("reasoning") or "")[:1200],
         alternatives=cleaned_alts,
+        warnings=cleaned_warnings,
         source=source,
         elapsed_ms=elapsed_ms,
         has_measurements=has_measurements,
@@ -851,6 +901,7 @@ async def analyze_chart(
             matched_columns=[],
             reasoning=" ".join(why_parts),
             alternatives=[],
+            warnings=[],
             source="none",
             elapsed_ms=int((time.time() - t0) * 1000),
             has_measurements=has_measurements,

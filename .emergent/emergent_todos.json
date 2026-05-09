@@ -1,18 +1,22 @@
 [
   {
-    "content": "Add CLOTHING-SIZE FALLBACK rule to system prompt (shirt_size / pants_size / shoe_size used when body circumferences missing)",
+    "content": "Add anomaly-detection rule to system prompt (compare user values to chart's column range; skip outliers)",
     "status": "completed"
   },
   {
-    "content": "Split user prompt into BODY CIRCUMFERENCES vs CLOTHING SIZES vs HEIGHT/WEIGHT context sections",
+    "content": "Add structured `warnings: list[str]` field to AnalyzeChartOut and normalize/coerce it in the response handler",
     "status": "completed"
   },
   {
-    "content": "Verify both paths: full circumferences (XL @ 0.9) and shirt_size-only (L @ 0.7)",
+    "content": "Render warnings prominently in the recommendation overlay (chrome-extension)",
     "status": "completed"
   },
   {
-    "content": "Remove temporary debug log added earlier",
+    "content": "Smoke-test with lokoprod profile: shoulders=55 should be flagged but chest=92/sleeve=46 should still drive the match",
     "status": "completed"
+  },
+  {
+    "content": "[future] Fix 'Save changes' always-active button on profile form",
+    "status": "pending"
   }
 ]
