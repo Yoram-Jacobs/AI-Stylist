@@ -145,13 +145,7 @@ WHAT TO DO
    - The units (cm, in, or both).
    - The size labels in the first column (S/M/L/EU 38/...).
    - The numeric value(s) in each cell. Cells may hold a single number (a garment dimension) OR a range like "86-90" (a body-measurement bracket).
-2. Map the user's measurements to chart columns by NAME, using these aliases:
-     chest <-> Bust / Chest
-     hip   <-> Hip / Hips / Bottom / Bottom Hem
-     waist <-> Waist
-     shoulders <-> Shoulder / Shoulder Width
-     sleeve <-> Sleeve / Sleeve Length
-     inseam <-> Inseam / Inside Leg
+2. The user's measurements have been **pre-expanded server-side** so every common chart-column synonym is already populated. For example ``chest`` and ``bust`` carry the same value; ``shoulder``, ``shoulders`` and ``shoulder_width`` carry the same value; ``hip``, ``hips``, ``bottom`` and ``bottom_hem`` carry the same value. Do a case-insensitive substring match between each chart column header and the JSON keys to find the user's value for that column. **NEVER** answer "measurements were not provided" if any column header matches any JSON key.
 3. For each row, check whether every relevant user measurement fits:
      - Range cells "lo-hi": user value must satisfy lo <= v <= hi.
      - Single-number cells (garment dimensions): user value must be <= the cell value (the garment must be at least as wide as the user).
@@ -178,6 +172,61 @@ If you cannot find a usable chart in the image (only product photos, occluded, b
 """
 
 
+# ---------------- measurement-alias expansion ------------------------
+# When the app stores ``chest`` and the chart prints "Bust Size", we
+# don't want the model to play "spot the synonym" on its own — it
+# leans conservative and reports "no measurements provided".
+# Instead we expand every stored field into ALL its common aliases
+# server-side, so the JSON Gemini sees holds every name a chart
+# might use. Single source of truth for the chest<->bust,
+# shoulder<->shoulders<->shoulder-width, etc. fan-out.
+_MEASUREMENT_ALIASES: dict[str, tuple[str, ...]] = {
+    # canonical body field -> tuple of equivalent / column-side names
+    "chest":      ("chest", "bust", "bust_size", "chest_circumference"),
+    "bust":       ("bust", "chest", "bust_size", "chest_circumference"),
+    "waist":      ("waist", "waist_circumference", "natural_waist"),
+    "hip":        ("hip", "hips", "bottom", "bottom_hem", "hip_circumference"),
+    "hips":       ("hips", "hip", "bottom", "bottom_hem", "hip_circumference"),
+    "shoulder":   ("shoulder", "shoulders", "shoulder_width", "across_shoulder"),
+    "shoulders":  ("shoulders", "shoulder", "shoulder_width", "across_shoulder"),
+    "sleeve":     ("sleeve", "sleeve_length", "sleeves"),
+    "sleeves":    ("sleeves", "sleeve", "sleeve_length"),
+    "inseam":     ("inseam", "inside_leg", "inseam_length"),
+    "outseam":    ("outseam", "outside_leg", "outseam_length"),
+    "thigh":      ("thigh", "thigh_circumference"),
+    "neck":       ("neck", "neck_circumference"),
+    "height":     ("height", "body_height", "stature"),
+    "weight":     ("weight", "body_weight"),
+    "length":     ("length", "back_length", "body_length"),
+}
+
+
+def _expand_measurement_aliases(
+    measurements: dict[str, Any],
+) -> dict[str, Any]:
+    """Return ``measurements`` with every alias key populated to the
+    same value, so the LLM cannot miss a synonym match.
+
+    Empty strings / ``None`` are dropped first so we never leak
+    placeholder ``""`` cells. Unknown user keys (e.g. ``"thigh_left"``
+    on a custom profile) are passed through verbatim.
+    """
+    expanded: dict[str, Any] = {}
+    for k, v in (measurements or {}).items():
+        if v is None or v == "":
+            continue
+        kl = str(k).lower().strip()
+        # Apply alias fan-out when the key is a known canonical field.
+        for alias in _MEASUREMENT_ALIASES.get(kl, (kl,)):
+            # First write wins: the user's explicit key takes priority
+            # over any alias that maps to the same target. This means
+            # if both ``chest`` and ``bust`` are present, both are
+            # preserved with their respective values.
+            if alias not in expanded:
+                expanded[alias] = v
+    return expanded
+
+
 def _build_user_prompt(
     *,
     measurements: dict[str, Any],
@@ -190,15 +239,26 @@ def _build_user_prompt(
     """Render the user-message text. Body measurements first
     (highest priority for the model), then context, then any
     extracted text we happen to have."""
-    cleaned: dict[str, Any] = {}
-    for k, v in (measurements or {}).items():
-        if v is None or v == "":
-            continue
-        cleaned[k] = v
-    measurements_str = json.dumps(cleaned, ensure_ascii=False)
+    # Server-side alias expansion: every stored field is duplicated
+    # under all of its known synonym keys so chart-side wording (e.g.
+    # "Bust Size", "Shoulder Width") finds an exact-name match in
+    # the JSON we send. Without this, models like Gemini Flash
+    # sometimes report "no measurements provided" because the user
+    # gave ``chest`` and the chart says ``Bust Size`` — semantically
+    # identical, but the model wouldn't risk the inference.
+    expanded = _expand_measurement_aliases(measurements)
+    measurements_str = json.dumps(expanded, ensure_ascii=False)
 
     parts: list[str] = [
-        f"USER MEASUREMENTS (cm, JSON):\n{measurements_str}",
+        f"USER MEASUREMENTS (cm, JSON — every chart-column synonym is pre-expanded):\n{measurements_str}",
+        (
+            "IMPORTANT: the measurements above already include every common "
+            "synonym (e.g. ``chest`` = ``bust``; ``shoulder`` = ``shoulder_width``; "
+            "``hip`` = ``bottom``). If a chart column matches ANY of these names "
+            "(case-insensitive substring is enough), use the user's value. Do "
+            "**NOT** reply that 'measurements were not provided' when at least "
+            "one column has a matching key."
+        ),
     ]
     ctx_lines: list[str] = []
     if store:

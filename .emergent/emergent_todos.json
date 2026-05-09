@@ -1,18 +1,14 @@
 [
   {
-    "content": "Diagnose why pass 1 still hit OLD code: extension was talking to dressapp.co (prod) by default, not preview",
+    "content": "Add server-side measurement alias expansion (chest→bust, shoulder→shoulder_width, hip→bottom, etc.) before sending to Gemini",
     "status": "completed"
   },
   {
-    "content": "Build extension with VITE_DRESSAPP_BACKEND pointed at preview backend",
+    "content": "Update prompt to forbid 'no measurements provided' when an alias matches",
     "status": "completed"
   },
   {
-    "content": "Add 'stale_context' detection in content script for cleaner UX after extension reload",
+    "content": "Verify with smoke test — dev user gets XL @ 1.0 confidence in 15s",
     "status": "completed"
-  },
-  {
-    "content": "Document reinstall + reconnect steps for user",
-    "status": "in_progress"
   }
 ]
