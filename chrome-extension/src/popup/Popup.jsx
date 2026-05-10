@@ -26,27 +26,53 @@ export default function Popup() {
     user: null,
     measurementsSummary: null,
     error: null,
+    backend: null, // origin we're talking to — purely informational
   });
 
   async function refresh() {
     setState((s) => ({ ...s, phase: 'loading', error: null }));
     const r = await sendToBackground({ type: messages.AUTH_STATUS });
     if (!r || !r.ok) {
-      setState({ phase: 'error', user: null, measurementsSummary: null, error: r?.error || 'Unknown error' });
+      setState({ phase: 'error', user: null, measurementsSummary: null, error: r?.error || 'Unknown error', backend: null });
       return;
     }
     if (!r.token) {
-      setState({ phase: 'disconnected', user: null, measurementsSummary: null, error: null });
+      setState({ phase: 'disconnected', user: null, measurementsSummary: null, error: null, backend: null });
       return;
     }
-    // Connected — fetch /me through the SW (it adds the bearer header).
+    // Connected — verify the token still works against the backend
+    // it was issued for. ``/me`` returns 401 when a stale token (e.g.
+    // an old preview-issued dev token) is sent to a different backend
+    // (e.g. production) — in that case we must NOT show "connected"
+    // with the stale cached user. The SW already wipes the token on
+    // 401 inside ``authedFetch``; we just need to reflect that here.
     const me = await sendToBackground({ type: messages.FETCH_ME });
     if (!me || !me.ok) {
+      const err = String(me?.error || '');
+      const looksAuthError = /401|session expired|reconnect|no token/i.test(err);
+      if (looksAuthError) {
+        // Token was rejected — make sure storage is fully clean and
+        // bring the popup back to the disconnected (Connect) state
+        // so the user can re-authenticate against the right backend.
+        await sendToBackground({ type: messages.CLEAR_AUTH });
+        setState({
+          phase: 'disconnected',
+          user: null,
+          measurementsSummary: null,
+          error: 'Your previous session is no longer valid. Reconnect to continue.',
+          backend: null,
+        });
+        return;
+      }
+      // Non-auth error (network blip, CORS, etc.) — fall back to
+      // showing the stored user so the popup is still useful, but
+      // surface the error so the user knows things are degraded.
       setState({
         phase: 'connected',
         user: r.user || null,
         measurementsSummary: null,
-        error: me?.error || null,
+        error: err || null,
+        backend: r.backend || null,
       });
       return;
     }
@@ -55,6 +81,7 @@ export default function Popup() {
       user: me.user,
       measurementsSummary: summarize(me.user?.body_measurements || {}),
       error: null,
+      backend: r.backend || null,
     });
   }
 
@@ -96,13 +123,14 @@ export default function Popup() {
       {state.phase === 'loading' ? (
         <div className="flex h-32 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : state.phase === 'disconnected' ? (
-        <DisconnectedView onConnect={connect} />
+        <DisconnectedView onConnect={connect} message={state.error} />
       ) : state.phase === 'error' ? (
         <ErrorView error={state.error} onRetry={refresh} />
       ) : (
         <ConnectedView
           user={state.user}
           measurementsSummary={state.measurementsSummary}
+          backend={state.backend}
           onDisconnect={disconnect}
         />
       )}
@@ -114,9 +142,18 @@ export default function Popup() {
   );
 }
 
-function DisconnectedView({ onConnect }) {
+function DisconnectedView({ onConnect, message }) {
   return (
     <div className="flex flex-col items-stretch gap-3">
+      {message ? (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[11px] leading-snug text-amber-800"
+          data-testid="popup-stale-session"
+          role="status"
+        >
+          {message}
+        </div>
+      ) : null}
       <div className="rounded-xl border border-dashed bg-muted/40 p-3 text-center">
         <ShieldCheck className="mx-auto h-6 w-6 text-primary" />
         <p className="mt-2 text-xs text-foreground">Connect to your DressApp account to get personalised size recommendations on every shopping site.</p>
@@ -132,7 +169,13 @@ function DisconnectedView({ onConnect }) {
   );
 }
 
-function ConnectedView({ user, measurementsSummary, onDisconnect }) {
+function ConnectedView({ user, measurementsSummary, backend, onDisconnect }) {
+  // Compact display of which origin issued our token. Mostly useful
+  // to spot stale dev sessions persisted from preview testing.
+  const backendHost = (() => {
+    if (!backend) return null;
+    try { return new URL(backend).host; } catch { return backend; }
+  })();
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3 rounded-xl border bg-muted/30 p-3">
@@ -144,8 +187,11 @@ function ConnectedView({ user, measurementsSummary, onDisconnect }) {
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{user?.full_name || user?.email || 'Connected'}</div>
-          {user?.email && user?.full_name ? <div className="truncate text-[11px] text-muted-foreground">{user.email}</div> : null}
+          <div className="truncate text-sm font-medium" data-testid="popup-user-name">{user?.full_name || user?.email || 'Connected'}</div>
+          {user?.email && user?.full_name ? <div className="truncate text-[11px] text-muted-foreground" data-testid="popup-user-email">{user.email}</div> : null}
+          {backendHost ? (
+            <div className="truncate text-[10px] text-muted-foreground" data-testid="popup-backend-host">via {backendHost}</div>
+          ) : null}
         </div>
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700" data-testid="connected-badge">
           Logged in
