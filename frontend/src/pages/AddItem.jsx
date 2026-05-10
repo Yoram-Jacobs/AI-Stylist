@@ -21,6 +21,8 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { sha256File, aHashFile, colorSignatureFile } from '@/lib/utils';
+import { findDuplicatesInCloset } from '@/lib/duplicateDetection';
+import { closetStore } from '@/lib/closetStore';
 import DuplicatePreflightDialog from '@/components/DuplicatePreflightDialog';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
@@ -134,8 +136,9 @@ export default function AddItem() {
   // each item with sane defaults; user is told to fix any misfits in
   // /closet afterwards.
   const [bgBatch, setBgBatch] = useState(null);
-  // Phase Z2 — pre-flight duplicate dialog state. Holds the
-  // `matches` array returned by /closet/preflight plus a continuation
+  // Phase Z3 — pre-flight duplicate dialog state. Holds the
+  // ``matches`` array returned by ``findDuplicatesInCloset`` plus a
+  // continuation closure that resumes the upload flow once the user
   // function that the dialog calls once the user has decided
   // skip/add per row. Null when the dialog is closed.
   const [preflight, setPreflight] = useState(null);
@@ -222,13 +225,20 @@ export default function AddItem() {
     if (!files.length) return;
 
     // ----------------------------------------------------------------
-    // Phase Z2 — pre-flight duplicate detection.
+    // Phase Z3 — pre-flight duplicate detection (client-side).
     //
-    // Compute the SHA-256 of every selected file in-browser (free,
-    // ~50 ms each), POST the whole batch to /closet/preflight in ONE
-    // round-trip, and either prompt the user (≤5 photos) or silently
-    // drop the duplicates (>5 photos, batch path) before any analyze
-    // / Gemini / SegFormer cost is incurred.
+    // Compute the SHA-256 / aHash / colour-sig of every selected file
+    // in-browser (~150–250 ms per file in parallel) then check them
+    // against the locally-cached closet snapshot (``closetStore``)
+    // using ``findDuplicatesInCloset`` — a 1:1 port of the backend's
+    // ``is_duplicate_match``. Either prompts the user (≤5 photos) or
+    // silently drops the duplicates (>5 photos, batch path) before
+    // any analyze / Gemini / SegFormer cost is incurred.
+    //
+    // Previous version round-tripped to ``POST /closet/preflight``
+    // for the same information that was already in the cache —
+    // 300–1500 ms of pure overhead. Endpoint is now deprecated, kept
+    // mounted as a fallback for older clients.
     // ----------------------------------------------------------------
     const fingerprints = await Promise.all(
       files.map(async (f) => {
@@ -258,7 +268,7 @@ export default function AddItem() {
 
     let matches = [];
     try {
-      const fpForApi = fingerprints
+      const fpForLookup = fingerprints
         .filter((fp) => fp.sha256 || fp.phash)
         .map((fp) => ({
           sha256: fp.sha256 || null,
@@ -267,13 +277,21 @@ export default function AddItem() {
           filename: fp.filename,
           size_bytes: fp.size_bytes,
         }));
-      if (fpForApi.length) {
-        const res = await api.preflightDuplicates(fpForApi);
+      if (fpForLookup.length) {
+        // Phase Z3 — duplicate detection runs CLIENT-SIDE against the
+        // already-cached closet snapshot. Eliminates a 300–1500 ms
+        // round-trip per upload batch. Logic is a 1:1 port of the
+        // backend's ``is_duplicate_match``; trade-off (Q1a): legacy
+        // closet items without ``source_phash`` are silently skipped
+        // and rely on the backend's post-save guard. See
+        // ``lib/duplicateDetection.js`` for the porting notes.
+        const closetItems = closetStore.getSnapshot().items || [];
+        const res = findDuplicatesInCloset(fpForLookup, closetItems);
         matches = Array.isArray(res?.matches) ? res.matches : [];
       }
     } catch (err) {
       // Pre-flight is purely advisory — never block the upload on a
-      // network/server error. Treat as "no duplicates found" and let
+      // local lookup error. Treat as "no duplicates found" and let
       // the post-analysis duplicate detector still catch obvious hits.
       matches = [];
     }
@@ -561,7 +579,9 @@ export default function AddItem() {
           useReconstructed: false,
           // Phase Z2 — fingerprint passthrough into buildCreatePayload
           // so the row stored in Mongo carries source_sha256 etc. and
-          // future uploads of the same file get caught by /preflight.
+          // future uploads of the same file get caught by the
+          // client-side duplicate check against ``closetStore``
+          // (Phase Z3 — was /closet/preflight before).
           ...sourceMeta,
         };
 
@@ -1742,8 +1762,9 @@ function buildCreatePayload(card) {
     // Phase V6: preserve DPP provenance imported via QR scan.
     dpp_data: card.dppData || undefined,
     // Phase Z2 — photo fingerprint passthrough so future uploads of
-    // the same JPEG get caught by /closet/preflight, and the closet
-    // card knows whether to paint the red ⭐ overlay.
+    // the same JPEG get caught by the Phase-Z3 client-side duplicate
+    // check (was /closet/preflight before), and the closet card knows
+    // whether to paint the red ⭐ overlay.
     source_sha256: card.sourceSha256 || undefined,
     source_phash: card.sourcePhash || undefined,
     source_color_sig: card.sourceColorSig || undefined,

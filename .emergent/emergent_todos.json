@@ -1,10 +1,26 @@
 [
   {
-    "content": "Add --reasoning-budget 0 to llama-server argv to disable thinking",
+    "content": "Inspect utils.js hash helpers + edit-mode photo replace flow",
     "status": "completed"
   },
   {
-    "content": "Lint + verify backend stays green",
+    "content": "Create /app/frontend/src/lib/duplicateDetection.js (JS port of is_duplicate_match)",
+    "status": "completed"
+  },
+  {
+    "content": "Refactor AddItem.jsx upload path to use local duplicate check",
+    "status": "completed"
+  },
+  {
+    "content": "Skip edit-mode refactor (no preflight call there) — surface CLIP re-embed as separate bottleneck",
+    "status": "completed"
+  },
+  {
+    "content": "Mark backend /closet/preflight as DEPRECATED in docstring + add warning log",
+    "status": "completed"
+  },
+  {
+    "content": "Add backlog item for endpoint removal + smoke-test in browser",
     "status": "completed"
   }
 ]

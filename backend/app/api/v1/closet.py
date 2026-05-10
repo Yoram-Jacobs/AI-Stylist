@@ -398,7 +398,19 @@ class PreflightIn(BaseModel):
 async def preflight_duplicates(
     payload: PreflightIn, user: dict = Depends(get_current_user)
 ) -> dict[str, Any]:
-    """Return any closet entries that already carry one of the supplied
+    """**DEPRECATED — kept mounted as a fallback for older clients.**
+
+    As of Phase Z3, modern clients run this lookup locally against the
+    cached ``closetStore`` (see ``frontend/src/lib/duplicateDetection.js``)
+    and never call this endpoint on the hot path. Slated for removal
+    after one or two release cycles — track via the
+    ``Z3-preflight-removal`` backlog item in ``docs/chat_summary.md``.
+    The endpoint also doubled as the opportunistic phash/color-sig
+    backfill site; that backfill now relies on natural traffic to the
+    ``POST /closet/{id}/photo`` and ``POST /closet`` paths, both of
+    which compute fresh signatures and persist them server-side.
+
+    Return any closet entries that already carry one of the supplied
     SHA-256 / aHash values. The response is structured for direct
     rendering by the duplicate-confirm dialog: each match carries the
     existing item's id, title, ``thumbnail_data_url`` and the incoming
@@ -416,6 +428,15 @@ async def preflight_duplicates(
     from app.services.image_hash import (
         compute_signatures,
         is_duplicate_match,
+    )
+
+    # Surface every hit so we can confirm via prod logs when client
+    # traffic to this endpoint has dropped to zero — that's the
+    # signal that it's safe to delete in the Z3 removal pass.
+    logger.warning(
+        "DEPRECATED endpoint hit: POST /closet/preflight user=%s photos=%d "
+        "(client should use lib/duplicateDetection.js instead)",
+        user.get("id"), len(payload.photos or []),
     )
 
     db = get_db()

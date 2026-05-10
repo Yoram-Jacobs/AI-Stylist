@@ -966,3 +966,124 @@ Out of scope for this session per user. To pick up later:
   in server logs.** The frontend ought to surface it as a small
   badge during the audit period — it would have made today's
   whole audit unnecessary.
+
+---
+
+# Phase Z3 — Client-side duplicate detection
+
+Add-Item upload was bottlenecked by an unnecessary round-trip to
+`POST /closet/preflight`. The user diagnosed it correctly: every
+piece of data the endpoint needed to answer "is this a duplicate?"
+was already in the browser via `closetStore` (which carries each
+item's `source_sha256`, `source_phash`, `source_color_sig`).
+Refactored the hot path to do the lookup locally.
+
+## 1. What changed
+
+### Frontend
+
+* **`/app/frontend/src/lib/duplicateDetection.js`** (new) — 1:1 JS
+  port of the backend's `is_duplicate_match` (and its
+  `hamming_distance` / `color_distance` helpers). Same thresholds
+  (Hamming ≤ 6, colour ≤ 220), same decision tree (SHA exact →
+  phash + colour gate). Cross-validated against the Python side
+  with 22 parity assertions including the *navy-vs-grey-shorts*
+  edge case that originally motivated the colour gate.
+* **`/app/frontend/src/pages/AddItem.jsx`** — `handleFiles` now
+  calls `findDuplicatesInCloset(fingerprints, closetStore.getSnapshot().items)`
+  instead of `api.preflightDuplicates(...)`. The match-payload
+  shape passed into `DuplicatePreflightDialog` is **bit-identical**
+  to the old server response, so the dialog and the downstream
+  resolve flow needed zero changes.
+
+### Backend
+
+* **`/app/backend/app/api/v1/closet.py`** — `POST /closet/preflight`
+  marked **DEPRECATED** in the docstring and now emits a
+  `logger.warning("DEPRECATED endpoint hit: ...")` on every call so
+  it's grep-able in prod logs. The endpoint stays mounted as a
+  safety net for clients on a stale bundle. Removal tracked under
+  the `Z3-preflight-removal` backlog item below.
+
+## 2. Trade-offs taken (with the user's explicit OK)
+
+* **Q1a — Legacy items without `source_phash` skip pre-flight
+  detection.** Pre-Phase-Z2 closet items lack the hash fields the
+  client check needs. They get a free pass through the pre-flight
+  gate — relying on the backend's post-save duplicate guard to
+  catch obvious re-uploads. The previous lazy backfill inside
+  `/preflight` is now obsolete; new uploads via `POST /closet` and
+  photo replacements via `POST /closet/{id}/photo` already compute
+  + persist fresh signatures server-side, so the gap closes
+  naturally as users live with their closets.
+* **Q2a+b — Endpoint left mounted but deprecated.** Removal in a
+  future release once the `DEPRECATED endpoint hit` warning has
+  stopped appearing in production logs for a full release cycle.
+
+## 3. Expected impact
+
+* Add-Item upload pre-flight: **300–1500 ms → 5–30 ms** per batch.
+  The remaining latency on the upload path is the in-browser
+  SHA / aHash / colour-sig compute (~150–250 ms per photo, run in
+  parallel via `Promise.all`).
+* `/closet/preflight` traffic should trend toward zero as clients
+  update. Once it's at zero for ~2 weeks, delete the endpoint, the
+  `PreflightIn` model, and the lazy-backfill block in `closet.py`.
+
+## 4. Files changed / added
+
+```
+frontend/
+  src/lib/duplicateDetection.js     (NEW — port + helpers + smoke API)
+  src/pages/AddItem.jsx             (handleFiles → local lookup;
+                                     comments updated Z2 → Z3)
+
+backend/
+  app/api/v1/closet.py              (DEPRECATED docstring +
+                                     warning-log on every hit)
+
+docs/
+  chat_summary.md                   (this section)
+```
+
+## 5. Not addressed in this session (but surfaced)
+
+While tracing the user's secondary complaint that "replacing a
+photo in edit mode is slow too", I found that path
+(`ItemDetail.onPhotoFileChosen` → `POST /closet/{id}/photo` with
+`autoSegment: false`) does **not** call `/preflight`. Its
+slowness almost certainly comes from the in-line **FashionCLIP
+re-embed** that runs on every replacement (~0.5-2 s on the
+production VPS depending on CLIP model warm-up). If the user wants
+to optimise that next, options are:
+
+1. Background the re-embed via a fire-and-forget task and return
+   the updated item immediately (semantic search would be briefly
+   stale).
+2. Skip the re-embed on photo replace and trigger it only on
+   explicit re-analyse.
+
+This is logged here so the next session can pick it up if
+confirmed as a UX pain point.
+
+## 6. New backlog items
+
+### `Z3-preflight-removal` — P2
+
+After one or two release cycles with zero `DEPRECATED endpoint
+hit: POST /closet/preflight` warnings in production logs:
+
+1. Delete `@router.post("/preflight")` block in `closet.py`.
+2. Delete the `PreflightIn` Pydantic model.
+3. Delete `api.preflightDuplicates` in `frontend/src/lib/api.js`.
+4. Update `DuplicatePreflightDialog.jsx`'s docstring (currently
+   references "backend's /closet/preflight").
+5. Optionally rename the `preflight` state key in `AddItem.jsx` to
+   `dupCheck` for clarity, since the term now describes a purely
+   client-side check.
+
+### `Z3-clip-reembed-on-photo-replace` — P3 (deferred)
+
+See §5. Only pick up if the user confirms edit-mode replace is
+slow even after the Z3 deploy lands (since the Z3 fix doesn't
+touch that path, that complaint should persist if real).
