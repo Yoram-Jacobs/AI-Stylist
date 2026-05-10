@@ -47,8 +47,7 @@
     {
       "matches": [
         "https://dressapp.co/extension/connect*",
-        "https://*.dressapp.co/extension/connect*",
-        "https://*.preview.emergentagent.com/extension/connect*"
+        "https://*.dressapp.co/extension/connect*"
       ],
       "js": ["src/content/auth-bridge.js"],
       "run_at": "document_idle"
@@ -66,8 +65,7 @@
   "externally_connectable": {
     "matches": [
       "https://dressapp.co/*",
-      "https://*.dressapp.co/*",
-      "https://*.preview.emergentagent.com/*"
+      "https://*.dressapp.co/*"
     ]
   },
   "web_accessible_resources": [
