@@ -59,7 +59,7 @@ async def _call_gemma_space(
     system_prompt: str,
     user_text: str,
     image_b64_jpeg: str,
-    max_tokens: int = 900,
+    max_tokens: int = 2400,
     temperature: float = 0.1,
     timeout: float | None = None,
 ) -> str:
