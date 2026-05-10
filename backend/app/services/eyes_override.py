@@ -51,7 +51,11 @@ from app.db.database import get_db
 log = logging.getLogger(__name__)
 
 _CONFIG_DOC_ID = "eyes_provider"
-_VALID_PROVIDERS = ("gemma", "qwen")
+# Phase O.4 — DressApp ships only the self-hosted Gemma-4 E2B Eyes
+# model and Google's Gemini 2.5 Flash. The legacy "qwen" path is
+# disabled until/unless we re-introduce it. Any persisted "qwen"
+# override falls through to the env default at resolution time.
+_VALID_PROVIDERS = ("gemma", "gemini")
 _CACHE_TTL_S = 5.0
 
 # Module-level cache. None until first read; (value, ts) afterwards.
@@ -104,7 +108,10 @@ async def get_active_provider() -> str:
 
     if override:
         return override
-    return _normalize(settings.EYES_PROVIDER) or "qwen"
+    # When no DB override is set, fall back to the env-default. We
+    # intentionally bias to "gemini" (not "qwen") because DressApp's
+    # only two supported Eyes backends today are Gemma-4 and Gemini.
+    return _normalize(settings.EYES_PROVIDER) or "gemini"
 
 
 async def set_override(value: str | None, *, by_email: str | None = None) -> dict[str, Any]:
@@ -164,9 +171,9 @@ async def status() -> dict[str, Any]:
     Shape::
 
         {
-          "active_provider": "gemma" | "qwen",
+          "active_provider": "gemma" | "gemini",
           "source":          "db" | "env",
-          "env_default":     "qwen",
+          "env_default":     "gemini",
           "override":        "gemma" | None,
           "updated_at":      "<iso8601>" | None,
           "updated_by":      "<email>"   | None,
@@ -183,7 +190,7 @@ async def status() -> dict[str, Any]:
         doc = None
 
     override = _normalize((doc or {}).get("value")) if doc else None
-    env_default = _normalize(settings.EYES_PROVIDER) or "qwen"
+    env_default = _normalize(settings.EYES_PROVIDER) or "gemini"
     active = override or env_default
     source = "db" if override else "env"
 

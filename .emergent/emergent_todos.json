@@ -1,34 +1,22 @@
 [
   {
-    "content": "[1/8] Map provider-toggle architecture",
+    "content": "Update eyes_override.py: valid providers gemma|gemini (drop qwen)",
     "status": "completed"
   },
   {
-    "content": "[2/8] Verify Eyes (Gemma) endpoint is reachable from the preview backend (network, healthcheck, model file loaded)",
+    "content": "Refactor garment_vision.py analyze() so DB toggle drives gemma vs gemini routing",
     "status": "completed"
   },
   {
-    "content": "[3/8] Trace request paths: closet AddItem flow, size-chart flow, outfit/recommendations — which provider each one ACTUALLY uses today",
-    "status": "in_progress"
+    "content": "Update DeveloperPanel.jsx UI: Qwen -> Gemini labels and toggle values",
+    "status": "completed"
   },
   {
-    "content": "[4/8] Verify the Developer/Internal switch wires through to the runtime (admin endpoint round-trip)",
-    "status": "pending"
+    "content": "Add GET /api/v1/admin/eyes/diagnostics endpoint",
+    "status": "completed"
   },
   {
-    "content": "[5/8] Check provider_activity logs / response telemetry — are responses tagged with the actual provider used?",
-    "status": "pending"
-  },
-  {
-    "content": "[6/8] Inspect frontend: does any UI surface 'analyzed by gemma vs gemini'? If not, is there hidden telemetry to confirm?",
-    "status": "pending"
-  },
-  {
-    "content": "[7/8] Run live A/B test: force EYES_PROVIDER=gemma and EYES_PROVIDER=gemini in turn, compare outputs on the same input",
-    "status": "pending"
-  },
-  {
-    "content": "[8/8] Write findings report with concrete remediation steps",
-    "status": "pending"
+    "content": "Smoke-test endpoints + clarify HF Space fix is on user's side",
+    "status": "completed"
   }
 ]
