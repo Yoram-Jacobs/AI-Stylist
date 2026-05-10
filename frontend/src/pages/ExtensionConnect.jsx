@@ -54,6 +54,22 @@ export default function ExtensionConnect() {
   const nav = useNavigate();
   const extId = params.get('ext_id');
   const requestedV = parseInt(params.get('v') || '1', 10);
+  // ``?force=1`` (or ``?switch=1``) signals "user clicked 'Switch
+  // account' in the DressApp extension popup". We clear the
+  // currently-cached web-app auth so the existing useEffect bounces
+  // them through ``/login`` for a fresh credential entry. After
+  // login they return here, the new token is handed off, and the
+  // extension flips identity. Idempotent: ``force_handled`` flag
+  // prevents an infinite clear-redirect loop.
+  const force = params.get('force') === '1' || params.get('switch') === '1';
+  const forceHandledRef = useRef(false);
+  if (force && !forceHandledRef.current) {
+    forceHandledRef.current = true;
+    try {
+      tokenStore.clear();
+      userStore.clear?.();
+    } catch { /* noop — best effort */ }
+  }
 
   const [phase, setPhase] = useState('init'); // init|sending|sent|error|noauth|noopener
   const [error, setError] = useState(null);
