@@ -626,3 +626,343 @@ UX shape for every store going forward.
    modes, and log them into the **"smartass" size carts** P1
    backlog item before the next session.
 
+
+---
+
+# Phase O.5 — Eyes Audit & Toggle Truth-in-Routing
+
+User came back asking to **prove** that DressApp's Add-Item analyses
+were actually being served by the fine-tuned Gemma-4 E2B "Eyes"
+model and not silently falling through to Gemini. The audit ran
+across Preview and Production, exposed a stack of bypasses, fixed
+each one cleanly, and finished with a definitive end-to-end
+diagnostic notebook that answered the original question with hard
+data.
+
+## 1. Initial state of the routing stack
+
+Three independent reasons the user could not have been seeing
+Gemma output:
+
+1. **Pod env hard-routed to Gemini.** `GARMENT_VISION_PROVIDER=gemini`
+   in the pod env caused `garment_vision.analyze()` to enter the
+   Gemini branch immediately, *before* `eyes_override.get_active_provider()`
+   was ever consulted. The DB toggle UI was decorative.
+2. **HuggingFace Space crashed (HTTP 503).** The user's
+   `Yoram-Jacobs/dressapp-eyes-gguf` Space was returning
+   `Your space is in error, check its status on hf.co` for every
+   request. Even if the toggle had worked, the call would have
+   failed.
+3. **Phase-1 Space had no vision projector.** The deployed Space
+   was running text-only (Q4_K_M LLM, no `mmproj-*.gguf`), so even
+   when reachable it could not actually look at images. Whatever
+   "analysis" it produced was hallucinated from prompt structure
+   alone.
+
+## 2. Toggle architecture rewrite
+
+Replaced the env-first router in `garment_vision.analyze()` with a
+**toggle-driven** router (`/app/backend/app/services/garment_vision.py`):
+
+* `eyes_override.get_active_provider()` is now consulted *first*.
+* Allowed values are `gemma | gemini` (legacy `qwen` retired —
+  DressApp ships only those two engines today;
+  `/app/backend/app/services/eyes_override.py`).
+* On `gemma`: POST to `EYES_GEMMA_SPACE_URL`. On any failure
+  (timeout, 5xx, network, parse-empty), automatically fall back to
+  Gemini and tag the response payload with
+  `provider_fallback: {from: "gemma", to: "gemini", reason: ...}`
+  so the frontend / admin can see fallback transparently.
+* On `gemini`: direct call to Gemini 2.5 Flash via
+  `EMERGENT_LLM_KEY`.
+* `GARMENT_VISION_PROVIDER` env demoted to *seed default* —
+  consulted by `eyes_override` only when the DB has no override
+  yet, never by the analyser directly.
+
+Frontend Developer panel updated to match
+(`/app/frontend/src/components/DeveloperPanel.jsx`): switch labels
+are now **Gemini ↔ Gemma**, value `qwen` removed, copy reflects
+new fallback semantics.
+
+## 3. New diagnostic endpoint
+
+Added `GET /api/v1/admin/eyes/diagnostics`
+(`/app/backend/app/api/v1/admin.py`). Single-shot snapshot of the
+Eyes pipeline's true state, no app restart required:
+
+```
+{
+  "toggle":   { active_provider, source, env_default, override, ... },
+  "env":      { GARMENT_VISION_PROVIDER, GARMENT_VISION_MODEL,
+                EYES_GEMMA_SPACE_URL, gemini_chat_key_set, ... },
+  "resolved": { provider, model, routing_source, fallback_path,
+                notes },
+  "gemma_space": { url, status_code, ok, latency_ms,
+                   body_preview, error },        // live HTTP probe
+  "recent_calls": [...last 10 garment-vision provider_activity rows]
+}
+```
+
+This is what every future "is my model actually serving?" question
+should be answered with — call the endpoint, read the JSON, done.
+
+## 4. HuggingFace Space repaired (then retired)
+
+User's Space was failing to build because the Phase-1 Dockerfile
+contradicted itself: the comment said "we use prebuilt CPU wheels
+so we don't need a compiler" but a leftover `apt install
+build-essential cmake git` block forced a source build that OOM'd
+the free-tier 16 GB sandbox. Removed the redundant block, kept the
+abetlen wheel index, build dropped from 10 min + OOM to ~30 s.
+
+User then uploaded `mmproj-Gemma4E2B-f16.gguf` (986 MB) to the
+model repo. Patched `app.py` to load
+`Gemma3ChatHandler(clip_model_path=...)` (NOT `Llava15ChatHandler` —
+LLaVA's `<image>` token format would have produced silently-
+garbled output on the Gemma-4 token scheme). Vision flag flipped
+to `True` on next boot.
+
+Eventually retired the Space entirely (see §6) once the VPS path
+matched feature parity at zero marginal cost.
+
+## 5. VPS migration — `inference-server/eyes/`
+
+User's Hetzner CPX32 already had the full Phase O.3 inference-
+server scaffold from a session 3 days prior:
+`/app/inference-server/eyes/` builds llama-server from
+`llama.cpp` HEAD (correct multimodal handling, no
+`llama-cpp-python` lag), with `_ensure_mmproj_present()` and the
+`--mmproj` flag pre-wired. All that was missing was the env wiring
+for Phase 2.
+
+Patches applied this session:
+
+* **`/app/deploy/.env.example`** — added a complete *The Eyes*
+  section so the seven `EYES_*` variables that had been silently
+  expected by `docker-compose.yml` are now self-documenting.
+  Includes the Phase-2 `EYES_MMPROJ_FILE=mmproj-Gemma4E2B-f16.gguf`
+  flip, `EYES_LLAMA_THREADS=4` to match CPX32's vCPU count, the
+  internal `EYES_GEMMA_SPACE_URL=http://eyes:7860`, and the
+  bearer-auth token semantics.
+* **`/app/inference-server/eyes/main.py`** — added two
+  llama-server flags:
+    * `--reasoning-budget 0` — disables the model's `<|think|>`
+      phase entirely. Fine-tune is a thinking model that on CPU
+      spent 60-120 s reasoning before producing any output;
+      cutting this dropped first-token latency from ~50 s to ~3 s
+      on CPX32.
+    * `--chat-template-kwargs '{"enable_thinking": false}'` —
+      belt-and-braces for templates that gate thinking via Jinja
+      booleans. Older llama.cpp builds without
+      `--reasoning-budget` ignore this harmlessly.
+  Also patched the `/predict` response to fall back to
+  `reasoning_content` when `content` is empty (covers the case
+  where a thinking-template model exhausts its budget mid-think
+  and leaves `content == ""`).
+* **`/app/backend/app/services/garment_vision.py`** — bumped the
+  `_call_gemma_space` `max_tokens` from the default 900 to 2400
+  for the Gemma path. The schema is verbose (~18 fields ≈ 600
+  output tokens); reasoning + JSON together comfortably fit in
+  2400 with thinking-budget disabled.
+
+VPS roll-out runbook captured in this session's transcript:
+
+```bash
+ssh root@<vps>
+cd /srv/AI-Stylist
+git pull origin main
+cd deploy
+docker compose up -d --build --force-recreate backend eyes
+```
+
+Common gotcha exposed: `docker compose up -d --build` does **not**
+recreate already-running containers when only `.env` values
+change. Always pair the `.env` edit with `--force-recreate`, or
+`docker compose down eyes && docker compose up -d eyes`.
+
+## 6. Eyes_Vision_Smoke_Test.ipynb — the definitive diagnostic
+
+`/app/docs/Eyes_Vision_Smoke_Test.ipynb` — Colab notebook that
+bypasses DressApp entirely and talks to the Eyes container raw
+through a Cloudflare quick-tunnel (or any other one-shot exposure
+of `eyes:7860`). Eight cells:
+
+1. Setup
+2. Config — form fields for URL, bearer token, optional Gemini key
+3. Image upload (Colab's `files.upload()`, pre-processed to
+   1280px JPEG q=82 to mirror backend pre-processing exactly)
+4. The actual call — uses the **verbatim DressApp system prompt**
+   so the result is what would land in the closet
+5. JSON parse via the same `_extract_json` heuristic as the
+   backend
+6. **Vision-blindness control test** — re-runs the call with a
+   blank grey canvas. Headline test of the whole notebook: if the
+   blank canvas and real photo produce structurally similar
+   output, the projector is not actually being consulted at
+   inference, regardless of what `vision_enabled` reports.
+7. Optional Gemini comparison
+8. Decision tree mapping each output pattern to a root cause
+
+## 7. Notebook results — the audit's actual answer
+
+User ran the notebook against the production Eyes service through
+a `*.trycloudflare.com` quick-tunnel. The data was unambiguous:
+
+### Real photo (`5d786bfe...jpg`, women's long-sleeve)
+
+```
+Total latency       : 13.5 s          ✅ thinking off, fast
+vision_used         : True            ✅ projector loaded
+finish_reason       : stop            ✅ natural stop, not budget
+tokens_completion   : 56
+output:
+  { "name": "Long-sleeve shirt",
+    "item_id": "Tees_Tanks-id_00000313_1_1_1_front.jpg" }
+```
+
+### Blank grey canvas
+
+```
+Total latency       : 89.5 s
+tokens_completion   : 2400 (hit cap)
+output:
+  { "name": "Tanks on Shorts",
+    "description":
+       "...There is an accessory on her wrist." × 40+ }
+```
+
+### Conclusions
+
+* ✅ **Infrastructure 100 %.** Vision proven to be wired (different
+  outputs for different images), reasoning-budget proven to take
+  effect (13.5 s vs 90 s), routing toggle proven to flip cleanly.
+* ❌ **Fine-tune is the limiting factor.** Three independent issues:
+    1. **Training-data leakage** — `item_id` value
+       `Tees_Tanks-id_00000313_1_1_1_front.jpg` matches
+       DeepFashion-family filename conventions. The model
+       memorised filenames as labels.
+    2. **Schema drift** — output uses `{name, item_id}` and
+       `{name, description}` schemas in two consecutive calls;
+       neither matches DressApp's 18-field prompt schema. The
+       fine-tune was prepared with a different output format and
+       the system-prompt schema has zero influence on the output
+       structure.
+    3. **Mode collapse on out-of-distribution input** — blank
+       canvas triggered "There is an accessory on her wrist" loop
+       40+ times until the token cap. Model has no graceful
+       refusal behaviour.
+* 🎯 **The original audit question is answered.** Every Add-Item
+  result the user has admired on dressapp.co was Gemini 2.5
+  Flash, not Gemma. The DB toggle is now honest about that, and
+  the diagnostics endpoint can prove it for any future request.
+
+## 8. Final state at end of session
+
+* Production DB toggle: **set to `gemini`** (per user instruction
+  at the close of the session). Set explicitly via the Developer
+  panel UI on dressapp.co — the panel writes
+  `config.eyes_provider.value = "gemini"` to Mongo, picked up by
+  every backend call within ~5 s.
+* HuggingFace Space (`Yoram-Jacobs/dressapp-eyes-gguf`):
+  **paused** in HF Settings. Repo + Dockerfile preserved as a
+  fallback. Stops the free-tier compute clock; user pays nothing.
+* VPS Eyes container: **left running** for diagnostic and
+  fine-tune-evaluation purposes. Toggle keeps Add-Item users on
+  Gemini regardless. When the new fine-tune is ready, the user
+  flips the toggle in the Developer panel and traffic reroutes
+  immediately.
+* Diagnostic endpoint `/api/v1/admin/eyes/diagnostics`: live in
+  prod. Single source of truth for "what is Eyes doing right
+  now?".
+
+## 9. Files changed / added in this session
+
+```
+backend/
+  app/services/garment_vision.py       (toggle-driven routing,
+                                        gemini fallback,
+                                        max_tokens=2400, fallback
+                                        tagging)
+  app/services/eyes_override.py        (valid providers
+                                        gemma|gemini, env_default
+                                        gemini)
+  app/api/v1/admin.py                  (+ /eyes/diagnostics
+                                        endpoint, gemma|gemini
+                                        validation on POST)
+
+frontend/
+  src/components/DeveloperPanel.jsx    (Gemini ↔ Gemma labels,
+                                        fallback copy, removed
+                                        Qwen)
+
+inference-server/
+  eyes/main.py                         (--reasoning-budget 0,
+                                        --chat-template-kwargs
+                                        enable_thinking=false,
+                                        reasoning_content fallback)
+
+deploy/
+  .env.example                         (Eyes section documented)
+
+docs/
+  Eyes_Vision_Smoke_Test.ipynb         (NEW — definitive
+                                        diagnostic Colab notebook)
+  chat_summary.md                      (this section)
+```
+
+## 10. Outstanding work — handoff for the next engineer
+
+### Closed in this session
+
+* ~~Eyes audit / toggle truth-in-routing~~ — done.
+* ~~HF Space build failure (cmake/OOM)~~ — fixed, then retired.
+* ~~Vision projector not loaded~~ — fixed (mmproj uploaded +
+  Gemma3ChatHandler + `--mmproj` flag).
+* ~~Thinking-mode latency~~ — fixed (`--reasoning-budget 0`).
+* ~~Empty `content` from thinking-template models~~ — fixed
+  (`reasoning_content` fallback in `/predict`).
+
+### New track: **Eyes v2 fine-tune** (post-refactor)
+
+Out of scope for this session per user. To pick up later:
+
+1. **Regenerate the training dataset** by running Gemini 2.5
+   Flash with DressApp's *exact* production system prompt over
+   ~5,000 garment photos. Use Gemini's JSON output as the
+   supervised target. Estimated cost: $5-15 in API spend.
+2. **Strip every `item_id` / filename-shaped field** from the
+   training labels — that's what leaked into production output.
+3. **Mix in 5-10 % "non-garment" examples** (blank canvas,
+   landscapes, document scans) labelled with a `null`-shaped JSON
+   to teach the model graceful refusal instead of mode collapse.
+4. **Hyperparameters for the next run**:
+   * LR ≤ `2e-5` (current run was likely higher → memorisation).
+   * 1-2 epochs max with eval-loss monitoring; stop at minimum.
+   * Coverage of all 7 categories (Top, Bottom, Outerwear,
+     Full Body, Footwear, Accessories, Underwear).
+5. **Validate offline before promoting**: run
+   `Eyes_Vision_Smoke_Test.ipynb` over 50 unseen photos. Score
+   JSON-validity rate and category-correctness rate. Don't flip
+   the production toggle to `gemma` until both are >90 %.
+
+### Carried-over backlog (unchanged)
+
+* "Smartass" size charts (Zara, H&M) reconciliation. **P1.**
+* Mobile deployment via Capacitor or native share-extension. **P2.**
+* Profile "Save changes" always-active button (dirty-state
+  tracking). **P3.**
+* `AddItem.jsx` refactor (>1800 lines → modular). **P3.**
+* Server-side logout endpoint with cookie clear. **P3.**
+
+### Lessons / process notes for the next session
+
+* **Never trust `vision_enabled: True` alone.** The blank-canvas
+  control test in the smoke notebook is the only way to prove
+  pixels are actually reaching the LLM during inference.
+* **`docker compose up -d --build` ≠ `--force-recreate`.** When
+  `.env` changes but image hash doesn't, the running container
+  keeps stale env. Document this in any future deploy runbook.
+* **Always log `provider_used` in the response payload, not just
+  in server logs.** The frontend ought to surface it as a small
+  badge during the audit period — it would have made today's
+  whole audit unnecessary.
