@@ -1,14 +1,10 @@
 [
   {
-    "content": "Patch eyes/main.py: capture reasoning_content as fallback for empty content",
+    "content": "Add --reasoning-budget 0 to llama-server argv to disable thinking",
     "status": "completed"
   },
   {
-    "content": "Patch backend/garment_vision.py: bump max_tokens to 2400 on Gemma path",
-    "status": "completed"
-  },
-  {
-    "content": "Lint both files + smoke-test backend",
+    "content": "Lint + verify backend stays green",
     "status": "completed"
   }
 ]
