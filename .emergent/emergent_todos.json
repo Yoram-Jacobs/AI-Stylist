@@ -1,14 +1,14 @@
 [
   {
-    "content": "Rebuild extension explicitly targeting production (dressapp.co)",
+    "content": "[CRITICAL] Investigate why body measurements are deleted on logout — recent commits, logout flow, PATCH endpoints",
     "status": "completed"
   },
   {
-    "content": "Update system prompt to distinguish CIRCUMFERENCE vs LENGTH measurements: length values are MAX (short-sleeve garments are fine, not anomalies)",
-    "status": "completed"
+    "content": "Restore lokoprod's measurements if affected (production, requires user to redo)",
+    "status": "pending"
   },
   {
-    "content": "Re-verify smoke test: shoulders=55 still flagged, sleeve=46 vs short-sleeve chart should NOT flag",
+    "content": "Add 'Switch account' button to popup with backend logout endpoint",
     "status": "completed"
   }
 ]

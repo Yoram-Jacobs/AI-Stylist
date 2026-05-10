@@ -16,7 +16,7 @@
  * repeated opens.
  */
 import { useEffect, useState } from 'react';
-import { LogIn, LogOut, Loader2, ShieldCheck, AlertCircle, Ruler, Sparkles, ExternalLink } from 'lucide-react';
+import { LogIn, LogOut, Loader2, ShieldCheck, AlertCircle, Ruler, Sparkles, ExternalLink, Repeat } from 'lucide-react';
 import { messages, sendToBackground } from '@/lib/messages.js';
 import { authBaseUrl } from '@/lib/api.js';
 
@@ -92,6 +92,29 @@ export default function Popup() {
     chrome.tabs.create({ url });
   }
 
+  /**
+   * Switch the extension to a different DressApp account in one click.
+   *
+   * Under the hood:
+   *   1. Clear our chrome.storage auth slate (token, user, backend) so
+   *      the popup can't briefly flash the old account while the new
+   *      handoff is in flight.
+   *   2. Open the connect URL with ``?force=1``. The frontend connect
+   *      page treats that flag as "wipe localStorage auth before
+   *      proceeding" and bounces the user through ``/login``, so they
+   *      get a fresh credential prompt instead of being silently
+   *      auto-handed-off as the previously-cached web-app user.
+   *   3. After login on dressapp.co, the page returns to
+   *      ``/extension/connect`` and the normal handoff fires —
+   *      stamping our chrome.storage with the new account's token
+   *      and user object.
+   */
+  async function switchAccount() {
+    await sendToBackground({ type: messages.CLEAR_AUTH });
+    const url = `${authBaseUrl()}/extension/connect?force=1&ext_id=${encodeURIComponent(chrome.runtime.id)}&v=1`;
+    chrome.tabs.create({ url });
+  }
+
   async function disconnect() {
     await sendToBackground({ type: messages.CLEAR_AUTH });
     refresh();
@@ -132,6 +155,7 @@ export default function Popup() {
           measurementsSummary={state.measurementsSummary}
           backend={state.backend}
           onDisconnect={disconnect}
+          onSwitchAccount={switchAccount}
         />
       )}
 
@@ -169,7 +193,7 @@ function DisconnectedView({ onConnect, message }) {
   );
 }
 
-function ConnectedView({ user, measurementsSummary, backend, onDisconnect }) {
+function ConnectedView({ user, measurementsSummary, backend, onDisconnect, onSwitchAccount }) {
   // Compact display of which origin issued our token. Mostly useful
   // to spot stale dev sessions persisted from preview testing.
   const backendHost = (() => {
@@ -200,13 +224,23 @@ function ConnectedView({ user, measurementsSummary, backend, onDisconnect }) {
 
       <MeasurementsCard summary={measurementsSummary} />
 
-      <button
-        onClick={onDisconnect}
-        className="flex items-center justify-center gap-2 rounded-lg border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-        data-testid="disconnect-button"
-      >
-        <LogOut className="h-3.5 w-3.5" /> Sign out of extension
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onSwitchAccount}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-muted/50"
+          data-testid="switch-account-button"
+          title="Sign out and re-authenticate as a different DressApp account"
+        >
+          <Repeat className="h-3.5 w-3.5" /> Switch account
+        </button>
+        <button
+          onClick={onDisconnect}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          data-testid="disconnect-button"
+        >
+          <LogOut className="h-3.5 w-3.5" /> Sign out
+        </button>
+      </div>
     </div>
   );
 }
