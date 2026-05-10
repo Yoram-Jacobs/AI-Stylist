@@ -973,73 +973,163 @@ class GarmentVisionService:
     ) -> dict[str, Any]:
         """Run the 17-field analyser on a single image.
 
-        Dispatches to the HF Inference path (Gemma-family, Phase A
-        default) or the Gemini path (legacy / explicit override) based
-        on ``provider``. When called from the multi-item pipeline we
-        pass ``model=self.crop_model`` so per-crop calls use the smaller
-        crop-tuned model if the operator has configured one.
+        Phase O.4 routing — the **DB-backed Eyes toggle**
+        (``eyes_override.get_active_provider()``) is the authoritative
+        source for which model serves the request:
+
+        * ``gemma`` -> POST to the self-hosted Gemma-4 E2B HF Space
+          (``EYES_GEMMA_SPACE_URL``). Any failure (5xx, timeout,
+          network error) automatically falls back to Gemini so the
+          UX stays alive while the Space is sleeping/crashed; we
+          tag the response with ``provider_fallback`` so the
+          frontend can surface "served from Gemini fallback".
+        * ``gemini`` -> direct Gemini 2.5 Flash via Emergent / Google
+          chat key.
+
+        Explicit ``provider=`` argument still wins (used by the new
+        diagnostics endpoint and tests). The ``GARMENT_VISION_PROVIDER``
+        env var is now only a *seed* used by ``eyes_override`` when no
+        DB override has been written yet.
         """
+        from app.services import eyes_override
+
         shrunk = _shrink_for_vision(image_bytes)
         b64 = base64.b64encode(shrunk).decode("ascii")
-        use_model = model or self.model
-        use_provider = (provider or self.provider or "hf").lower()
         system_prompt = SYSTEM_PROMPT + _language_directive(language)
 
-        t0 = time.perf_counter()
-        ok = False
-        last_err: str | None = None
+        # 1) Resolve the routing target.
+        if provider:
+            resolved = provider.strip().lower()
+            routing_source = "explicit"
+        else:
+            resolved = (await eyes_override.get_active_provider()).lower()
+            routing_source = "toggle"
+
         raw: str | None = None
-        try:
-            if use_provider == "hf":
-                raw = await _hf_chat_json(
-                    model=use_model,
+        used_provider: str = resolved
+        used_model: str = model or self.model
+        used_fallback: bool = False
+        fallback_reason: str | None = None
+
+        # 2) Gemma path (toggle says gemma AND a Space URL is configured).
+        if resolved == "gemma" and settings.EYES_GEMMA_SPACE_URL:
+            t0 = time.perf_counter()
+            try:
+                raw = await _call_gemma_space(
                     system_prompt=system_prompt,
                     user_text=(
                         "Analyse this garment photograph and return the "
                         "JSON object only \u2014 no commentary."
                     ),
                     image_b64_jpeg=b64,
+                    timeout=settings.EYES_GEMMA_TIMEOUT_S,
                 )
-            else:
-                chat = LlmChat(
-                    api_key=self.api_key,
-                    session_id=f"theeyes-{uuid.uuid4().hex[:12]}",
-                    system_message=system_prompt,
+                provider_activity.record(
+                    "garment-vision",
+                    ok=True,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                    extra={
+                        "provider": "gemma",
+                        "model": "gemma-4-e2b-q4_k_m",
+                        "routing_source": routing_source,
+                    },
                 )
-                chat.with_model(use_provider, use_model)
-                msg = UserMessage(
-                    text=(
-                        "Analyze this garment photograph. Return the JSON object only."
-                    ),
-                    file_contents=[ImageContent(b64)],
+                used_provider = "gemma"
+                used_model = "gemma-4-e2b-q4_k_m"
+            except Exception as exc:  # noqa: BLE001
+                provider_activity.record(
+                    "garment-vision",
+                    ok=False,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                    error=repr(exc),
+                    extra={
+                        "provider": "gemma",
+                        "fallback": "gemini",
+                        "routing_source": routing_source,
+                    },
                 )
-                raw = await chat.send_message(msg)
-            ok = True
-        except Exception as exc:  # noqa: BLE001
-            last_err = repr(exc)
-            raise
-        finally:
-            provider_activity.record(
-                "garment-vision",
-                ok=ok,
-                latency_ms=int((time.perf_counter() - t0) * 1000),
-                error=last_err,
-                extra={"provider": use_provider, "model": use_model},
+                logger.warning(
+                    "Gemma Space unavailable (%s) \u2014 falling back to Gemini.",
+                    repr(exc)[:200],
+                )
+                used_fallback = True
+                fallback_reason = repr(exc)[:200]
+                resolved = "gemini"
+                raw = None  # cascade into the Gemini branch below
+
+        # 3) Gemini path (toggle says gemini, OR Gemma path failed and
+        #    cascaded down here, OR gemma was selected but no Space URL
+        #    is configured on this pod).
+        if raw is None:
+            if not self.api_key:
+                raise RuntimeError(
+                    "Gemini Eyes path requires GEMINI_API_KEY or "
+                    "EMERGENT_LLM_KEY to be set."
+                )
+            gemini_model = model or self.model
+            chat = LlmChat(
+                api_key=self.api_key,
+                session_id=f"theeyes-{uuid.uuid4().hex[:12]}",
+                system_message=system_prompt,
             )
+            chat.with_model("gemini", gemini_model)
+            msg = UserMessage(
+                text=(
+                    "Analyze this garment photograph. Return the JSON object only."
+                ),
+                file_contents=[ImageContent(b64)],
+            )
+            t0 = time.perf_counter()
+            ok = False
+            last_err: str | None = None
+            try:
+                raw = await chat.send_message(msg)
+                ok = True
+            except Exception as exc:  # noqa: BLE001
+                last_err = repr(exc)
+                raise
+            finally:
+                extra: dict[str, Any] = {
+                    "provider": "gemini",
+                    "model": gemini_model,
+                    "routing_source": routing_source,
+                }
+                if used_fallback:
+                    extra["fallback_from"] = "gemma"
+                    extra["fallback_reason"] = fallback_reason
+                provider_activity.record(
+                    "garment-vision",
+                    ok=ok,
+                    latency_ms=int((time.perf_counter() - t0) * 1000),
+                    error=last_err,
+                    extra=extra,
+                )
+            used_provider = "gemini"
+            used_model = gemini_model
+
+        # 4) Parse + sanitise.
         parsed = _extract_json(raw or "")
         if not parsed.get("title") and parsed.get("name"):
             parsed["title"] = parsed["name"]
         if not parsed.get("title"):
             parsed["title"] = "Unnamed garment"
-        # Sanitise AI-returned enum-like values so downstream Pydantic
-        # validation never 422s on a model slip.
         parsed = _coerce_enums(parsed)
-        parsed["model_used"] = use_model
+        parsed["provider_used"] = used_provider
+        parsed["model_used"] = used_model
+        if used_fallback:
+            parsed["provider_fallback"] = {
+                "from": "gemma",
+                "to": "gemini",
+                "reason": fallback_reason,
+            }
         parsed["raw"] = {"preview": (raw or "")[:500]}
         logger.info(
-            "The Eyes OK provider=%s model=%s category=%s sub=%s item_type=%s",
-            use_provider,
-            use_model,
+            "The Eyes OK provider=%s model=%s routing=%s fallback=%s "
+            "category=%s sub=%s item_type=%s",
+            used_provider,
+            used_model,
+            routing_source,
+            used_fallback,
             parsed.get("category"),
             parsed.get("sub_category"),
             parsed.get("item_type"),

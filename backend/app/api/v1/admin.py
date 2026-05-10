@@ -277,7 +277,7 @@ async def eyes_set_override(
 
     Body::
 
-        { "provider": "gemma" | "qwen" | null }
+        { "provider": "gemma" | "gemini" | null }
 
     A null / missing / empty ``provider`` clears the override and
     reverts the pod to the env-default. Any non-allowlisted value
@@ -293,6 +293,140 @@ async def eyes_set_override(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return new_status
+
+
+# -------------------- eyes diagnostics --------------------
+# Phase O.4 — one-shot diagnostic probe for the Eyes pipeline. This
+# is the "is my custom Gemma actually serving requests right now?"
+# question answered in a single GET. It composites:
+#   * The DB toggle resolution (override + env default + active value)
+#   * The pod's vision-routing env vars (GARMENT_VISION_PROVIDER /
+#     _MODEL, EYES_PROVIDER, EYES_GEMMA_SPACE_URL)
+#   * A live HTTP HEAD/GET probe of the Gemma Space with latency
+#     and a body preview so 503/HTML "Space is in error" pages are
+#     visible without leaving the admin UI
+#   * The most recent N garment-vision provider_activity entries so
+#     callers can see whether real traffic is succeeding
+#
+# Wire this into the Developer panel later; for now ``curl`` is the
+# expected consumer (per the user's request).
+@router.get("/eyes/diagnostics")
+async def eyes_diagnostics(
+    _: dict = Depends(require_admin),
+    probe_timeout: float = Query(default=5.0, ge=0.5, le=15.0),
+) -> dict[str, Any]:
+    """Return a one-shot snapshot of the Eyes pipeline's health.
+
+    Shape::
+
+        {
+          "toggle":   { ... eyes_override.status() ... },
+          "env":      { GARMENT_VISION_PROVIDER, GARMENT_VISION_MODEL,
+                        EYES_PROVIDER, EYES_GEMMA_SPACE_URL,
+                        gemini_chat_key_set, hf_token_set },
+          "resolved": { provider, model, would_use, fallback_path,
+                        notes },
+          "gemma_space": { url, status_code, ok, latency_ms,
+                           body_preview, error },
+          "recent_calls": [ ...last 10 garment-vision activity rows... ]
+        }
+    """
+    from app.services import eyes_override
+
+    toggle_snap = await eyes_override.status()
+    active_provider = toggle_snap["active_provider"]
+
+    env_block = {
+        "GARMENT_VISION_PROVIDER": settings.GARMENT_VISION_PROVIDER,
+        "GARMENT_VISION_MODEL": settings.GARMENT_VISION_MODEL,
+        "EYES_PROVIDER": settings.EYES_PROVIDER,
+        "EYES_GEMMA_SPACE_URL": settings.EYES_GEMMA_SPACE_URL or None,
+        "EYES_GEMMA_TIMEOUT_S": settings.EYES_GEMMA_TIMEOUT_S,
+        "gemini_chat_key_set": bool(settings.gemini_chat_key),
+        "hf_token_set": bool(settings.HF_TOKEN),
+        "eyes_bearer_set": bool(
+            settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN
+        ),
+    }
+
+    # Resolved view — what would happen on the very next analyze() call?
+    notes: list[str] = []
+    fallback_path: str | None = None
+    if active_provider == "gemma":
+        if settings.EYES_GEMMA_SPACE_URL:
+            would_use = "gemma"
+            fallback_path = "gemini (on Gemma Space failure)"
+        else:
+            would_use = "gemini"
+            notes.append(
+                "Toggle is set to 'gemma' but EYES_GEMMA_SPACE_URL is not "
+                "configured on this pod — every request will silently use "
+                "the Gemini fallback."
+            )
+    else:
+        would_use = "gemini"
+
+    resolved_block = {
+        "provider": would_use,
+        "model": (
+            settings.GARMENT_VISION_MODEL
+            if would_use == "gemini"
+            else "gemma-4-e2b-q4_k_m"
+        ),
+        "routing_source": toggle_snap["source"],  # "db" | "env"
+        "fallback_path": fallback_path,
+        "notes": notes,
+    }
+
+    # Live Gemma Space probe — GET /health with a tight timeout. We
+    # don't POST /predict because that would consume Gemma capacity
+    # on every diagnostics call and risk a token-quota hit. /health
+    # is what the HF Space exposes for liveness.
+    gemma_url = (settings.EYES_GEMMA_SPACE_URL or "").rstrip("/")
+    space_block: dict[str, Any] = {
+        "url": gemma_url or None,
+        "status_code": None,
+        "ok": False,
+        "latency_ms": None,
+        "body_preview": None,
+        "error": None,
+    }
+    if gemma_url:
+        import time as _t
+
+        # Some HF Spaces don't expose /health — fall back to the root
+        # gradio page on 404. Both responses are short.
+        async def _probe(path: str) -> tuple[int, str, float]:
+            t0 = _t.perf_counter()
+            async with httpx.AsyncClient(timeout=probe_timeout) as cli:
+                r = await cli.get(f"{gemma_url}{path}")
+            return r.status_code, r.text[:300], (_t.perf_counter() - t0) * 1000
+
+        try:
+            code, body, latency = await _probe("/health")
+            if code == 404:
+                code, body, latency = await _probe("/")
+            space_block["status_code"] = code
+            space_block["ok"] = 200 <= code < 300
+            space_block["latency_ms"] = int(latency)
+            space_block["body_preview"] = body
+        except Exception as exc:  # noqa: BLE001
+            space_block["error"] = repr(exc)[:300]
+
+    # Most-recent traffic — the source of truth for "is Gemma actually
+    # answering, even if /health says ok?".
+    recent_all = provider_activity.snapshot("garment-vision").get(
+        "garment-vision", []
+    )
+    recent_calls = recent_all[-10:]
+
+    return {
+        "toggle": toggle_snap,
+        "env": env_block,
+        "resolved": resolved_block,
+        "gemma_space": space_block,
+        "recent_calls": recent_calls,
+    }
 
 
 # -------------------- trend-scout --------------------

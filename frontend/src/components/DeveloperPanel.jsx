@@ -9,11 +9,11 @@
  *
  * Capabilities:
  *  - Read the active Eyes provider on the current pod ("gemma" or
- *    "qwen") and surface where it came from (env default vs DB
+ *    "gemini") and surface where it came from (env default vs DB
  *    override) along with the URL-configured / token-set booleans
  *    so admins can confirm the pod actually has the Gemma endpoint
  *    wired before flipping the switch.
- *  - Toggle Qwen <-> Gemma at runtime. Writes to
+ *  - Toggle Gemini <-> Gemma at runtime. Writes to
  *    ``config.{_id: 'eyes_provider'}`` via ``POST /api/v1/admin/eyes``
  *    so the choice survives a backend container restart and is
  *    picked up within ~5 s by every analyse call.
@@ -116,7 +116,7 @@ export function DeveloperPanel({ user }) {
   // Optimistic value for the Switch while a POST is in flight.
   const visualProvider = pending !== null
     ? pending
-    : (status?.active_provider || 'qwen');
+    : (status?.active_provider || 'gemini');
   const isGemma = visualProvider === 'gemma';
 
   const lastCall = status?.last_call;
@@ -148,10 +148,11 @@ export function DeveloperPanel({ user }) {
                 <div>
                   <div className="text-sm font-medium">Eyes vision provider</div>
                   <div className="text-xs text-muted-foreground">
-                    Routes the closet analyzer between the legacy
-                    Qwen-VL cloud path and the self-hosted Gemma-4
-                    E2B endpoint. Override is persisted in this pod's
-                    Mongo and survives container restarts.
+                    Routes the closet analyzer between Google's Gemini
+                    2.5 Flash and the self-hosted Gemma-4 E2B endpoint.
+                    Override is persisted in this pod's Mongo and
+                    survives container restarts. If Gemma is unreachable,
+                    the request automatically falls back to Gemini.
                   </div>
                 </div>
                 <Button
@@ -186,7 +187,7 @@ export function DeveloperPanel({ user }) {
                 <div className="text-sm">
                   <span className="text-muted-foreground">Active:</span>{' '}
                   <span className="font-semibold" data-testid="developer-eyes-active">
-                    {visualProvider === 'gemma' ? 'Gemma-4 E2B (self-hosted)' : 'Qwen-VL (cloud)'}
+                    {visualProvider === 'gemma' ? 'Gemma-4 E2B (self-hosted)' : 'Gemini 2.5 Flash (Google)'}
                   </span>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
                     Source: {status?.source === 'db' ? 'DB override' : 'env default'}
@@ -195,11 +196,11 @@ export function DeveloperPanel({ user }) {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className={`text-[11px] uppercase tracking-wide ${isGemma ? 'text-muted-foreground' : 'text-foreground'}`}>
-                    Qwen
+                    Gemini
                   </span>
                   <Switch
                     checked={isGemma}
-                    onCheckedChange={(v) => setProvider(v ? 'gemma' : 'qwen')}
+                    onCheckedChange={(v) => setProvider(v ? 'gemma' : 'gemini')}
                     disabled={saving || loading || !status}
                     aria-label="Toggle Eyes provider"
                     data-testid="developer-eyes-toggle"

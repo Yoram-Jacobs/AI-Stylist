@@ -350,3 +350,279 @@ recreate the backend (`up -d --force-recreate backend`), curl the
 smoke-test endpoints from inside the backend container, then flip the
 Eyes provider to `gemma` from the Profile panel and trigger a real
 analyse from the UI to close out Phase O.3.
+---
+
+# Phase O.4 — DressApp Shopping Assistant (Chrome Extension)
+
+This phase delivered the **DressApp Shopping Assistant**, a Manifest V3
+Chrome Extension that recommends clothing sizes in real-time from any
+shopping site. Architecture: in-page **Floating Action Button (FAB)**
++ **resizable crop overlay** → cropped JPEG → backend
+`/api/v1/sizes/analyze-chart` → **Gemini 2.5 Flash** OCR + sizing in
+one shot → recommendation overlay with anomaly warnings.
+
+The session pivoted through three architectural dead-ends before
+landing on the screenshot-only flow that's now in production. Each
+pivot was forced by a failure that the previous design couldn't
+recover from. As before, the goal of writing this down is so the
+next engineer doesn't re-litigate decisions whose causes have already
+been buried.
+
+---
+
+## 1. Starting state
+
+* Manifest V3 extension scaffold existed (`/app/chrome-extension/`)
+  with a popup, service worker, content scripts, and Vite + crxjs
+  build pipeline.
+* Token-handoff auth via a content script on
+  `dressapp.co/extension/connect` pushing `{token, user, backend}`
+  into `chrome.storage.local`.
+* Backend `/api/v1/sizes/analyze-chart` was **bespoke**: it tried
+  Gemma Space → Qwen-VL fallback for image OCR, with a per-store HTML
+  adapter set (Zara, ASOS, Shein, H&M, Amazon, AliExpress, …).
+
+---
+
+## 2. Failure trail — three architectural dead-ends
+
+| # | Approach | Symptom | Root cause | What replaced it |
+|---|---|---|---|---|
+| 1 | **Per-store HTML adapters** | New stores (AliExpress modal in iframe) didn't match any selector → silent failure | Every adapter was a hand-written CSS-selector ladder. Sites change weekly; the maintenance load was unbounded | Generic auto-detect + manual crop UX |
+| 2 | **Auto-detect chart element + screenshot** | Detection still missed div-based size guides on AliExpress/Shein; permission-less screenshot blocked by Chrome | `chrome.tabs.captureVisibleTab` requires `<all_urls>` host permission OR `activeTab` (only granted on toolbar-icon clicks, NOT in-page FAB clicks) | Resizable crop overlay + universal `<all_urls>` host permission |
+| 3 | **Hybrid HTML + screenshot pipeline** | Heuristic took 60s to fail, vision took another 60s; net 2-minute round-trip per try | Backend serialised Gemma-vision attempts (`vision_disabled=true` in Phase 1) → HF fallback (Qwen-VL endpoint not on this deploy) → no Gemini | **Screenshot-only** ship to Gemini 2.5 Flash directly |
+
+The final architecture (Phase 4) is the thing the user asked for at
+the start:
+> *"we can't write separate code for every online fashion store"*
+
+---
+
+## 3. Final architecture
+
+### 3.1. Extension capture flow
+
+1. User clicks the **floating FAB** on any page (auto-injected
+   via content script with `<all_urls>` matches) or via toolbar icon.
+2. **Resizable crop overlay** mounts. User drags a box around the
+   size chart, hits **Apply**.
+3. Content script captures viewport via `tabs.captureVisibleTab`
+   (background SW), crops it canvas-side to the user's box,
+   strips the `data:` prefix → base64 JPEG.
+4. POSTs only `{ chart_screenshot_b64, garment_type, store, page_url,
+   page_title }` to `/api/v1/sizes/analyze-chart`. **No HTML, no
+   text, no DOM tricks.**
+
+### 3.2. Backend pipeline (`/app/backend/app/api/v1/sizes.py`)
+
+* **Auth + measurement load** via `get_current_user` →
+  `user.body_measurements` blob.
+* **Server-side alias expansion** (`_expand_measurement_aliases`):
+  `chest=92` fans out to `chest, bust, bust_size,
+  chest_circumference`; `shoulder=44` → `shoulder, shoulders,
+  shoulder_width, across_shoulder`; etc. So the JSON sent to Gemini
+  always contains an exact-name match for any chart-side wording.
+* **Three-section user prompt** so the model sees clear
+  separation: `USER BODY CIRCUMFERENCES`, `USER CLOTHING SIZES THEY
+  NORMALLY BUY`, `USER HEIGHT / WEIGHT CONTEXT`.
+* **Direct Gemini 2.5 Flash call** via
+  `emergentintegrations.llm.chat.LlmChat` with `ImageContent`. We
+  deliberately bypass the Eyes/Gemma chain — Phase-1 Gemma is
+  `vision_disabled=true`, so an image payload always produces empty
+  output and a 30-60 s wall-clock penalty.
+* **30 s timeout cap** (`asyncio.wait_for`), provider activity
+  logging on success/failure.
+* **Optional heuristic-first** for back-compat HTML/text payloads
+  (free <50 ms win when the caller still sends a `<table>`).
+
+### 3.3. System prompt rules (the hardest part)
+
+The prompt is the product. Four explicit rules, in priority order:
+
+1. **OCR the chart** — extract headers, units, size labels, cell
+   values; recognise range cells (`86-90`) vs. single-number cells.
+2. **Circumference vs. length distinction:**
+    * **Circumferences** (chest/bust/waist/hip/shoulder/neck): user
+      value must fit inside the garment dimension. Standard
+      bigger-on-tie rule.
+    * **Length** (sleeve/inseam/outseam/length/arm_length): user
+      value is treated as their **full-body MAX** (full arm, full
+      leg). A garment shorter than this is just a short-sleeve /
+      cropped / mini garment — **NOT** a misfit. No anomaly flag.
+3. **Anomaly detection:**
+    * **Only check circumferences.** Length values are NEVER
+      flagged for being "too high".
+    * Trigger when user value > chart maximum AT ALL (no size can
+      fit them) OR < min by 15%+. Skip the column when picking the
+      size, drop it from `matched_columns`, append a friendly
+      `warnings` entry asking the user to re-measure.
+4. **Clothing-size fallback:** when body circumferences are empty
+   but `shirt_size` / `pants_size` / `shoe_size` is set, use that
+   directly as the recommendation (confidence 0.55-0.80, set
+   `matched_columns=["shirt_size"]`, recommend re-measuring for a
+   tighter fit).
+
+### 3.4. Recommendation overlay
+
+* Confidence badge (low/mid/high) + recommended size + reasoning
+  paragraph + **amber warnings stack** (each warning gets its own
+  row with a `!` badge, `role="alert"` for screen readers, stable
+  `data-testid="dressapp-overlay-warning-N"`).
+* Alternatives row (`{size, fit: snug|loose}`) underneath.
+
+### 3.5. Auth flow (token-handoff)
+
+* Popup `Connect to DressApp` opens
+  `https://dressapp.co/extension/connect?ext_id=...` in a new tab.
+* Auth-bridge content script (only injected on
+  `dressapp.co/extension/connect*` per manifest) calls
+  `chrome.runtime.sendMessage` with `{ token, user, backend }`.
+* SW persists to `chrome.storage.local`. All future API calls go
+  through SW → `Authorization: Bearer <token>` → registered
+  backend.
+
+---
+
+## 4. Bug trail — what bit us, what fixed it
+
+Each entry below corresponds to a real failure observed during
+testing. The column "deploy gate" indicates whether the fix only
+takes effect on a fresh prod deploy.
+
+| # | Symptom | Root cause | Fix | Files | Deploy gate |
+|---|---|---|---|---|---|
+| B1 | "AI sizing engines couldn't read this chart (gemma: ...; qwen: ...)" — 60 s timeout | Bespoke Gemma → Qwen waterfall, both unavailable on this deploy | Replaced with direct Gemini 2.5 Flash call | `sizes.py`, `garment_vision.py` | prod redeploy |
+| B2 | Heuristic took 60 s to fail before vision was tried | Synchronous waterfall + Gemma `vision_disabled` empty-reply hang | Heuristic-first only when HTML present; vision call has hard 30 s cap; skip Gemma for image OCR (vision_disabled known state) | `sizes.py` | prod redeploy |
+| B3 | "No clear match — user body measurements were not provided" while the user actually had `chest=92` saved | Model wouldn't infer `chest`↔`Bust Size` semantic equivalence on its own | Server-side alias expansion (chest fans to bust, bust_size, …) so the JSON contains a literal name match | `sizes.py` (`_expand_measurement_aliases`) | prod redeploy |
+| B4 | Same "no measurements" message on a profile with only `height`, `weight`, `shirt_size` | No fallback rule for the all-too-common case where a user has shirt_size but no tape-measure data | Added **CLOTHING-SIZE FALLBACK** rule: shirt_size → primary signal for tops, pants_size for bottoms, shoe_size for footwear, height/weight as last-resort low-confidence | `sizes.py` system prompt | prod redeploy |
+| B5 | One typo'd circumference (`shoulders=55` on a chart maxing at 50) blocked the recommendation entirely | Strict "all columns must fit" logic | Anomaly-detection rule: skip the offending column, recommend from the others, return `warnings` so the user knows to re-measure | `sizes.py` system prompt + `AnalyzeChartOut.warnings` | prod redeploy |
+| B6 | Short-sleeve T-shirt sleeve (19 cm) flagged as anomaly because user's full-arm `sleeve=46 cm` "exceeds chart range" | Anomaly rule didn't differentiate column types | Length columns (sleeve/inseam/outseam/length) excluded from "too high" anomaly checks; user value is treated as MAX, garment can be shorter | `sizes.py` system prompt | prod redeploy |
+| B7 | Extension's `<all_urls>` permission not granted after FAB click on AliExpress | `tabs.captureVisibleTab` requires `<all_urls>` OR `activeTab`, and `activeTab` is only granted on **toolbar icon clicks**, not in-page FAB clicks. Narrow `*.aliexpress.com` host permission insufficient | Moved `<all_urls>` from `optional_host_permissions` → required `host_permissions` | `manifest.json` | extension reinstall |
+| B8 | "Extension context invalidated" overlay after the user reloaded the extension while a tab was open | Orphaned content script in stale tab; classic MV3 lifecycle issue | Detect the error in `_captureViewportWithPermission`, return `{stale_context: true}`, render a tailored "DressApp was just updated — reload this tab" overlay with a Retry button that calls `location.reload()` | `service-worker.js`, `content/content.js` | extension reinstall |
+| B9 | Popup showed user as `dev@dressapp.io` even though stored token was being silently wiped on `/me` 401 | Popup's `refresh()` showed `phase: 'connected'` with stale cached `r.user` even when `/me` failed | On 401-shaped error from `/me`, call `CLEAR_AUTH`, transition to `disconnected`, show a yellow "session no longer valid" notice | `popup/Popup.jsx` | extension reinstall |
+| B10 | Stale `backend` URL (preview) in `chrome.storage` survived a "Disconnect" and kept routing API calls to the wrong host | `handleClearAuth` only removed `token, user, issued_at` — `backend` lingered | Wipe `backend` too on disconnect; **also** added a registrable-domain check in `getBackend()` that drops any stored backend whose domain doesn't match the build-time default (and wipes the token+user with it) | `service-worker.js`, `lib/api.js` | extension reinstall |
+| B11 | Newly built prod-targeted extension still authenticated as preview's `dev@dressapp.io` | Manifest's `externally_connectable.matches` and auth-bridge `content_scripts.matches` still listed `*.preview.emergentagent.com/*`. Plus the user already had a `dressapp.co` browser session as dev → handoff used that session | (a) Removed all preview URLs from `manifest.json`. (b) Added "Switch account" button to popup that opens `?force=1` connect URL → frontend clears localStorage on mount → user sees fresh login page | `manifest.json`, `popup/Popup.jsx`, `pages/ExtensionConnect.jsx` | both deploys |
+| **B12** ⚠ | **CRITICAL: a partial PATCH to `/api/v1/users/me` was wiping every body-measurement field not in the payload, on every request, in production** | Mongo `$set: { body_measurements: <new dict> }` wholesale replaces the embedded document — it doesn't merge nested fields. Pre-existing latent bug surfaced after multi-test cycles | Switch to dot-notation `$set` (`body_measurements.chest = 92`) for every nested-dict field in `_MERGEABLE_DICT_FIELDS` — `body_measurements`, `address`, `units`, `hair`, `home_location`, `professional`, `style_profile`, `cultural_context` | `users.py` | **prod redeploy ASAP** |
+
+---
+
+## 5. Files of reference
+
+```
+backend/
+  app/api/v1/sizes.py               (full rewrite — Gemini-direct vision pipeline)
+  app/api/v1/users.py               (B12 dot-notation $set for nested dicts)
+  app/services/garment_vision.py    (used by closet flow; size endpoint no longer routes through it)
+chrome-extension/
+  manifest.json                     (host_permissions: <all_urls>, dressapp.co only)
+  src/content/content.js            (FAB, crop overlay, screenshot capture, error UX)
+  src/content/overlay.js            (recommendation overlay + warnings render)
+  src/content/content.css           (.dressapp-warnings amber palette)
+  src/content/auth-bridge.js        (postMessage handoff on dressapp.co/extension/connect)
+  src/background/service-worker.js  (auth state, captureVisibleTab, handlers)
+  src/popup/Popup.jsx               (refresh-with-401-detection, Switch account, backend host display)
+  src/lib/api.js                    (registrable-domain check; trusted backend resolution)
+  dressapp-extension.zip            (72 KB, prod-only, ready to install)
+frontend/
+  src/pages/ExtensionConnect.jsx    (force=1 handler for "Switch account")
+  src/lib/auth.jsx                  (logout is local-only — no backend call)
+  src/components/ProfileDetailsCard.jsx  (still has "always-active Save" UX bug — backlog)
+docs/
+  chat_summary.md                   (this file)
+```
+
+---
+
+## 6. Outstanding work — handoff for the next engineer
+
+### Backlog (P1)
+
+* **"Smartass" size charts (Zara, H&M, et al.).** These sites
+  serve charts in modal iframes, with size names that don't match
+  the master JSON the same site uses for product-page filters.
+  Zara's `XS-M-L-XL` modal labels resolve to `02-04-06-08` SKUs
+  internally. Need a per-site **chart-reconciliation** layer that
+  cross-references the chart's row labels against the site's own
+  size-selector elements, so the recommendation aligns with what
+  the user can actually click on the product page.
+* **Mobile deployment.** The current Chrome Extension architecture
+  doesn't run on mobile Safari/Chrome. Two paths:
+  (a) Capacitor wrapper with a custom JS bridge for screenshot
+  capture (mobile DOMs are different — needs a long-press +
+  share-sheet flow);
+  (b) Native iOS/Android share-extension that posts the screenshot
+  directly to `/api/v1/sizes/analyze-chart`. Prefer (b) — much
+  simpler, but two codebases.
+
+### Backlog (P2)
+
+* Profile form **"Save changes" always-active button**: track form
+  dirtiness against a snapshot of loaded values; only enable Save
+  when something actually differs; reset the snapshot on
+  successful PATCH.
+* **Per-store reconciliation cache** (database-side): when a chart
+  is successfully analysed, store the OCR'd column headers + row
+  labels keyed by store + chart-image hash. Future requests for the
+  same chart skip the LLM call entirely.
+* **Analytics**: log `(store, garment_type, recommended_size,
+  confidence, source, elapsed_ms)` so we can spot regressions when
+  Gemini changes underneath us.
+
+### Backlog (P3)
+
+* Backend **logout endpoint** that clears the dressapp.co session
+  cookie and 302s to `returnTo`. The current "Switch account" flow
+  uses a localStorage clear via `?force=1` — works, but a
+  server-side cookie clear would be more thorough if/when sessions
+  ever go server-side.
+* **Provider activity dashboard** for size-chart calls (Gemini
+  latency p50/p95, error rate, fallback hit rate).
+
+### Verified production behaviour (last session)
+
+```
+input:  AliExpress short-sleeve T-shirt size guide (in inches)
+        + lokoprod profile (chest=92, shoulders=55 (deliberate typo),
+          sleeve=46, shirt_size=M, ...)
+
+output: { recommended_size: "M",
+          confidence: 0.9,
+          matched_columns: ["bust", "arm_length"],
+          reasoning: "Based on your bust measurement (92 cm), size M
+                      provides a comfortable fit. The garment's
+                      sleeve length (19.00 cm) indicates it is a
+                      short-sleeved top, which is compatible with
+                      your full arm length (59 cm).",
+          warnings: ["Your shoulders (55 cm) looks higher than
+                      expected for this kind of garment. Please
+                      re-measure — DressApp ignored it for this
+                      recommendation."],
+          source: "gemini",
+          elapsed_ms: ~30000 }
+```
+
+Anomaly skipped, recommendation made from the valid `chest=92`,
+short-sleeve compatibility correctly recognised, user told to
+re-measure the obviously-wrong shoulder value. This is the target
+UX shape for every store going forward.
+
+---
+
+## 7. Final action items for the user
+
+1. **Push & deploy the data-loss fix** (B12) — `users.py`. **Do
+   this first.** Until it's live, every partial profile-form save
+   continues to wipe fields.
+2. **Push & deploy** the rest of `sizes.py` (B1-B6) and the
+   `ExtensionConnect.jsx` `force=1` handler.
+3. **Reload the new extension** from
+   `/app/chrome-extension/dressapp-extension.zip` (72 KB,
+   production-only). Approve `<all_urls>`. Check the popup shows
+   `via dressapp.co`.
+4. Re-enter the body measurements that B12 wiped from your prod
+   profile — there's no way to recover them server-side.
+5. Run a real-world test on AliExpress / Zara / H&M with the new
+   build, record the recommendation + timing + any new failure
+   modes, and log them into the **"smartass" size carts** P1
+   backlog item before the next session.
+
