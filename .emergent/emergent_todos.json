@@ -1,14 +1,34 @@
 [
   {
-    "content": "[CRITICAL] Investigate why body measurements are deleted on logout — recent commits, logout flow, PATCH endpoints",
+    "content": "[1/8] Map provider-toggle architecture",
     "status": "completed"
   },
   {
-    "content": "Restore lokoprod's measurements if affected (production, requires user to redo)",
+    "content": "[2/8] Verify Eyes (Gemma) endpoint is reachable from the preview backend (network, healthcheck, model file loaded)",
+    "status": "completed"
+  },
+  {
+    "content": "[3/8] Trace request paths: closet AddItem flow, size-chart flow, outfit/recommendations — which provider each one ACTUALLY uses today",
+    "status": "in_progress"
+  },
+  {
+    "content": "[4/8] Verify the Developer/Internal switch wires through to the runtime (admin endpoint round-trip)",
     "status": "pending"
   },
   {
-    "content": "Add 'Switch account' button to popup with backend logout endpoint",
-    "status": "completed"
+    "content": "[5/8] Check provider_activity logs / response telemetry — are responses tagged with the actual provider used?",
+    "status": "pending"
+  },
+  {
+    "content": "[6/8] Inspect frontend: does any UI surface 'analyzed by gemma vs gemini'? If not, is there hidden telemetry to confirm?",
+    "status": "pending"
+  },
+  {
+    "content": "[7/8] Run live A/B test: force EYES_PROVIDER=gemma and EYES_PROVIDER=gemini in turn, compare outputs on the same input",
+    "status": "pending"
+  },
+  {
+    "content": "[8/8] Write findings report with concrete remediation steps",
+    "status": "pending"
   }
 ]
