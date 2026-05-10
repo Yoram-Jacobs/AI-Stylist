@@ -505,7 +505,14 @@ async def predict(req: PredictIn) -> PredictOut:
     msg = choice.get("message") or {}
     usage = res.get("usage") or {}
     return PredictOut(
-        output=str(msg.get("content") or ""),
+    # Models trained with `thinking = 1` may stash the actual JSON inside
+    # ``reasoning_content`` and leave ``content`` empty when the response
+    # is cut off mid-think. Capture both so the backend never sees ''.
+    content = msg.get("content") or ""
+    if not content:
+        content = msg.get("reasoning_content") or ""
+        return PredictOut(
+            output=str(content),
         finish_reason=choice.get("finish_reason"),
         tokens_prompt=int(usage.get("prompt_tokens") or 0),
         tokens_completion=int(usage.get("completion_tokens") or 0),
