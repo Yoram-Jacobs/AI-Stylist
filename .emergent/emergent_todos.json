@@ -1,22 +1,14 @@
 [
   {
-    "content": "Update eyes_override.py: valid providers gemma|gemini (drop qwen)",
+    "content": "Patch eyes/main.py: capture reasoning_content as fallback for empty content",
     "status": "completed"
   },
   {
-    "content": "Refactor garment_vision.py analyze() so DB toggle drives gemma vs gemini routing",
+    "content": "Patch backend/garment_vision.py: bump max_tokens to 2400 on Gemma path",
     "status": "completed"
   },
   {
-    "content": "Update DeveloperPanel.jsx UI: Qwen -> Gemini labels and toggle values",
-    "status": "completed"
-  },
-  {
-    "content": "Add GET /api/v1/admin/eyes/diagnostics endpoint",
-    "status": "completed"
-  },
-  {
-    "content": "Smoke-test endpoints + clarify HF Space fix is on user's side",
+    "content": "Lint both files + smoke-test backend",
     "status": "completed"
   }
 ]

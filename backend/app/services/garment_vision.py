@@ -1022,6 +1022,14 @@ class GarmentVisionService:
                         "JSON object only \u2014 no commentary."
                     ),
                     image_b64_jpeg=b64,
+                    # The Gemma-4 fine-tune is a thinking model: it spends
+                    # ~600-1200 tokens reasoning inside ``<|think|> ...
+                    # </think>`` before producing the JSON. Combined with
+                    # the 18-field schema (~600 tokens of valid output),
+                    # the default 900-token budget is too tight and the
+                    # response gets cut off mid-think with empty
+                    # ``content``. 2400 leaves comfortable headroom.
+                    max_tokens=2400,
                     timeout=settings.EYES_GEMMA_TIMEOUT_S,
                 )
                 provider_activity.record(
