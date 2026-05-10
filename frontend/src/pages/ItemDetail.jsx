@@ -17,6 +17,7 @@ import {
   X,
   CheckCircle2,
   Camera,
+  Images,
   QrCode,
   Leaf,
   Globe2,
@@ -439,7 +440,17 @@ export default function ItemDetail() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const photoInputRef = useRef(null);
+  // Phase Z3 — separate hidden input for direct-camera capture, mirrors
+  // the Add-Item UX. ``capture="environment"`` opens the rear camera
+  // on mobile; on desktop it harmlessly falls back to a file picker so
+  // the button is safe to surface everywhere. We keep TWO inputs (vs.
+  // one) so the same DOM element doesn't have to flip its ``capture``
+  // attribute between clicks — that's racy on some Android browsers
+  // and causes the camera to open even when the user wanted the
+  // library picker.
+  const cameraInputRef = useRef(null);
   const onPickPhoto = () => photoInputRef.current?.click();
+  const openCameraCapture = () => cameraInputRef.current?.click();
   const onPhotoFileChosen = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -772,44 +783,84 @@ export default function ItemDetail() {
                     variant="default"
                     size="sm"
                     className="rounded-xl mt-1"
-                    onClick={onPickPhoto}
+                    onClick={openCameraCapture}
                     disabled={uploadingPhoto}
-                    data-testid="item-detail-add-photo-btn"
+                    data-testid="item-detail-take-photo-btn"
                   >
                     {uploadingPhoto ? (
                       <Loader2 className="h-4 w-4 me-2 animate-spin" />
                     ) : (
                       <Camera className="h-4 w-4 me-2" />
                     )}
+                    {t('itemDetail.photo.takeLabel', { defaultValue: 'Take photo' })}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl"
+                    onClick={onPickPhoto}
+                    disabled={uploadingPhoto}
+                    data-testid="item-detail-add-photo-btn"
+                  >
+                    <Images className="h-4 w-4 me-2" />
                     {t('itemDetail.photo.addLabel')}
                   </Button>
                 </div>
               )}
             </AspectRatio>
-            {/* Replace photo button (subtle, shown only when an image exists) */}
+            {/* Replace photo controls (subtle pill row, shown only when an image exists).
+                Mirrors the no-image state's two-button choice so the user always has
+                "Take photo" (camera) and "Choose from library" (gallery) at hand. */}
             {preferredImage && (
-              <button
-                type="button"
-                onClick={onPickPhoto}
-                disabled={uploadingPhoto}
-                className="absolute bottom-3 end-3 inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary transition-colors disabled:opacity-60"
-                data-testid="item-detail-replace-photo-btn"
-              >
-                {uploadingPhoto ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Camera className="h-3 w-3" />
-                )}
-                {t('itemDetail.photo.replaceLabel')}
-              </button>
+              <div className="absolute bottom-3 end-3 inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={openCameraCapture}
+                  disabled={uploadingPhoto}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary transition-colors disabled:opacity-60"
+                  data-testid="item-detail-take-photo-replace-btn"
+                  aria-label={t('itemDetail.photo.takeLabel', { defaultValue: 'Take photo' })}
+                >
+                  {uploadingPhoto ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Camera className="h-3 w-3" />
+                  )}
+                  {t('itemDetail.photo.takeLabel', { defaultValue: 'Take photo' })}
+                </button>
+                <button
+                  type="button"
+                  onClick={onPickPhoto}
+                  disabled={uploadingPhoto}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-background/90 backdrop-blur border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-secondary transition-colors disabled:opacity-60"
+                  data-testid="item-detail-replace-photo-btn"
+                  aria-label={t('itemDetail.photo.replaceLabel')}
+                >
+                  <Images className="h-3 w-3" />
+                  {t('itemDetail.photo.replaceLabel')}
+                </button>
+              </div>
             )}
-            {/* Hidden file input for add/replace photo */}
+            {/* Hidden inputs — one for the library picker, one for direct
+                camera capture. Separate elements (rather than flipping a
+                single input's ``capture`` attr) avoid race conditions on
+                Android where the wrong dialog can open. */}
             <input
               ref={photoInputRef}
               type="file"
               accept="image/*"
               className="sr-only"
               data-testid="item-detail-photo-input"
+              onChange={onPhotoFileChosen}
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              data-testid="item-detail-camera-input"
               onChange={onPhotoFileChosen}
             />
             {hasReconstruction && (

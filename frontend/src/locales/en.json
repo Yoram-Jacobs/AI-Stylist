@@ -287,6 +287,7 @@
     },
     "photo": {
       "addLabel": "Add photo",
+      "takeLabel": "Take photo",
       "replaceLabel": "Replace photo",
       "subtitleEmpty": "This item has no photo yet — take or upload one. Use Clean background and Analyse afterwards if you want a fresh cutout / form refill.",
       "subtitleReplace": "Upload a new photo. The original is saved as-is — use Clean background and Analyse afterwards to refresh the cutout and fields.",
