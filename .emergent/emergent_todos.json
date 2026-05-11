@@ -1,22 +1,26 @@
 [
   {
-    "content": "Extend _extract_json to handle JSON arrays",
+    "content": "Update SYSTEM_PROMPT for Option A — support single object OR array of objects",
     "status": "completed"
   },
   {
-    "content": "Update analyze() to take first item when array is returned + log warning",
+    "content": "Define EYES_JSON_SCHEMA constant matching the 18-field shape",
     "status": "completed"
   },
   {
-    "content": "Add language-aware user_text helper and wire into both Gemma + Gemini paths",
+    "content": "Pass json_schema in _call_gemma_space payload",
     "status": "completed"
   },
   {
-    "content": "Lint + restart backend + smoke test",
+    "content": "Add switchable `think` parameter through analyze/analyze_outfit/_handle_already_cropped/_analyse_crops/_analyse_one_crop",
     "status": "completed"
   },
   {
-    "content": "Update plan.md follow-ups",
+    "content": "Lint, restart backend, schema sanity test",
     "status": "completed"
+  },
+  {
+    "content": "Update dressapp-eyes proxy main.py on VPS to forward json_schema + enable_thinking (USER ACTION REQUIRED)",
+    "status": "pending"
   }
 ]

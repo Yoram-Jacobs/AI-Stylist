@@ -63,19 +63,31 @@ async def _call_gemma_space(
     max_tokens: int = 2400,
     temperature: float = 0.1,
     timeout: float | None = None,
+    json_schema: dict[str, Any] | None = None,
+    think: bool = False,
 ) -> str:
     """Phase O.3 — call the self-hosted Gemma-4 E2B HF Space.
 
     The Space exposes a FastAPI ``/predict`` endpoint that wraps
-    llama-cpp-python. Phase 1 deploys a text-only Q4_K_M (no mmproj),
-    so the image bytes are sent for forward-compat but the Space
-    silently sets ``vision_disabled: true`` until an mmproj-*.gguf is
-    uploaded to the model repo (Phase 2).
+    llama-cpp-python / llama-server.
+
+    Optional payload knobs (the proxy ignores unknown fields, so older
+    builds remain compatible):
+
+    * ``json_schema``  — when given, the proxy is expected to forward
+      it to llama-server as ``response_format={"type":"json_schema",
+      "json_schema":{...}}`` to grammar-constrain the output.
+    * ``think``        — when False (default for the closet AddItem
+      flow), the proxy should pass
+      ``--chat-template-kwargs {"enable_thinking": false}`` /
+      ``--reasoning-budget 0`` to llama-server (the current
+      ``dressapp-eyes`` container already launches with these defaults).
+      When True, callers wanting the model to "think" before
+      answering (e.g. Brain experiments) can flip it on per request.
 
     Failures here are surfaced as ``RuntimeError`` so the outer
-    routing in ``_hf_chat_json`` can swap to the Qwen / HF / Gemini
-    fallback. That keeps AddItem working even when the free-tier
-    Space is sleeping or 5xxing.
+    routing can swap to the Gemini fallback. That keeps AddItem
+    working even when the Space is sleeping or 5xxing.
     """
     space_url = (settings.EYES_GEMMA_SPACE_URL or "").rstrip("/")
     if not space_url:
@@ -91,7 +103,26 @@ async def _call_gemma_space(
         # Trigger llama.cpp grammar-constrained JSON when the Space
         # supports it; older builds ignore the flag harmlessly.
         "json_mode": True,
+        # Switchable reasoning. The current dressapp-eyes container
+        # launches llama-server with enable_thinking=false; we still
+        # send the flag every call so a future proxy build can honour
+        # per-request overrides without redeploys.
+        "enable_thinking": bool(think),
+        "think": bool(think),  # alias for forward-compat
     }
+    if json_schema is not None:
+        # The dressapp-eyes proxy should forward this to llama-server's
+        # OpenAI-compatible response_format. Unknown to older proxies
+        # → ignored harmlessly.
+        payload["json_schema"] = json_schema
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "eyes_garment_response",
+                "strict": True,
+                "schema": json_schema,
+            },
+        }
     headers: dict[str, str] = {"Content-Type": "application/json"}
     # Bearer auth between backend and the Eyes service. Prefer the
     # dedicated EYES_API_TOKEN (used on the self-hosted Hetzner deploy
@@ -267,14 +298,19 @@ async def _hf_chat_json(
 
 
 SYSTEM_PROMPT = (
-    "You are The Eyes \u2014 DressApp's visual garment analyst. You look at a "
-    "single clothing photo and describe it in exhaustive, merchandisable "
-    "detail. Your output is used to auto-fill an Add-Item form that a user "
-    "will review, so be confident but never invent sensitive claims (e.g. "
-    "do not guess a specific brand unless clearly visible; leave brand "
-    "blank otherwise).\n\n"
-    "Return ONLY a JSON object with the following shape (all keys optional "
-    "except `title`):\n"
+    "You are The Eyes \u2014 DressApp's visual garment analyst. You look at "
+    "a clothing photograph (which may contain one or more garments) and "
+    "describe each item in exhaustive, merchandisable detail. Your output "
+    "is used to auto-fill an Add-Item form that a user will review, so be "
+    "confident but never invent sensitive claims (e.g. do not guess a "
+    "specific brand unless clearly visible; leave brand blank otherwise).\n\n"
+    "Return ONLY a JSON value with one of two shapes:\n"
+    "  \u2022 a single JSON object (when exactly one garment is visible), or\n"
+    "  \u2022 a JSON array of such objects (when multiple garments are visible).\n"
+    "If no garment is present, return an empty array `[]`. Never wrap the "
+    "result in extra commentary or markdown.\n\n"
+    "Each garment object has the following shape (all keys optional except "
+    "`title`):\n"
     "{\n"
     '  "name": string,                     // short friendly descriptor, 2\u20135 words, e.g. "Cream Linen Blazer"\n'
     '  "title": string,                    // fallback short title (required)\n'
@@ -302,6 +338,118 @@ SYSTEM_PROMPT = (
     "natural \u2014 write like a thoughtful editor, never salesy, never "
     "robotic. No emojis, no markdown, no hashtags."
 )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Canonical JSON schema for Eyes responses. Sent to llama-server via
+# ``response_format={"type":"json_schema","json_schema":{...}}`` so the
+# decoder is grammar-constrained to a valid garment object (or array
+# of garment objects). Kept in lockstep with ``SYSTEM_PROMPT``.
+#
+# The wrapper uses ``oneOf`` so the model can return either a single
+# garment object or a JSON array of garment objects, matching the
+# user-message instruction. Empty array `[]` is allowed (no garment).
+# ─────────────────────────────────────────────────────────────────────
+_GARMENT_OBJECT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["title"],
+    "additionalProperties": False,
+    "properties": {
+        "name": {"type": "string"},
+        "title": {"type": "string"},
+        "caption": {"type": "string", "maxLength": 240},
+        "category": {
+            "type": "string",
+            "enum": [
+                "Top", "Bottom", "Outerwear", "Full Body",
+                "Footwear", "Accessories", "Underwear",
+            ],
+        },
+        "sub_category": {"type": "string"},
+        "item_type": {"type": "string"},
+        "brand": {"type": ["string", "null"]},
+        "gender": {
+            "type": "string",
+            "enum": ["men", "women", "unisex", "kids"],
+        },
+        "dress_code": {
+            "type": "string",
+            "enum": [
+                "casual", "smart-casual", "business",
+                "formal", "athletic", "loungewear",
+            ],
+        },
+        "season": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": ["spring", "summer", "fall", "winter", "all"],
+            },
+        },
+        "tradition": {"type": ["string", "null"]},
+        "colors": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "pct"],
+                "additionalProperties": False,
+                "properties": {
+                    "name": {"type": "string"},
+                    "pct": {"type": "integer", "minimum": 0, "maximum": 100},
+                },
+            },
+        },
+        "fabric_materials": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "pct"],
+                "additionalProperties": False,
+                "properties": {
+                    "name": {"type": "string"},
+                    "pct": {"type": "integer", "minimum": 0, "maximum": 100},
+                },
+            },
+        },
+        "pattern": {
+            "type": "string",
+            "enum": [
+                "solid", "striped", "plaid", "floral", "herringbone",
+                "polka", "paisley", "geometric", "abstract",
+            ],
+        },
+        "state": {"type": "string", "enum": ["new", "used"]},
+        "condition": {
+            "type": "string",
+            "enum": ["bad", "fair", "good", "excellent"],
+        },
+        "quality": {
+            "type": "string",
+            "enum": ["budget", "mid", "premium", "luxury"],
+        },
+        "size": {"type": ["string", "null"]},
+        "price_cents": {"type": ["integer", "null"], "minimum": 0},
+        "repair_advice": {"type": ["string", "null"]},
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 0,
+            "maxItems": 16,
+        },
+    },
+}
+
+# Top-level wrapper: single garment object OR list of garment objects.
+EYES_JSON_SCHEMA: dict[str, Any] = {
+    "oneOf": [
+        _GARMENT_OBJECT_SCHEMA,
+        {
+            "type": "array",
+            "items": _GARMENT_OBJECT_SCHEMA,
+        },
+    ],
+}
+
 
 
 # Human-readable names for each supported UI language (matches
@@ -349,8 +497,9 @@ def _user_prompt(code: str | None) -> str:
     output language without altering the JSON schema.
     """
     base = (
-        "Analyse this garment photograph and return the "
-        "JSON object only \u2014 no commentary."
+        "Analyse this photograph. If one garment is visible return a single "
+        "JSON object; if multiple garments are visible return a JSON array "
+        "of such objects; if none, return `[]`. No commentary."
     )
     code = (code or "en").lower()
     if code == "en":
@@ -1058,6 +1207,7 @@ class GarmentVisionService:
         model: str | None = None,
         provider: str | None = None,
         language: str | None = None,
+        think: bool = False,
     ) -> dict[str, Any]:
         """Run the 17-field analyser on a single image.
 
@@ -1078,6 +1228,10 @@ class GarmentVisionService:
         diagnostics endpoint and tests). The ``GARMENT_VISION_PROVIDER``
         env var is now only a *seed* used by ``eyes_override`` when no
         DB override has been written yet.
+
+        ``think`` — pass through to ``_call_gemma_space``. Defaults to
+        False so the closet AddItem flow stays fast & non-reasoning.
+        Brain experiments / stylist callers can flip it on.
         """
         from app.services import eyes_override
 
@@ -1117,6 +1271,8 @@ class GarmentVisionService:
                     # ``content``. 2400 leaves comfortable headroom.
                     max_tokens=2400,
                     timeout=settings.EYES_GEMMA_TIMEOUT_S,
+                    json_schema=EYES_JSON_SCHEMA,
+                    think=think,
                 )
                 provider_activity.record(
                     "garment-vision",
@@ -1315,6 +1471,8 @@ class GarmentVisionService:
         image_bytes: bytes,
         detections: list[dict[str, Any]],
         language: str | None,
+        *,
+        think: bool = False,
     ) -> list[dict[str, Any]]:
         """Short-circuit for photos that are already tightly cropped.
 
@@ -1330,7 +1488,9 @@ class GarmentVisionService:
             len(detections),
         )
         matted = await self._whole_image_matte(image_bytes)
-        single = await self.analyze(image_bytes, language=language)
+        single = await self.analyze(
+            image_bytes, language=language, think=think,
+        )
 
         if matted:
             crop_bytes = matted
@@ -1482,6 +1642,8 @@ class GarmentVisionService:
         crop_mime: str,
         language: str | None,
         sem: asyncio.Semaphore,
+        *,
+        think: bool = False,
     ) -> dict[str, Any] | None:
         """Analyse a single crop + (optionally) reconstruct.
 
@@ -1492,7 +1654,10 @@ class GarmentVisionService:
         async with sem:
             try:
                 analysis = await self.analyze(
-                    crop_bytes, model=self.crop_model, language=language,
+                    crop_bytes,
+                    model=self.crop_model,
+                    language=language,
+                    think=think,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -1534,12 +1699,17 @@ class GarmentVisionService:
         self,
         crops: list[tuple[dict[str, Any], bytes, str]],
         language: str | None,
+        *,
+        think: bool = False,
     ) -> list[dict[str, Any]]:
         """Run :meth:`_analyse_one_crop` over every crop with bounded
         concurrency, then strip unidentifiable results."""
         sem = asyncio.Semaphore(6)
         results = await asyncio.gather(
-            *[self._analyse_one_crop(d, b, m, language, sem) for d, b, m in crops]
+            *[
+                self._analyse_one_crop(d, b, m, language, sem, think=think)
+                for d, b, m in crops
+            ]
         )
         items = [r for r in results if r]
         before_drop = len(items)
@@ -1554,6 +1724,7 @@ class GarmentVisionService:
     async def analyze_outfit(
         self, image_bytes: bytes, *, max_items: int | None = None,
         language: str | None = None,
+        think: bool = False,
     ) -> list[dict[str, Any]]:
         """End-to-end multi-item pipeline.
 
@@ -1594,14 +1765,16 @@ class GarmentVisionService:
         # 2) Fast-path: already-cropped product photo.
         if _looks_already_cropped(detections):
             return await self._handle_already_cropped(
-                image_bytes, detections, language,
+                image_bytes, detections, language, think=think,
             )
 
         # 3) Filter + cap detections.
         cap = max_items if max_items is not None else self.max_items
         useful = self._filter_useful_detections(detections, cap)
         if not useful:
-            single = await self.analyze(image_bytes, language=language)
+            single = await self.analyze(
+                image_bytes, language=language, think=think,
+            )
             return [self._build_fullframe_item(single, image_bytes)]
 
         # 4) Crop (CPU-bound; run on a worker thread).
@@ -1617,15 +1790,17 @@ class GarmentVisionService:
 
         if not crops:
             # Every crop was rejected (tiny / invalid bbox).
-            single = await self.analyze(image_bytes, language=language)
+            single = await self.analyze(
+                image_bytes, language=language, think=think,
+            )
             return [self._build_fullframe_item(single, image_bytes)]
 
         # 6) Analyse each crop in parallel.
-        items = await self._analyse_crops(crops, language)
+        items = await self._analyse_crops(crops, language, think=think)
 
         # 7) If every parallel call failed, fall back once.
         if not items:
-            single = await self.analyze(image_bytes)
+            single = await self.analyze(image_bytes, think=think)
             return [self._build_fullframe_item(single, image_bytes)]
 
         logger.info(
