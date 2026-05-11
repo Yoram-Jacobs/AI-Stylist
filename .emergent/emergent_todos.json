@@ -1,26 +1,22 @@
 [
   {
-    "content": "Remove EYES_GEMMA_BACKEND=local branch from garment_vision.py",
+    "content": "Extend _extract_json to handle JSON arrays",
     "status": "completed"
   },
   {
-    "content": "Strip eyes_local_gemma4 references from admin.py diagnostics",
+    "content": "Update analyze() to take first item when array is returned + log warning",
     "status": "completed"
   },
   {
-    "content": "Delete /app/backend/app/services/eyes_local_gemma4.py",
+    "content": "Add language-aware user_text helper and wire into both Gemma + Gemini paths",
     "status": "completed"
   },
   {
-    "content": "Lint backend + verify import graph",
+    "content": "Lint + restart backend + smoke test",
     "status": "completed"
   },
   {
-    "content": "Restart backend and confirm no regression",
-    "status": "completed"
-  },
-  {
-    "content": "Flag multi-garment array handling as P3 follow-up in plan.md",
+    "content": "Update plan.md follow-ups",
     "status": "completed"
   }
 ]

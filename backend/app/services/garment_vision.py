@@ -339,26 +339,109 @@ def _language_directive(code: str | None) -> str:
     )
 
 
-def _extract_json(raw: str) -> dict[str, Any]:
+def _user_prompt(code: str | None) -> str:
+    """Build the user-message prompt with an inline language reminder.
+
+    The system-prompt language directive is sometimes ignored by smaller
+    multimodal models (notably Gemma 4 E2B) because the user message is
+    the freshest English instruction the model sees before generating.
+    Reinforcing the language in the user text reliably anchors the
+    output language without altering the JSON schema.
+    """
+    base = (
+        "Analyse this garment photograph and return the "
+        "JSON object only \u2014 no commentary."
+    )
+    code = (code or "en").lower()
+    if code == "en":
+        return base
+    name = _LANG_NAMES.get(code, "English")
+    # Put the language line FIRST so it is the most prominent
+    # instruction; restate that keys/enums stay English so we don't
+    # localise the schema by accident.
+    return (
+        f"Reply in {name} ({code}). "
+        f"Keep JSON keys and enum values in English. "
+        + base
+    )
+
+
+def _extract_json(raw: str) -> dict[str, Any] | list[dict[str, Any]]:
+    """Pull the JSON payload out of a model response.
+
+    Returns either:
+      * dict  — the typical single-garment response, OR
+      * list[dict] — Eyes v3 (Gemma 4) can return a JSON array when the
+        photo contains multiple garments. Callers that expect a single
+        item should handle the list case (see ``analyze()``).
+    """
     if not raw:
         return {}
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, flags=re.S)
-    if fenced:
+
+    # 1) ```json fenced``` — prefer array form, then object.
+    for pattern in (r"```(?:json)?\s*(\[.*?\])\s*```", r"```(?:json)?\s*(\{.*?\})\s*```"):
+        m = re.search(pattern, raw, flags=re.S)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:  # noqa: BLE001
+                pass
+
+    # 2) Bare array: take the outermost [...] span.
+    a_first = raw.find("[")
+    a_last = raw.rfind("]")
+    o_first = raw.find("{")
+    o_last = raw.rfind("}")
+
+    # Prefer array if it brackets an object (i.e. real list-of-garments,
+    # not just a stray "[" inside a string field). Heuristic: the array
+    # span must enclose at least one "{".
+    if (
+        a_first != -1 and a_last != -1 and a_last > a_first
+        and (o_first == -1 or a_first < o_first <= a_last)
+    ):
         try:
-            return json.loads(fenced.group(1))
+            return json.loads(raw[a_first : a_last + 1])
         except Exception:  # noqa: BLE001
             pass
-    first = raw.find("{")
-    last = raw.rfind("}")
-    if first != -1 and last != -1 and last > first:
+
+    # 3) Bare object.
+    if o_first != -1 and o_last != -1 and o_last > o_first:
         try:
-            return json.loads(raw[first : last + 1])
+            return json.loads(raw[o_first : o_last + 1])
         except Exception:  # noqa: BLE001
             pass
+
+    # 4) Last resort — model returned valid JSON with no surrounding text.
     try:
         return json.loads(raw)
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _coerce_single_garment(
+    parsed: dict[str, Any] | list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Collapse a list-of-garments response into the single-item contract.
+
+    Eyes v3 (Gemma 4) sometimes returns ``[{...}, {...}]`` when a crop
+    accidentally bundles two garments, or in the already-cropped fast
+    path. ``analyze()`` is contractually single-garment, so we pick the
+    first entry (model orders by prominence) and log so we can monitor
+    how often this happens.
+    """
+    if isinstance(parsed, list):
+        items = [x for x in parsed if isinstance(x, dict)]
+        if not items:
+            return {}
+        if len(items) > 1:
+            logger.info(
+                "Eyes returned %d garments in one call; using the first "
+                "(consider tightening crop or upgrading to multi-item path)",
+                len(items),
+            )
+        return items[0]
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _shrink_for_vision(image_bytes: bytes, *, max_side: int = 1280, q: int = 82) -> bytes:
@@ -914,6 +997,10 @@ class GarmentVisionService:
                 extra={"model": self.detect_model},
             )
         parsed = _extract_json(raw or "")
+        if isinstance(parsed, list):
+            # Bbox detector schema is {"items": [...]} — a top-level list
+            # means the model misformatted; treat as no detections.
+            parsed = {}
         items = parsed.get("items") or []
         if not isinstance(items, list):
             items = []
@@ -997,6 +1084,7 @@ class GarmentVisionService:
         shrunk = _shrink_for_vision(image_bytes)
         b64 = base64.b64encode(shrunk).decode("ascii")
         system_prompt = SYSTEM_PROMPT + _language_directive(language)
+        user_text = _user_prompt(language)
 
         # 1) Resolve the routing target.
         if provider:
@@ -1018,10 +1106,7 @@ class GarmentVisionService:
             try:
                 raw = await _call_gemma_space(
                     system_prompt=system_prompt,
-                    user_text=(
-                        "Analyse this garment photograph and return the "
-                        "JSON object only \u2014 no commentary."
-                    ),
+                    user_text=user_text,
                     image_b64_jpeg=b64,
                     # The Gemma-4 fine-tune is a thinking model: it spends
                     # ~600-1200 tokens reasoning inside ``<|think|> ...
@@ -1083,9 +1168,7 @@ class GarmentVisionService:
             )
             chat.with_model("gemini", gemini_model)
             msg = UserMessage(
-                text=(
-                    "Analyze this garment photograph. Return the JSON object only."
-                ),
+                text=user_text,
                 file_contents=[ImageContent(b64)],
             )
             t0 = time.perf_counter()
@@ -1116,8 +1199,9 @@ class GarmentVisionService:
             used_provider = "gemini"
             used_model = gemini_model
 
-        # 4) Parse + sanitise.
-        parsed = _extract_json(raw or "")
+        # 4) Parse + sanitise. Eyes v3 (Gemma 4) may return a JSON array
+        #    when the crop contains multiple garments; collapse to first.
+        parsed = _coerce_single_garment(_extract_json(raw or ""))
         if not parsed.get("title") and parsed.get("name"):
             parsed["title"] = parsed["name"]
         if not parsed.get("title"):
