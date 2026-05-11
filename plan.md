@@ -108,8 +108,9 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 **Post-cutover follow-ups (open):**
 - ⏳ Real garment-photo smoke test through the live app (<30 s response, 18-field JSON, no Gemini fallback).
 - ⏳ Rotate exposed secrets from deployment transcript: `EYES_HF_TOKEN`, `EYES_API_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`.
-- ⏳ Remove dead code: `app/backend/app/services/eyes_local_gemma4.py` + dormant `EYES_GEMMA_BACKEND=local` branch in `garment_vision.py`.
+- ✅ ~~Remove dead code: `app/backend/app/services/eyes_local_gemma4.py` + dormant `EYES_GEMMA_BACKEND=local` branch in `garment_vision.py`.~~ — **DONE** (deleted file; stripped routing branch from `garment_vision.py` and diagnostics block from `admin.py`; backend restarted clean, lint passes).
 - ⏳ After 24 h stable traffic: delete deprecated GGUFs from VPS volume (`phase6-Q4_K_M.gguf`, `mmproj-Gemma4E2B-f16.gguf`).
+- ⏳ **(NEW — P3)** Live `_extract_json` in `garment_vision.py` only parses objects (`{...}`), not arrays. The array-handling logic in the now-deleted `parse_eyes_response` never ran in production. If multi-garment prompts are introduced later, extend `_extract_json` to also try `[...]` and return `list[dict] | dict`.
 
 ### ✅ SPA zero-delay navigation (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
 **Objective achieved:** Main directory pages no longer re-fetch/flash spinners on SPA back/forward navigation.
@@ -377,14 +378,15 @@ Delivered previously; unchanged.
 7. ✅ ~~Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.~~ — **SHIPPED** as self-hosted Gemma 4 E2B in `dressapp-eyes` container.
 8. Chrome Web Store publishing (deferred until Phase X.6 manual E2E passes).
 9. **Eyes v3 post-cutover cleanup:**
-   - rotate exposed secrets (`EYES_HF_TOKEN`, `EYES_API_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`)
-   - remove dead `eyes_local_gemma4.py` + dormant `EYES_GEMMA_BACKEND=local` branch from `garment_vision.py`
-   - delete deprecated GGUFs from VPS volume after 24 h stable traffic
+   - ⏳ rotate exposed secrets (`EYES_HF_TOKEN`, `EYES_API_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`)
+   - ✅ ~~remove dead `eyes_local_gemma4.py` + dormant `EYES_GEMMA_BACKEND=local` branch from `garment_vision.py`~~ — **DONE** (also stripped admin diagnostics block; backend restarted clean)
+   - ⏳ delete deprecated GGUFs from VPS volume after 24 h stable traffic
    - (optional) add a short `deploy/README.md` note: service name is `eyes`, container is `dressapp-eyes`, and both `EYES_MODEL_FILE` + `EYES_MMPROJ_FILE` must be plumbed
-10. Profile “Save changes” button always-active fix (`ProfileDetailsCard.jsx`) — track form dirtiness against loaded snapshot.
+10. Profile "Save changes" button always-active fix (`ProfileDetailsCard.jsx`) — track form dirtiness against loaded snapshot.
 
 ### P3
 11. Refactor `AddItem.jsx` into modules.
+12. **Live `_extract_json` in `garment_vision.py` is object-only.** The array-handling logic that was patched in the previous session lived in the now-deleted `parse_eyes_response`/`eyes_local_gemma4.py` and never reached production. If future prompts request multi-garment output, extend `_extract_json` to also try `[...]` and return `list[dict] | dict`.
 
 ---
 

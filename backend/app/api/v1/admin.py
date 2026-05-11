@@ -343,7 +343,6 @@ async def eyes_diagnostics(
         "EYES_PROVIDER": settings.EYES_PROVIDER,
         "EYES_GEMMA_SPACE_URL": settings.EYES_GEMMA_SPACE_URL or None,
         "EYES_GEMMA_TIMEOUT_S": settings.EYES_GEMMA_TIMEOUT_S,
-        "EYES_GEMMA_BACKEND": os.environ.get("EYES_GEMMA_BACKEND", "space"),
         "gemini_chat_key_set": bool(settings.gemini_chat_key),
         "hf_token_set": bool(settings.HF_TOKEN),
         "eyes_bearer_set": bool(
@@ -351,44 +350,11 @@ async def eyes_diagnostics(
         ),
     }
 
-    # Phase Z6: probe the on-disk GGUF artefacts when EYES_GEMMA_BACKEND=local.
-    local_gguf_block: dict[str, Any] = {}
-    if env_block["EYES_GEMMA_BACKEND"] == "local":
-        from app.services import eyes_local_gemma4
-        local_gguf_block = {
-            "lm_path": str(eyes_local_gemma4._LM_PATH),
-            "lm_path_exists": eyes_local_gemma4._LM_PATH.exists(),
-            "lm_size_gb": (
-                eyes_local_gemma4._LM_PATH.stat().st_size / 1e9
-                if eyes_local_gemma4._LM_PATH.exists() else None
-            ),
-            "mmproj_path": str(eyes_local_gemma4._MMPROJ_PATH),
-            "mmproj_path_exists": eyes_local_gemma4._MMPROJ_PATH.exists(),
-            "mmproj_size_mb": (
-                eyes_local_gemma4._MMPROJ_PATH.stat().st_size / 1e6
-                if eyes_local_gemma4._MMPROJ_PATH.exists() else None
-            ),
-            "model_loaded": eyes_local_gemma4._ready,
-            "n_ctx": eyes_local_gemma4._N_CTX,
-            "n_threads": eyes_local_gemma4._N_THREADS,
-            "n_gpu_layers": eyes_local_gemma4._N_GPU_LAYERS,
-        }
-
     # Resolved view — what would happen on the very next analyze() call?
     notes: list[str] = []
     fallback_path: str | None = None
     if active_provider == "gemma":
-        if env_block["EYES_GEMMA_BACKEND"] == "local":
-            if local_gguf_block.get("lm_path_exists") and local_gguf_block.get("mmproj_path_exists"):
-                would_use = "gemma-local-gguf"
-                fallback_path = "gemma-space (if configured) then gemini"
-            else:
-                would_use = "gemini"
-                notes.append(
-                    "EYES_GEMMA_BACKEND=local but GGUF artefacts are not on "
-                    "disk — every request will fall through to Gemini."
-                )
-        elif settings.EYES_GEMMA_SPACE_URL:
+        if settings.EYES_GEMMA_SPACE_URL:
             would_use = "gemma"
             fallback_path = "gemini (on Gemma Space failure)"
         else:
@@ -412,7 +378,6 @@ async def eyes_diagnostics(
         "fallback_path": fallback_path,
         "notes": notes,
     }
-
     # Live Gemma Space probe — GET /health with a tight timeout. We
     # don't POST /predict because that would consume Gemma capacity
     # on every diagnostics call and risk a token-quota hit. /health
@@ -460,7 +425,6 @@ async def eyes_diagnostics(
         "env": env_block,
         "resolved": resolved_block,
         "gemma_space": space_block,
-        "local_gguf": local_gguf_block,
         "recent_calls": recent_calls,
     }
 

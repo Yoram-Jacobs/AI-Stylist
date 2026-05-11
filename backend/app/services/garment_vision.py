@@ -192,51 +192,6 @@ async def _hf_chat_json(
     from app.services import eyes_override
 
     active_provider = (await eyes_override.get_active_provider()).lower()
-    if active_provider == "gemma":
-        # Phase Z6: route to LOCAL llama.cpp GGUF when EYES_GEMMA_BACKEND=local
-        # (default behaviour — Space — preserved otherwise so preview pods keep working).
-        backend = os.environ.get("EYES_GEMMA_BACKEND", "space").lower()
-        if backend == "local":
-            from app.services import eyes_local_gemma4
-            if eyes_local_gemma4.is_available():
-                t0 = time.perf_counter()
-                try:
-                    out = await eyes_local_gemma4.chat_completion(
-                        system_prompt=system_prompt,
-                        user_text=user_text,
-                        image_b64_jpeg=image_b64_jpeg,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        timeout=settings.EYES_GEMMA_TIMEOUT_S,
-                    )
-                    provider_activity.record(
-                        "garment-vision",
-                        ok=True,
-                        latency_ms=int((time.perf_counter() - t0) * 1000),
-                        extra={"provider": "gemma", "backend": "local",
-                               "model": "gemma-4-e2b-q4_k_m-gguf"},
-                    )
-                    return out
-                except Exception as exc:  # noqa: BLE001
-                    provider_activity.record(
-                        "garment-vision",
-                        ok=False,
-                        latency_ms=int((time.perf_counter() - t0) * 1000),
-                        error=repr(exc),
-                        extra={"provider": "gemma", "backend": "local",
-                               "fallback": "gemini"},
-                    )
-                    logger.warning(
-                        "Local Gemma GGUF failed (%s); falling back to Gemini",
-                        exc,
-                    )
-                    # fall through to the Gemini path below
-            else:
-                logger.warning(
-                    "EYES_GEMMA_BACKEND=local but artefacts not on disk; "
-                    "falling back to Space/Gemini path",
-                )
-                # fall through to the Space path below
     if (
         active_provider == "gemma"
         and settings.EYES_GEMMA_SPACE_URL
