@@ -1,30 +1,26 @@
 [
   {
-    "content": "Fetch authoritative Gemma 4 specs from HF + Google docs",
+    "content": "Fix Eyes v3 parser to accept JSON array (multi-garment)",
     "status": "completed"
   },
   {
-    "content": "Confirm scope with user (adapter mode + GGUF-only)",
+    "content": "Write /app/backend/app/services/eyes_local_gemma4.py (llama-cpp-python singleton runtime)",
     "status": "completed"
   },
   {
-    "content": "Rewrite notebook against Gemma 4 architecture (35 layers, AutoModelForMultimodalLM, native chat template)",
+    "content": "Patch /app/backend/app/services/garment_vision.py to route to local GGUF when EYES_GEMMA_BACKEND=local",
     "status": "completed"
   },
   {
-    "content": "Add runtime module discovery (§3b) to replace hard-coded Gemma 3n module list",
+    "content": "Patch /api/v1/admin/eyes/diagnostics to surface local_gguf health block",
     "status": "completed"
   },
   {
-    "content": "Collapse to single Q4_K_M target for 2-3 GB on-device footprint",
+    "content": "Lint + restart backend to confirm no regressions",
     "status": "completed"
   },
   {
-    "content": "Strip LiteRT path, keep GGUF only",
-    "status": "completed"
-  },
-  {
-    "content": "Update chat_summary with Phase Z6 pivot notes",
+    "content": "Document Phase Z6 completion in chat_summary.md (production cutover procedure)",
     "status": "completed"
   }
 ]

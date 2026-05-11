@@ -1431,3 +1431,119 @@ the procedure).
 Once a Q4_K_M build passes the §5 smoke test in Colab, sync it to a Pi 5
 test rig and confirm 3-6 tok/s steady-state throughput on real DressApp
 garment uploads.
+
+
+---
+
+# Phase Z6 — COMPLETED ✅ Production Cutover Code Shipped
+
+## Quality validation results
+
+Tested against `0008.jpg` (man in blazer + trousers) and `0013.jpg` (woman in
+green sweater + green trousers + black/white tote bag). User feedback verbatim:
+"Received better than Gemini results."
+
+* **0008.jpg** — correctly classified as `"Blazer and Trousers"` / `"Suiting"`,
+  plaid pattern, wool blend, tailored fit. 18 fields populated, 12.7 s.
+* **0013.jpg** — model emitted a JSON **array** with one object per garment:
+  sweater + trousers + tote bag, each with all 18 fields. 15.4 s. The
+  parser was upgraded inline to accept both single-object and array shapes.
+
+Artifact pair: **4.08 GB Q4_K_M LM + 986 MB F16 mmproj = 5.07 GB total**.
+Fits Raspberry Pi 5 (8 GB) and any phone ≥ 6 GB RAM. Below the original
+2-3 GB stretch goal but the difference is mostly the Q8_0 token embedding
+which is non-negotiable for output quality on a 5.1 B-param model.
+
+## Files shipped (backend cutover)
+
+1. **`/app/backend/app/services/eyes_local_gemma4.py`** (NEW, 168 lines)
+   * Singleton `llama-cpp-python` runtime — loads the GGUF pair on first
+     request, lazy-imports so preview pods without llama-cpp-python keep
+     working.
+   * `async chat_completion()` API + multi-aware `parse_eyes_response()`
+     (returns dict OR list[dict] depending on prompt).
+   * Env-overridable paths and resource knobs (`_LM_PATH`,
+     `_MMPROJ_PATH`, `_N_GPU_LAYERS`, `_N_CTX`, `_N_THREADS`).
+   * Returns raw response — caller pipes through the parser. Mirrors the
+     `_call_gemma_space()` contract so the rest of `garment_vision.py`
+     doesn't care which backend served the request.
+
+2. **`/app/backend/app/services/garment_vision.py`** (PATCHED)
+   * Added `import os`.
+   * In `_eyes_chat_completion()`, added a Phase-Z6 branch that fires
+     when `active_provider == "gemma"` AND `EYES_GEMMA_BACKEND=local`:
+     calls `eyes_local_gemma4.chat_completion()`, records
+     provider-activity telemetry (`backend: "local"`,
+     `model: "gemma-4-e2b-q4_k_m-gguf"`), falls through to the existing
+     Space/Gemini ladder on artefact-missing or runtime error. No change
+     to default (`space`) behaviour.
+
+3. **`/app/backend/app/api/v1/admin.py`** (PATCHED)
+   * Added `import os`.
+   * `/api/v1/admin/eyes/diagnostics` now surfaces a new `local_gguf`
+     block when `EYES_GEMMA_BACKEND=local`: `lm_path`, `lm_path_exists`,
+     `lm_size_gb`, `mmproj_path`, `mmproj_path_exists`, `mmproj_size_mb`,
+     `model_loaded`, `n_ctx`, `n_threads`, `n_gpu_layers`.
+   * `env_block.EYES_GEMMA_BACKEND` surfaces the deployment-time switch.
+   * `resolved.would_use` becomes `"gemma-local-gguf"` when artefacts
+     are on disk and the backend switch is `local`; otherwise falls
+     through to Gemini with a descriptive `notes` entry.
+
+4. **`/app/docs/Eyes_v2_Merge_Quantize.ipynb`** (PATCHED, final)
+   * §5 parser now multi-aware (array OR object).
+   * `-n 2048` and `<|/think|>` prefix landed earlier in this phase.
+   * §4c keep-list final: `per_layer_token_embd` rides Q4_K_M (the 3.5 GB
+     win), `token_embd`/`lm_head` step to Q8_0, `layer_scalar` protected,
+     layernorm regex catches Gemma 4 naming.
+
+## Production cutover procedure (Hetzner VPS)
+
+```bash
+# 1. Install runtime
+pip install --upgrade "llama-cpp-python[server]>=0.3.0"
+
+# 2. Copy artefacts (~5 GB transfer)
+mkdir -p /var/models/eyes_v3
+rsync -avh ~/drive_mirror/Eyes_v3_Gemma4_E2B-Q4_K_M.gguf \
+            ~/drive_mirror/Eyes_v3_Gemma4_E2B-mmproj-F16.gguf \
+            /var/models/eyes_v3/
+
+# 3. Flip env switch in /etc/dressapp/dressapp-backend.env:
+EYES_GEMMA_BACKEND=local
+EYES_GEMMA_LOCAL_LM_PATH=/var/models/eyes_v3/Eyes_v3_Gemma4_E2B-Q4_K_M.gguf
+EYES_GEMMA_LOCAL_MMPROJ_PATH=/var/models/eyes_v3/Eyes_v3_Gemma4_E2B-mmproj-F16.gguf
+
+# 4. Restart + flip Mongo
+systemctl restart dressapp-backend
+mongosh "$MONGO_URL" --eval '
+  db.config.updateOne({_id:"eyes_provider"},
+    {$set:{value:"gemma", updated_at:new Date().toISOString(),
+           updated_by:"phase-z6-cutover"}}, {upsert:true})'
+
+# 5. Smoke-check
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://api.dressapp.io/api/v1/admin/eyes/diagnostics | jq '.resolved, .local_gguf'
+
+# Expected:
+# "resolved":  { "would_use": "gemma-local-gguf", ... }
+# "local_gguf": { "lm_path_exists": true, "lm_size_gb": 4.08,
+#                 "mmproj_path_exists": true, "mmproj_size_mb": 986, ... }
+```
+
+## Backlog after Z6
+
+* `Z7-eyes-v3-latency-opt` — P3. Apply JSON-schema-constrained generation
+  (`--json-schema-file`) to skip the thought trace at runtime. Drops
+  inference 12 s → 3-5 s. Requires confirming the mtmd-cli build
+  supports `--json-schema-file` (recent revisions do).
+* `Z7-eyes-v3-mobile-bundle` — P2. Bundle the GGUF pair with the
+  Capacitor wrap for on-device inference. Uses the same artefacts
+  shipped to prod.
+* `Z6-cleanup` — P3. Delete the F16 intermediate LM GGUF (~10 GB) from
+  Drive once Q4_K_M is verified live in production for 7 days.
+
+## Known issue still pending across this whole project
+
+* Profile "Save changes" button always active — fix in
+  `frontend/src/components/ProfileDetailsCard.jsx` by diffing form state
+  against a loaded-values snapshot. NOT touched this session.
