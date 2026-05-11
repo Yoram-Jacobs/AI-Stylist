@@ -305,10 +305,11 @@ SYSTEM_PROMPT = (
     "confident but never invent sensitive claims (e.g. do not guess a "
     "specific brand unless clearly visible; leave brand blank otherwise).\n\n"
     "Return ONLY a JSON value with one of two shapes:\n"
-    "  \u2022 a single JSON object (when exactly one garment is visible), or\n"
-    "  \u2022 a JSON array of such objects (when multiple garments are visible).\n"
-    "If no garment is present, return an empty array `[]`. Never wrap the "
-    "result in extra commentary or markdown.\n\n"
+    "  \u2022 a single JSON object when one garment is visible, or\n"
+    "  \u2022 a JSON array of such objects when multiple garments are visible.\n"
+    "Always return at least one garment object \u2014 the photograph is a "
+    "user-uploaded clothing photo, so a garment is present. Never wrap "
+    "the result in extra commentary or markdown.\n\n"
     "Each garment object has the following shape (all keys optional except "
     "`title`):\n"
     "{\n"
@@ -499,7 +500,7 @@ def _user_prompt(code: str | None) -> str:
     base = (
         "Analyse this photograph. If one garment is visible return a single "
         "JSON object; if multiple garments are visible return a JSON array "
-        "of such objects; if none, return `[]`. No commentary."
+        "of such objects. No commentary."
     )
     code = (code or "en").lower()
     if code == "en":
