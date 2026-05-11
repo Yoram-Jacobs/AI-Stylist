@@ -1215,3 +1215,121 @@ re-fires `api.createItem` with the captured body. Requires
 stashing the full payload on the failure descriptor (currently
 only metadata is kept). Estimate: 80 lines of code, one new
 `api.createItemRaw` helper that bypasses the optimistic dance.
+
+
+---
+
+# Phase Z5 — Eyes v2 Merge + Mixed-Precision Quantization Pipeline
+
+User finished training the Eyes v2 (Gemma 3n E2B / "Gemma4-E2B") LoRA
+adapter in bf16 and confirmed it passes the schema/vision-blindness eval.
+Next step: ship to (a) the web/server backend via GGUF and (b) mobile
+devices via MediaPipe LiteRT `.task`, with the entire vision tower +
+audio tower + cross-modal embed projections + PLE tables kept in FP16
+to prevent quantization degradation.
+
+## 1. Decisions taken (with the user)
+
+* **Q1 (deployment targets):** 1a + 1b — GGUF for web, LiteRT `.task`
+  for mobile. Same merged HF checkpoint feeds both pipelines.
+* **Q2 (FP16 keep-list):** User audit covered `model.vision_tower.*`
+  (16 SigLIP encoder layers + patch_embedder + pooler),
+  `model.audio_tower.*`, `model.embed_vision.*`, `model.embed_audio.*`
+  and most of the LM (35 layers — interesting note: layers 15-34 only
+  list q_proj/o_proj, confirming Gemma 3n's KV-sharing optimization).
+  Notebook proactively adds the PLE tables (`embed_tokens_per_layer`,
+  `per_layer_model_projection`, `per_layer_projection_norm`,
+  `*.per_layer_projection`) to the keep-list since Google flags them
+  as quantization-sensitive and the user audit didn't include them.
+* **Q3 (output dir):** `Eyes_v2_Gemma4e2b_merged` alongside the existing
+  adapter on Drive.
+* **Q4 (size budget):** "a+b+c" — emit all three GGUF variants
+  (Q4_K_M aggressive, Q5_K_M balanced, Q8_0 quality) so the user can
+  A/B test on real garments. Same `mmproj-F16.gguf` shared by all three.
+
+## 2. Files changed / added
+
+```
+docs/
+  Eyes_v2_Merge_Quantize.ipynb   (NEW — single self-contained Colab notebook)
+  chat_summary.md                (this section)
+```
+
+The notebook is structured as 7 numbered sections so any stage can
+be re-run independently:
+
+* §1 Setup (transformers, peft, accelerate, litert-torch, cmake build deps)
+* §2 Paths + the canonical KEEP_FP16_REGEX list (single source of truth)
+* §3 LoRA merge in bf16 → save HF safetensors shards to Drive +
+     blank-canvas inference sanity check (catches a broken merge before
+     spending 30 min on quantization)
+* §4 GGUF: build llama.cpp → `convert_hf_to_gguf.py --mmproj` →
+     three `llama-quantize` runs with `--tensor-type` overrides mapped
+     from the HF keep-list onto llama.cpp's GGUF tensor names
+     (`blk.N.attn_*`, `per_layer_*`, etc.)
+* §5 GGUF smoke test with `llama-mtmd-cli` on an uploaded garment photo,
+     all three variants
+* §6 LiteRT export via `ai-edge-torch` with `ai-edge-quantizer`
+     Recipe API — INT4 blockwise on LM linears, FP16 NO_QUANTIZE
+     overrides for every keep-list pattern, then
+     `mediapipe-model-maker` to package the `.tflite` into a `.task`
+* §7 Troubleshooting playbook (Q4 schema regression → pin first/last
+     LM blocks; stale llama.cpp → git pull; MediaPipe Maker missing →
+     manual zip recipe; LiteRT OOM on Colab free → run §6 locally)
+
+## 3. Critical implementation notes for next agent
+
+* **HF↔GGUF tensor name mapping.** The notebook documents this inline
+  in §4c — llama.cpp strips `model.` and renames sub-blocks. The
+  KEEP_FP16_REGEX in §2 uses HF names; the GGUF_KEEP_FP16_OVERRIDES
+  in §4c uses GGUF names. If llama.cpp ever renames again, only that
+  one block needs updating.
+* **Vision/audio go to mmproj, not LM gguf.** This collapses the LM-
+  side keep-list to just `token_embd`, `per_layer_*`, and norms.
+* **litert-torch builder probing.** §6 probes four entry-point names
+  in priority order (`gemma3n.build_model_e2b`, …, falling back to
+  `gemma3.build_model_1b`) because the package surface has shifted
+  across versions. Keep this fallback chain in mind if the user
+  upgrades litert-torch and a new name appears.
+* **Gemma 3n KV-share architecture.** Layers 15-34 in the LM have
+  q_proj and o_proj listed but no k_proj/v_proj in the user audit —
+  this is the KV-sharing optimization, not missing layers. Both
+  llama.cpp and litert-torch handle this natively; no special
+  treatment needed in the keep-list.
+
+## 4. Expected user workflow
+
+1. Open `docs/Eyes_v2_Merge_Quantize.ipynb` in Colab Pro (L4 or A100).
+2. Run §1-§3 (≈20 min: install + merge + save to Drive).
+3. Run §4 (≈30 min: llama.cpp build + convert + 3 quantize passes).
+4. Run §5 with a real garment photo → eyeball that Q4_K_M still emits
+   the 18-field JSON. If not, follow §7a fix order.
+5. Run §6 (≈45 min: LiteRT INT4 conversion is the slow part).
+6. Once Q5_K_M passes a 30-image smoke test against
+   `Eyes_v2_Local_Eval.ipynb`'s harness, flip
+   `config.eyes_provider.active` in MongoDB from `gemini` to
+   `custom_eyes_v2_q5km` (loader change in `eyes_override.py` already
+   exists from the v1 work, just needs to point at the new GGUF path).
+
+## 5. New backlog items
+
+### `Z5-eyes-v2-prod-cutover` — P1 (blocked on user's quantization run)
+
+After §5 in the notebook confirms Q5_K_M quality matches bf16:
+1. Upload `Eyes_v2_Gemma4e2b-Q5_K_M.gguf` + `mmproj-F16.gguf` to the
+   prod VPS at `/var/models/eyes_v2/`.
+2. Add `custom_eyes_v2_q5km` as a routing target in
+   `backend/app/services/garment_vision.py` (mirror the existing
+   `custom_eyes_v1` block).
+3. Run the existing `Eyes_Vision_Smoke_Test.ipynb` against the prod
+   endpoint to confirm schema parity.
+4. Flip `config.eyes_provider.active` and monitor
+   `/api/v1/admin/eyes/diagnostics` for 24h before turning Gemini off.
+
+### `Z5-mobile-deployment-pipeline` — P2 (blocked on Capacitor wrap)
+
+The `.task` from §6 needs the Capacitor mobile wrap (separate
+future task `Deploy DressApp Assistant to mobile devices`). When
+that lands, drop the `.task` into the Android assets folder and
+wire `MediaPipe LlmInference` into the existing
+`garmentVision.captureAndAnalyze()` call path.

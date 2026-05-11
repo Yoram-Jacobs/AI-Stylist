@@ -1,26 +1,26 @@
 [
   {
-    "content": "Find closet card component for sparkle overlay placement",
+    "content": "Write Eyes_v2_Merge_Quantize.ipynb with §1 setup, §2 paths, §3 LoRA merge",
     "status": "completed"
   },
   {
-    "content": "Add _pendingSync state field + lastSaveFailures to closetStore",
+    "content": "Add §4 GGUF export (build llama.cpp + convert + 3 mixed-precision quant variants + mmproj)",
     "status": "completed"
   },
   {
-    "content": "Refactor AddItem.saveAll: optimistic upsert + parallel background sync",
+    "content": "Add §5 GGUF smoke test (llama-mtmd-cli with garment image)",
     "status": "completed"
   },
   {
-    "content": "Add sparkle overlay to closet card when _pendingSync=true",
+    "content": "Add §6 LiteRT/.task export with FP16 keep-list",
     "status": "completed"
   },
   {
-    "content": "Add post-save failures dialog (thumbnails + filenames) on Closet page",
+    "content": "Add §7 troubleshooting playbook + artifact summary",
     "status": "completed"
   },
   {
-    "content": "i18n keys + lint + smoke screenshot",
+    "content": "Update chat_summary.md with handoff note",
     "status": "completed"
   }
 ]
