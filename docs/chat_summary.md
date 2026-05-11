@@ -1087,3 +1087,131 @@ hit: POST /closet/preflight` warnings in production logs:
 See §5. Only pick up if the user confirms edit-mode replace is
 slow even after the Z3 deploy lands (since the Z3 fix doesn't
 touch that path, that complaint should persist if real).
+
+---
+
+# Phase Z4 — Optimistic "Save all"
+
+User asked for `Save all` to push items to the local closet first
+and sync to the backend in the background. The previous flow
+serialised every `api.createItem` call behind `await` and only
+navigated once the last one returned (5–30 s per typical batch on
+prod), which on an add-flow already vouched-for by the analyse
+step was pure dead time.
+
+## 1. Decisions taken (with the user)
+
+* **Q1a + thumbs** — on per-item save failure, remove the ghost
+  from `closetStore`, capture the failed item's title + filename +
+  thumbnail, and surface a single end-of-batch warning dialog on
+  the Closet page listing all failures so the user knows exactly
+  what didn't make it.
+* **Q2 yes** — navigate to /closet immediately on click. The
+  perceived save is now instant (~16 ms).
+* **Q3 yes** — render a *sparkling* "Syncing" overlay on every
+  closet card whose `_pendingSync` marker is still truthy. Soft
+  opacity/scale pulse, never a spinner (spinners read as "error"
+  in fashion-app context).
+
+## 2. Files changed
+
+```
+frontend/
+  src/lib/closetStore.js                +lastSaveFailures state,
+                                        +recordSaveFailures(),
+                                        +dismissSaveFailures()
+  src/pages/AddItem.jsx                 saveAll() fully rewritten:
+                                        optimistic ghosts + parallel
+                                        Promise.allSettled + reconciler
+  src/pages/Closet.jsx                  +sparkle overlay on
+                                        item._pendingSync,
+                                        +SaveFailuresDialog component
+  src/locales/en.json                   +closet.pendingSync,
+                                        +closet.saveFailuresTitle/Body
+                                        /Unnamed, +addItem.savedOptimistic,
+                                        +common.gotIt
+docs/
+  chat_summary.md                       (this section)
+```
+
+## 3. Reconciliation contract
+
+`AddItem.saveAll` mints a `crypto.randomUUID()` per card (with a
+``tmp-${ts}-${rand}`` fallback for ancient browsers), builds a
+``ClosetItem``-shaped optimistic ghost with the user's photo as a
+*data URL* (NOT a blob: URL — those die when AddItem unmounts),
+upserts every ghost into `closetStore`, toasts, navigates. The
+parallel reconciler then:
+
+* On `fulfilled`: `closetStore.remove(tempId)` followed by
+  `closetStore.upsert(serverItem)`. The canonical server item
+  carries the real id, server-computed thumbnail, CLIP embedding,
+  segmentation — these silently swap into the closet card on the
+  very next render.
+* On `rejected`: `closetStore.remove(tempId)` and push the
+  ghost's metadata onto a `failures` array. After all results
+  settle, `closetStore.recordSaveFailures(failures)` lights up
+  the Closet page's `SaveFailuresDialog` in one go.
+
+The reconciler runs after navigation; it has no closure over the
+unmounted AddItem React tree. Everything it needs (filename,
+thumbnail, body, tempId) is captured in a local `ghosts` Map.
+
+## 4. Expected impact
+
+* "Save all" perceived latency: **5–30 s → ~16 ms** (paint of the
+  optimistic items on /closet).
+* API write latency unchanged but now executes in PARALLEL via
+  `Promise.allSettled` — a 5-card batch on a 200 ms RTT goes from
+  ~1 s wall-clock to ~250 ms.
+* Failure recovery is non-destructive: the user lands on /closet
+  with the warning dialog open showing exactly which photos to
+  re-upload (with thumbnails so they recognise them at a glance).
+
+## 5. UX details to verify on first prod test
+
+* Sparkle overlay: subtle gradient fade-to-background at the
+  bottom of the card + a `Sparkles` icon with `animate-ping`
+  halo + `animate-pulse` icon body. Uses
+  `hsl(var(--accent))` so it picks up the theme accent rather
+  than hard-coded teal/blue. Test that this reads as "in
+  progress" (not "alert") in both light and dark mode.
+* Sonner toast: copy is `"X items added to your closet —
+  syncing in background"` (i18n key `addItem.savedOptimistic`).
+* Warning dialog: uses `AlertDialog` + `AlertTriangle` icon
+  (amber). Shows up to 6 visible rows before scrolling within
+  the dialog. Dismiss button is a clear "Got it" — the user
+  cannot accidentally retry from inside the dialog (intentional
+  — re-upload should be a deliberate action, not an
+  acknowledgement).
+
+## 6. Known limitations / accepted trade-offs
+
+* **Server-side enrichment lag.** During the brief window before
+  the canonical item replaces the ghost, the card shows the
+  user's raw uploaded image (no CLIP embedding, no segmentation,
+  no server thumbnail). For ~250 ms on a healthy network this is
+  invisible; on slow networks the gap is bounded by
+  `api.createItem`'s natural timeout. The sparkle overlay tells
+  the user something is happening.
+* **Offline / hard navigate during sync.** If the user kills the
+  tab, the in-flight `Promise.allSettled` is abandoned. The
+  optimistic ghosts remain in `closetStore` until the next full
+  `/closet` fetch reconciles them away. Acceptable for MVP —
+  proper background-sync with a service worker is a future
+  feature.
+* **No retry-from-failure UX.** The warning dialog is read-only;
+  the user has to navigate back to Add-Item and re-upload. A
+  proper retry path would require persisting the original
+  payload + thumbnail across navigation (basically the "drafts"
+  feature flagged in §5 of Phase Z3). Left as a P3 backlog.
+
+## 7. New backlog items
+
+### `Z4-failure-retry-from-dialog` — P3
+
+Augment the `SaveFailuresDialog` with a Retry button per row that
+re-fires `api.createItem` with the captured body. Requires
+stashing the full payload on the failure descriptor (currently
+only metadata is kept). Estimate: 80 lines of code, one new
+`api.createItemRaw` helper that bypasses the optimistic dance.

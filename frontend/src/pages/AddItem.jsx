@@ -920,30 +920,189 @@ export default function AddItem() {
   const saveAll = async () => {
     const ready = cards.filter((c) => c.status === 'ready' || c.status === 'error' /* still savable if user fills */);
     if (!ready.length) { toast.error(t('addItem.nothingToSave')); return; }
+
+    // Phase Z4 — optimistic-first "Save all".
+    //
+    // The previous implementation serialised every ``api.createItem``
+    // call behind ``await`` and only navigated once the last one
+    // returned (5-30 s for a typical batch). For an add-flow that's
+    // already vouched-for by the analyse step, the network round-trip
+    // is pure dead time the user spends staring at spinners.
+    //
+    // The new flow:
+    //   1. Build an OPTIMISTIC ClosetItem for every card (real UUID,
+    //      data-URL image, ``_pendingSync: true`` marker for the card
+    //      sparkle overlay).
+    //   2. Push every optimistic item into ``closetStore`` immediately
+    //      so the Closet page paints them on the very next render.
+    //   3. Toast "saved" and navigate to /closet so the user sees
+    //      their new pieces inside ~16 ms.
+    //   4. Fire all ``api.createItem`` calls in PARALLEL via
+    //      ``Promise.allSettled`` (was sequential — also a free win).
+    //   5. Reconcile per result: on success replace the optimistic
+    //      ghost with the canonical server item; on failure pull the
+    //      ghost and stash the failure descriptor on the store. The
+    //      Closet page reads that and renders a single warning dialog
+    //      listing every failed item with its thumbnail + filename so
+    //      the user knows exactly what didn't make it (Q1a + thumbs).
+
     setSaving(true);
-    let ok = 0; let fail = 0;
+
+    const validCards = [];
+    const skipped = [];
     for (const card of ready) {
-      if (card.status === 'error' && !card.fields.title) { fail += 1; continue; }
-      setCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'saving' } : c)));
+      if (card.status === 'error' && !card.fields?.title) {
+        skipped.push(card);
+        continue;
+      }
       try {
         const body = buildCreatePayload(card);
-        if (!body.title) { throw new Error('Title is required'); }
-        await api.createItem(body);
-        ok += 1;
-        setCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'saved' } : c)));
+        if (!body.title) throw new Error('Title is required');
+        validCards.push({ card, body });
       } catch (err) {
-        fail += 1;
-        setCards((prev) => prev.map((c) =>
-          c.id === card.id
-            ? { ...c, status: 'error', error: err?.response?.data?.detail || err.message || 'Save failed' }
-            : c));
+        skipped.push({ ...card, _buildErr: err });
       }
     }
+
+    if (skipped.length) {
+      setCards((prev) => prev.map((c) =>
+        skipped.find((s) => s.id === c.id)
+          ? { ...c, status: 'error', error: c.error || 'Title is required' }
+          : c,
+      ));
+    }
+    if (!validCards.length) {
+      setSaving(false);
+      toast.error(t('addItem.noneSaved'));
+      return;
+    }
+
+    // Step 1+2 — build optimistic items and push into closetStore.
+    // We hold ``ghosts`` in a small map keyed by tempId so the
+    // reconciliation phase below can find each card's filename /
+    // thumbnail without holding a closure over the AddItem state
+    // tree (which is about to unmount on navigation).
+    const ghosts = new Map();
+    const nowIso = new Date().toISOString();
+    for (const { card, body } of validCards) {
+      const tempId =
+        (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      // Use a data URL (not blob:) so the thumbnail survives the
+      // AddItem unmount. blob: URLs are document-scoped and would
+      // 404 the moment the user lands on /closet.
+      const dataUrl =
+        card.base64
+          ? `data:${card.mime || card.file?.type || 'image/jpeg'};base64,${card.base64}`
+          : (card.previewUrl || null);
+      const filename = card.sourceFilename || card.file?.name || null;
+      const optimisticItem = {
+        id: tempId,
+        user_id: undefined,         // server fills on create; never rendered
+        source: body.source || 'Private',
+        name: body.name || body.title,
+        title: body.title,
+        caption: body.caption || null,
+        category: body.category || 'Top',
+        sub_category: body.sub_category || null,
+        item_type: body.item_type || null,
+        brand: body.brand || null,
+        gender: body.gender || null,
+        dress_code: body.dress_code || null,
+        season: body.season || [],
+        size: body.size || null,
+        color: body.color || null,
+        colors: body.colors || [],
+        fabric_materials: body.fabric_materials || [],
+        pattern: body.pattern || null,
+        state: body.state || null,
+        condition: body.condition || null,
+        quality: body.quality || null,
+        price_cents: body.price_cents || 0,
+        currency: body.currency || 'USD',
+        marketplace_intent: body.marketplace_intent || 'own',
+        tags: body.tags || [],
+        original_image_url: dataUrl,
+        thumbnail_data_url: dataUrl,
+        created_at: nowIso,
+        updated_at: nowIso,
+        source_sha256: body.source_sha256 || null,
+        source_filename: filename,
+        source_phash: body.source_phash || null,
+        source_color_sig: body.source_color_sig || null,
+        is_duplicate: !!body.is_duplicate,
+        // Phase Z4 marker — Closet card paints a sparkling overlay
+        // while this is truthy; cleared the moment the server item
+        // replaces the ghost in ``closetStore``.
+        _pendingSync: true,
+      };
+      ghosts.set(tempId, {
+        body,
+        title: optimisticItem.title,
+        thumbnail: dataUrl,
+        filename,
+      });
+      closetStore.upsert(optimisticItem);
+      // Visual state on the AddItem cards in case the user doesn't
+      // navigate immediately (e.g. nav blocked by an unsaved-changes
+      // guard somewhere upstream).
+      setCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'saved' } : c)));
+    }
+
+    // Step 3 — instant feedback + navigate.
+    toast.success(
+      t('addItem.savedOptimistic', {
+        count: validCards.length,
+        defaultValue:
+          validCards.length === 1
+            ? 'Added to your closet — syncing in background'
+            : `${validCards.length} items added to your closet — syncing in background`,
+      }),
+    );
     setSaving(false);
-    if (ok && !fail) toast.success(t('addItem.savedCount', { count: ok }));
-    else if (ok && fail) toast.message(`${t('addItem.savedCount', { count: ok })} · ${fail} ${t('common.error')}`);
-    else toast.error(t('addItem.noneSaved'));
-    if (ok && !fail) setTimeout(() => nav('/closet'), 800);
+    nav('/closet');
+
+    // Step 4+5 — parallel persistence + reconciliation. Runs after
+    // navigation; failures surface via ``closetStore.recordSaveFailures``
+    // which the Closet page renders as a single end-of-batch dialog.
+    const settle = async () => {
+      const tempIds = Array.from(ghosts.keys());
+      const results = await Promise.allSettled(
+        tempIds.map((tid) => api.createItem(ghosts.get(tid).body)),
+      );
+      const failures = [];
+      for (let i = 0; i < results.length; i += 1) {
+        const tid = tempIds[i];
+        const g = ghosts.get(tid);
+        const r = results[i];
+        if (r.status === 'fulfilled' && r.value && r.value.id) {
+          // Swap ghost → canonical. We remove first so a server item
+          // that re-uses the temp UUID by coincidence (impossible —
+          // server mints its own — but defensive) doesn't collide.
+          closetStore.remove(tid);
+          closetStore.upsert(r.value);
+        } else {
+          closetStore.remove(tid);
+          const detail =
+            (r.reason && (r.reason.response?.data?.detail || r.reason.message))
+            || 'Save failed';
+          failures.push({
+            id: tid,
+            title: g.title,
+            filename: g.filename,
+            thumbnail: g.thumbnail,
+            error: detail,
+          });
+        }
+      }
+      if (failures.length) {
+        closetStore.recordSaveFailures(failures);
+      }
+    };
+    // Don't await — let it run in the background. The Closet page
+    // is a separate React tree at this point.
+    settle().catch(() => { /* recorded individually above */ });
   };
 
   return (

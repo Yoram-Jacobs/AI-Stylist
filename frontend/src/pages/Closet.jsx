@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Plus, Search, Trash2, CheckCircle2, Circle, X, CheckSquare,
   Square, Loader2, ListChecks, Sparkles, Wand2, QrCode, Star,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,7 @@ import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useClosetStore } from '@/lib/useClosetStore';
+import { closetStore } from '@/lib/closetStore';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
@@ -646,6 +648,17 @@ export default function Closet() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Phase Z4 — post-"Save all" failures dialog. Reads
+          ``store.lastSaveFailures`` (populated by AddItem.saveAll's
+          background-sync reconciler when one or more parallel
+          createItem calls reject). Shows the user a single warning
+          with every failed photo's thumbnail + filename so they
+          know exactly what didn't make it into the cloud closet. */}
+      <SaveFailuresDialog
+        failures={store.lastSaveFailures || []}
+        onDismiss={() => closetStore.dismissSaveFailures()}
+      />
+
       {/* Phase P: Outfit Completion sheet */}
       <OutfitCompletionSheet
         open={completionOpen}
@@ -735,6 +748,29 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
             <Star className="h-3.5 w-3.5 fill-white" />
           </div>
         )}
+        {/* Phase Z4 — pulsing sparkle marks items that were just
+            saved optimistically and are still syncing to the server.
+            Disappears the moment the canonical server item replaces
+            the ghost in ``closetStore``. The animation is a soft
+            opacity/scale pulse (not a spin, which reads as "error"
+            in fashion-app context); pointer-events-none so it never
+            blocks the card's link. */}
+        {item._pendingSync && (
+          <div
+            className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 px-2 py-1.5 pointer-events-none bg-gradient-to-t from-background/95 via-background/80 to-transparent"
+            data-testid="closet-item-pending-sync"
+            aria-live="polite"
+            aria-label={t('closet.pendingSync', { defaultValue: 'Syncing…' })}
+          >
+            <span className="relative inline-flex h-3 w-3">
+              <span className="absolute inset-0 rounded-full bg-[hsl(var(--accent))] opacity-60 animate-ping" />
+              <Sparkles className="relative h-3 w-3 text-[hsl(var(--accent))] animate-pulse" />
+            </span>
+            <span className="text-[10px] font-medium uppercase tracking-wider text-[hsl(var(--accent))]">
+              {t('closet.pendingSync', { defaultValue: 'Syncing' })}
+            </span>
+          </div>
+        )}
       </AspectRatio>
       <CardContent className="p-3">
         <div className="flex items-center justify-between gap-2">
@@ -762,3 +798,111 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
     </Card>
   );
 }
+
+/* -------------------- Save-all failures dialog (Phase Z4) -------------------- */
+/**
+ * One-shot warning surfaced on the Closet page when one or more
+ * items from the most recent "Save all" batch couldn't be persisted
+ * to the server. The optimistic ghosts have already been pulled
+ * from ``closetStore`` by the reconciler; this dialog is the
+ * acknowledgement step that tells the user *which* photos didn't
+ * make it, with thumbnails so they recognise them at a glance.
+ *
+ * Closes on dismiss; the underlying ``lastSaveFailures`` array on
+ * the store is then cleared. Idempotent — re-rendering with an
+ * empty array no-ops.
+ */
+function SaveFailuresDialog({ failures, onDismiss }) {
+  const { t } = useTranslation();
+  const open = Array.isArray(failures) && failures.length > 0;
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => { if (!o) onDismiss(); }}
+    >
+      <AlertDialogContent
+        className="max-w-md"
+        data-testid="closet-save-failures-dialog"
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-amber-500" aria-hidden />
+            {t('closet.saveFailuresTitle', {
+              count: failures.length,
+              defaultValue:
+                failures.length === 1
+                  ? "1 photo didn't make it"
+                  : `${failures.length} photos didn't make it`,
+            })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('closet.saveFailuresBody', {
+              defaultValue:
+                'These items couldn\u2019t be saved to your closet. Please try uploading them again.',
+            })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <ul
+          className="max-h-72 overflow-y-auto -mx-2 px-2 space-y-2 py-1"
+          data-testid="closet-save-failures-list"
+        >
+          {failures.map((f) => (
+            <li
+              key={f.id}
+              className="flex items-center gap-3 rounded-lg border border-border bg-card/50 p-2"
+            >
+              <div className="relative shrink-0 h-14 w-14 overflow-hidden rounded-md bg-muted">
+                {f.thumbnail ? (
+                  <img
+                    src={f.thumbnail}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center text-muted-foreground">
+                    <AlertTriangle className="h-5 w-5" aria-hidden />
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div
+                  className="truncate text-sm font-medium"
+                  title={f.title}
+                >
+                  {f.title || t('closet.saveFailuresUnnamed', { defaultValue: 'Untitled item' })}
+                </div>
+                {f.filename && (
+                  <div
+                    className="truncate text-[11px] text-muted-foreground"
+                    title={f.filename}
+                  >
+                    {f.filename}
+                  </div>
+                )}
+                {f.error && (
+                  <div
+                    className="truncate text-[11px] text-amber-600 dark:text-amber-400"
+                    title={f.error}
+                  >
+                    {f.error}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        <AlertDialogFooter>
+          <AlertDialogAction
+            onClick={onDismiss}
+            data-testid="closet-save-failures-dismiss"
+          >
+            {t('common.gotIt', { defaultValue: 'Got it' })}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+

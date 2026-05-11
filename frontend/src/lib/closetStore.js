@@ -49,6 +49,15 @@ let _state = {
   lastIncSync: 0,     // epoch ms of the last incremental sync
   loading: false,
   error: null,
+  // Phase Z4 — optimistic "Save all" support. ``lastSaveFailures``
+  // is a transient list of save-failure descriptors produced when
+  // an optimistic upload to the closet couldn't be persisted on the
+  // server. The Closet page reads this and renders a one-shot
+  // warning dialog with the failed items' thumbnails + filenames so
+  // the user knows exactly what didn't make it (instead of silently
+  // disappearing from the optimistic view). Cleared by
+  // ``dismissSaveFailures`` once the user acknowledges the dialog.
+  lastSaveFailures: [],
 };
 
 const _listeners = new Set();
@@ -234,6 +243,39 @@ export const closetStore = {
       lastFullSync: 0,
       lastIncSync: 0,
       error: null,
+      lastSaveFailures: [],
     });
+  },
+
+  /**
+   * Phase Z4 — record one or more "Save all" failures so the Closet
+   * page can surface a single dialog summarising what didn't sync.
+   *
+   * Each failure descriptor should carry at minimum:
+   *   { id, title, filename, thumbnail, error }
+   *
+   * ``id`` is the optimistic UUID we used (purely identifying for
+   * de-duplication if recordSaveFailures fires more than once on
+   * the same batch). ``thumbnail`` is a data URL the dialog renders
+   * inline so the user can recognise their photo without another
+   * round-trip.
+   */
+  recordSaveFailures(failures) {
+    if (!Array.isArray(failures) || failures.length === 0) return;
+    const existing = _state.lastSaveFailures || [];
+    const byId = new Map(existing.map((f) => [f.id, f]));
+    for (const f of failures) {
+      if (!f || !f.id) continue;
+      byId.set(f.id, f);
+    }
+    _set({ lastSaveFailures: Array.from(byId.values()) });
+  },
+
+  /** Dismiss the save-failures dialog. Idempotent. */
+  dismissSaveFailures() {
+    if (!_state.lastSaveFailures || _state.lastSaveFailures.length === 0) {
+      return;
+    }
+    _set({ lastSaveFailures: [] });
   },
 };
