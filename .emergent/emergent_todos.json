@@ -1,26 +1,22 @@
 [
   {
-    "content": "Find closet card component for sparkle overlay placement",
+    "content": "Extend _extract_json to handle JSON arrays",
     "status": "completed"
   },
   {
-    "content": "Add _pendingSync state field + lastSaveFailures to closetStore",
+    "content": "Update analyze() to take first item when array is returned + log warning",
     "status": "completed"
   },
   {
-    "content": "Refactor AddItem.saveAll: optimistic upsert + parallel background sync",
+    "content": "Add language-aware user_text helper and wire into both Gemma + Gemini paths",
     "status": "completed"
   },
   {
-    "content": "Add sparkle overlay to closet card when _pendingSync=true",
+    "content": "Lint + restart backend + smoke test",
     "status": "completed"
   },
   {
-    "content": "Add post-save failures dialog (thumbnails + filenames) on Closet page",
-    "status": "completed"
-  },
-  {
-    "content": "i18n keys + lint + smoke screenshot",
+    "content": "Update plan.md follow-ups",
     "status": "completed"
   }
 ]

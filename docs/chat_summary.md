@@ -1215,3 +1215,335 @@ re-fires `api.createItem` with the captured body. Requires
 stashing the full payload on the failure descriptor (currently
 only metadata is kept). Estimate: 80 lines of code, one new
 `api.createItemRaw` helper that bypasses the optimistic dance.
+
+
+---
+
+# Phase Z5 — Eyes v2 Merge + Mixed-Precision Quantization Pipeline
+
+User finished training the Eyes v2 (Gemma 3n E2B / "Gemma4-E2B") LoRA
+adapter in bf16 and confirmed it passes the schema/vision-blindness eval.
+Next step: ship to (a) the web/server backend via GGUF and (b) mobile
+devices via MediaPipe LiteRT `.task`, with the entire vision tower +
+audio tower + cross-modal embed projections + PLE tables kept in FP16
+to prevent quantization degradation.
+
+## 1. Decisions taken (with the user)
+
+* **Q1 (deployment targets):** 1a + 1b — GGUF for web, LiteRT `.task`
+  for mobile. Same merged HF checkpoint feeds both pipelines.
+* **Q2 (FP16 keep-list):** User audit covered `model.vision_tower.*`
+  (16 SigLIP encoder layers + patch_embedder + pooler),
+  `model.audio_tower.*`, `model.embed_vision.*`, `model.embed_audio.*`
+  and most of the LM (35 layers — interesting note: layers 15-34 only
+  list q_proj/o_proj, confirming Gemma 3n's KV-sharing optimization).
+  Notebook proactively adds the PLE tables (`embed_tokens_per_layer`,
+  `per_layer_model_projection`, `per_layer_projection_norm`,
+  `*.per_layer_projection`) to the keep-list since Google flags them
+  as quantization-sensitive and the user audit didn't include them.
+* **Q3 (output dir):** `Eyes_v2_Gemma4e2b_merged` alongside the existing
+  adapter on Drive.
+* **Q4 (size budget):** "a+b+c" — emit all three GGUF variants
+  (Q4_K_M aggressive, Q5_K_M balanced, Q8_0 quality) so the user can
+  A/B test on real garments. Same `mmproj-F16.gguf` shared by all three.
+
+## 2. Files changed / added
+
+```
+docs/
+  Eyes_v2_Merge_Quantize.ipynb   (NEW — single self-contained Colab notebook)
+  chat_summary.md                (this section)
+```
+
+The notebook is structured as 7 numbered sections so any stage can
+be re-run independently:
+
+* §1 Setup (transformers, peft, accelerate, litert-torch, cmake build deps)
+* §2 Paths + the canonical KEEP_FP16_REGEX list (single source of truth)
+* §3 LoRA merge in bf16 → save HF safetensors shards to Drive +
+     blank-canvas inference sanity check (catches a broken merge before
+     spending 30 min on quantization)
+* §4 GGUF: build llama.cpp → `convert_hf_to_gguf.py --mmproj` →
+     three `llama-quantize` runs with `--tensor-type` overrides mapped
+     from the HF keep-list onto llama.cpp's GGUF tensor names
+     (`blk.N.attn_*`, `per_layer_*`, etc.)
+* §5 GGUF smoke test with `llama-mtmd-cli` on an uploaded garment photo,
+     all three variants
+* §6 LiteRT export via `ai-edge-torch` with `ai-edge-quantizer`
+     Recipe API — INT4 blockwise on LM linears, FP16 NO_QUANTIZE
+     overrides for every keep-list pattern, then
+     `mediapipe-model-maker` to package the `.tflite` into a `.task`
+* §7 Troubleshooting playbook (Q4 schema regression → pin first/last
+     LM blocks; stale llama.cpp → git pull; MediaPipe Maker missing →
+     manual zip recipe; LiteRT OOM on Colab free → run §6 locally)
+
+## 3. Critical implementation notes for next agent
+
+* **HF↔GGUF tensor name mapping.** The notebook documents this inline
+  in §4c — llama.cpp strips `model.` and renames sub-blocks. The
+  KEEP_FP16_REGEX in §2 uses HF names; the GGUF_KEEP_FP16_OVERRIDES
+  in §4c uses GGUF names. If llama.cpp ever renames again, only that
+  one block needs updating.
+* **Vision/audio go to mmproj, not LM gguf.** This collapses the LM-
+  side keep-list to just `token_embd`, `per_layer_*`, and norms.
+* **litert-torch builder probing.** §6 probes four entry-point names
+  in priority order (`gemma3n.build_model_e2b`, …, falling back to
+  `gemma3.build_model_1b`) because the package surface has shifted
+  across versions. Keep this fallback chain in mind if the user
+  upgrades litert-torch and a new name appears.
+* **Gemma 3n KV-share architecture.** Layers 15-34 in the LM have
+  q_proj and o_proj listed but no k_proj/v_proj in the user audit —
+  this is the KV-sharing optimization, not missing layers. Both
+  llama.cpp and litert-torch handle this natively; no special
+  treatment needed in the keep-list.
+
+## 4. Expected user workflow
+
+1. Open `docs/Eyes_v2_Merge_Quantize.ipynb` in Colab Pro (L4 or A100).
+2. Run §1-§3 (≈20 min: install + merge + save to Drive).
+3. Run §4 (≈30 min: llama.cpp build + convert + 3 quantize passes).
+4. Run §5 with a real garment photo → eyeball that Q4_K_M still emits
+   the 18-field JSON. If not, follow §7a fix order.
+5. Run §6 (≈45 min: LiteRT INT4 conversion is the slow part).
+6. Once Q5_K_M passes a 30-image smoke test against
+   `Eyes_v2_Local_Eval.ipynb`'s harness, flip
+   `config.eyes_provider.active` in MongoDB from `gemini` to
+   `custom_eyes_v2_q5km` (loader change in `eyes_override.py` already
+   exists from the v1 work, just needs to point at the new GGUF path).
+
+## 5. New backlog items
+
+### `Z5-eyes-v2-prod-cutover` — P1 (blocked on user's quantization run)
+
+After §5 in the notebook confirms Q5_K_M quality matches bf16:
+1. Upload `Eyes_v2_Gemma4e2b-Q5_K_M.gguf` + `mmproj-F16.gguf` to the
+   prod VPS at `/var/models/eyes_v2/`.
+2. Add `custom_eyes_v2_q5km` as a routing target in
+   `backend/app/services/garment_vision.py` (mirror the existing
+   `custom_eyes_v1` block).
+3. Run the existing `Eyes_Vision_Smoke_Test.ipynb` against the prod
+   endpoint to confirm schema parity.
+4. Flip `config.eyes_provider.active` and monitor
+   `/api/v1/admin/eyes/diagnostics` for 24h before turning Gemini off.
+
+### `Z5-mobile-deployment-pipeline` — P2 (blocked on Capacitor wrap)
+
+The `.task` from §6 needs the Capacitor mobile wrap (separate
+future task `Deploy DressApp Assistant to mobile devices`). When
+that lands, drop the `.task` into the Android assets folder and
+wire `MediaPipe LlmInference` into the existing
+`garmentVision.captureAndAnalyze()` call path.
+
+
+---
+
+# Phase Z6 — Pivot to Gemma 4 E2B (NEW base), GGUF-only, INT4 on-device
+
+User clarified that "Gemma4-E2B" was actually meant as a placeholder for the
+genuinely-new `google/gemma-4-E2B-it` (Apache-2, released April 2026), NOT
+Gemma 3n. Previous Z5 notebook assumed Gemma 3n architecture, which is
+architecturally invalid for Gemma 4. Phase Z6 rewrites the quantization
+notebook end-to-end against the real Gemma 4 specs.
+
+## 1. Decisions taken (with user)
+
+* **Base model:** `google/gemma-4-E2B-it` (verified architecture: 5.1B total
+  params / 2.3B effective, 35 LM layers, hybrid sliding+global attention with
+  unified K/V on global, p-RoPE, PLE retained from 3n, native trimodal
+  text+image+audio, 128K context, `AutoModelForMultimodalLM` loader).
+* **Mode:** auto-detect (option c) — notebook merges LoRA if
+  `ADAPTER_DIR/adapter_config.json` exists, otherwise quantizes the stock
+  model directly. Lets user benchmark vanilla Gemma 4 quality on Pi/phone
+  before deciding whether to retrain Eyes v3 on it.
+* **Target:** GGUF-only (no LiteRT) — llama.cpp now runs on Pi 5, Android
+  (Termux), and iOS (via Capacitor/Swift wrappers), so Q4_K_M GGUF + F16
+  mmproj covers the entire deployment matrix.
+* **Quantization:** single Q4_K_M build (~2-3 GB LM + ~600 MB mmproj = ~3 GB
+  total) — fits Pi 5 (8 GB) and any phone with ≥4 GB RAM comfortably.
+
+## 2. Critical architectural deltas from Z5 (Gemma 3n) to Z6 (Gemma 4)
+
+| Aspect                  | Z5 (Gemma 3n)                         | Z6 (Gemma 4)                              |
+|-------------------------|---------------------------------------|--------------------------------------------|
+| HF loader               | `AutoModelForImageTextToText`         | `AutoModelForMultimodalLM`                |
+| LM layers               | 30                                    | 35                                         |
+| Audio status            | Wired but unused by DressApp          | Native 1st-class modality (30s ASR/AST)   |
+| Chat template           | Gemma 3 (`<start_of_turn>`)           | Native `system`/`user`/`assistant`        |
+| Reasoning control       | n/a                                   | `<\|think\|>` token in system prompt       |
+| Image token budget      | n/a                                   | 70/140/280/560/1120 (configurable)        |
+| Context                 | 8K                                    | 128K                                       |
+| Module-list audit       | Hard-coded from user's manual listing | **Runtime-discovered** via state-dict keys |
+
+## 3. Files changed
+
+```
+docs/
+  Eyes_v2_Merge_Quantize.ipynb   (REWRITTEN — Gemma 4 E2B / GGUF-only / Q4_K_M only)
+  chat_summary.md                (this section)
+```
+
+Notebook section layout:
+* §0 Title + Gemma 4 fact box (pulled from official model card)
+* §1 Setup
+* §2 Paths + adapter auto-detection (sets `MODE = MERGE+QUANTIZE` or `QUANTIZE-ONLY`)
+* §3 Conditional merge (3 cells, all short-circuit if no adapter)
+* §3b **Runtime module discovery** — streams state-dict keys, classifies
+   them into 11 families, prints coverage. This replaces the hard-coded
+   Gemma-3n module list which would silently match zero tensors on Gemma 4.
+* §4 GGUF: build llama.cpp → `convert_hf_to_gguf.py --mmproj` → single
+   `llama-quantize` pass to Q4_K_M with FP16 overrides on PLE/norms/embeddings
+* §5 Smoke test (`llama-mtmd-cli` with the DressApp Eyes prompt)
+* §6 Troubleshooting (gemma4 arch missing → branch fallback; Q4 schema
+   regression → 3-step fix ladder; Pi 5 build instructions; backend wiring)
+
+## 4. Important caveat for next agent
+
+The user's old `Eyes_v2_Gemma4e2b` LoRA adapter (trained on Gemma 3n) is
+**incompatible** with Gemma 4. If the user wants Eyes-level garment quality
+on Gemma 4, they need to retrain. The notebook gracefully handles this by
+quantizing the stock model when no adapter is present, but a retrained
+`Eyes_v3_Gemma4_E2B` adapter is the production path.
+
+## 5. New backlog items
+
+### `Z6-eyes-v3-retrain` — P1 (user action)
+
+Retrain the Eyes LoRA on `google/gemma-4-E2B-it`. The existing v2 training
+notebook needs:
+1. `AutoModelForMultimodalLM` instead of `AutoModelForImageTextToText`.
+2. Updated chat template (native system/user/assistant, no
+   `<|think|>` for JSON-strict).
+3. Target modules will change — re-run `model.named_parameters()` and pick
+   LoRA target_modules accordingly (probably `q_proj`, `k_proj`, `v_proj`,
+   `o_proj`, `gate_proj`, `up_proj`, `down_proj` on `language_model.layers.*`
+   — vision/audio towers should be frozen).
+4. PEFT config: `r=16, alpha=32` is a fine starting point for Gemma 4 E2B.
+
+### `Z6-llama-cpp-gemma4-availability` — P1 (risk monitor)
+
+Gemma 4 is brand new. Verify `convert_hf_to_gguf.py` in current llama.cpp
+master accepts the architecture before kicking off a long Colab run. If
+not, fall back to the open Gemma-4 PR branch (§6a in the notebook documents
+the procedure).
+
+### `Z6-pi5-prod-test` — P2
+
+Once a Q4_K_M build passes the §5 smoke test in Colab, sync it to a Pi 5
+test rig and confirm 3-6 tok/s steady-state throughput on real DressApp
+garment uploads.
+
+
+---
+
+# Phase Z6 — COMPLETED ✅ Production Cutover Code Shipped
+
+## Quality validation results
+
+Tested against `0008.jpg` (man in blazer + trousers) and `0013.jpg` (woman in
+green sweater + green trousers + black/white tote bag). User feedback verbatim:
+"Received better than Gemini results."
+
+* **0008.jpg** — correctly classified as `"Blazer and Trousers"` / `"Suiting"`,
+  plaid pattern, wool blend, tailored fit. 18 fields populated, 12.7 s.
+* **0013.jpg** — model emitted a JSON **array** with one object per garment:
+  sweater + trousers + tote bag, each with all 18 fields. 15.4 s. The
+  parser was upgraded inline to accept both single-object and array shapes.
+
+Artifact pair: **4.08 GB Q4_K_M LM + 986 MB F16 mmproj = 5.07 GB total**.
+Fits Raspberry Pi 5 (8 GB) and any phone ≥ 6 GB RAM. Below the original
+2-3 GB stretch goal but the difference is mostly the Q8_0 token embedding
+which is non-negotiable for output quality on a 5.1 B-param model.
+
+## Files shipped (backend cutover)
+
+1. **`/app/backend/app/services/eyes_local_gemma4.py`** (NEW, 168 lines)
+   * Singleton `llama-cpp-python` runtime — loads the GGUF pair on first
+     request, lazy-imports so preview pods without llama-cpp-python keep
+     working.
+   * `async chat_completion()` API + multi-aware `parse_eyes_response()`
+     (returns dict OR list[dict] depending on prompt).
+   * Env-overridable paths and resource knobs (`_LM_PATH`,
+     `_MMPROJ_PATH`, `_N_GPU_LAYERS`, `_N_CTX`, `_N_THREADS`).
+   * Returns raw response — caller pipes through the parser. Mirrors the
+     `_call_gemma_space()` contract so the rest of `garment_vision.py`
+     doesn't care which backend served the request.
+
+2. **`/app/backend/app/services/garment_vision.py`** (PATCHED)
+   * Added `import os`.
+   * In `_eyes_chat_completion()`, added a Phase-Z6 branch that fires
+     when `active_provider == "gemma"` AND `EYES_GEMMA_BACKEND=local`:
+     calls `eyes_local_gemma4.chat_completion()`, records
+     provider-activity telemetry (`backend: "local"`,
+     `model: "gemma-4-e2b-q4_k_m-gguf"`), falls through to the existing
+     Space/Gemini ladder on artefact-missing or runtime error. No change
+     to default (`space`) behaviour.
+
+3. **`/app/backend/app/api/v1/admin.py`** (PATCHED)
+   * Added `import os`.
+   * `/api/v1/admin/eyes/diagnostics` now surfaces a new `local_gguf`
+     block when `EYES_GEMMA_BACKEND=local`: `lm_path`, `lm_path_exists`,
+     `lm_size_gb`, `mmproj_path`, `mmproj_path_exists`, `mmproj_size_mb`,
+     `model_loaded`, `n_ctx`, `n_threads`, `n_gpu_layers`.
+   * `env_block.EYES_GEMMA_BACKEND` surfaces the deployment-time switch.
+   * `resolved.would_use` becomes `"gemma-local-gguf"` when artefacts
+     are on disk and the backend switch is `local`; otherwise falls
+     through to Gemini with a descriptive `notes` entry.
+
+4. **`/app/docs/Eyes_v2_Merge_Quantize.ipynb`** (PATCHED, final)
+   * §5 parser now multi-aware (array OR object).
+   * `-n 2048` and `<|/think|>` prefix landed earlier in this phase.
+   * §4c keep-list final: `per_layer_token_embd` rides Q4_K_M (the 3.5 GB
+     win), `token_embd`/`lm_head` step to Q8_0, `layer_scalar` protected,
+     layernorm regex catches Gemma 4 naming.
+
+## Production cutover procedure (Hetzner VPS)
+
+```bash
+# 1. Install runtime
+pip install --upgrade "llama-cpp-python[server]>=0.3.0"
+
+# 2. Copy artefacts (~5 GB transfer)
+mkdir -p /var/models/eyes_v3
+rsync -avh ~/drive_mirror/Eyes_v3_Gemma4_E2B-Q4_K_M.gguf \
+            ~/drive_mirror/Eyes_v3_Gemma4_E2B-mmproj-F16.gguf \
+            /var/models/eyes_v3/
+
+# 3. Flip env switch in /etc/dressapp/dressapp-backend.env:
+EYES_GEMMA_BACKEND=local
+EYES_GEMMA_LOCAL_LM_PATH=/var/models/eyes_v3/Eyes_v3_Gemma4_E2B-Q4_K_M.gguf
+EYES_GEMMA_LOCAL_MMPROJ_PATH=/var/models/eyes_v3/Eyes_v3_Gemma4_E2B-mmproj-F16.gguf
+
+# 4. Restart + flip Mongo
+systemctl restart dressapp-backend
+mongosh "$MONGO_URL" --eval '
+  db.config.updateOne({_id:"eyes_provider"},
+    {$set:{value:"gemma", updated_at:new Date().toISOString(),
+           updated_by:"phase-z6-cutover"}}, {upsert:true})'
+
+# 5. Smoke-check
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://api.dressapp.io/api/v1/admin/eyes/diagnostics | jq '.resolved, .local_gguf'
+
+# Expected:
+# "resolved":  { "would_use": "gemma-local-gguf", ... }
+# "local_gguf": { "lm_path_exists": true, "lm_size_gb": 4.08,
+#                 "mmproj_path_exists": true, "mmproj_size_mb": 986, ... }
+```
+
+## Backlog after Z6
+
+* `Z7-eyes-v3-latency-opt` — P3. Apply JSON-schema-constrained generation
+  (`--json-schema-file`) to skip the thought trace at runtime. Drops
+  inference 12 s → 3-5 s. Requires confirming the mtmd-cli build
+  supports `--json-schema-file` (recent revisions do).
+* `Z7-eyes-v3-mobile-bundle` — P2. Bundle the GGUF pair with the
+  Capacitor wrap for on-device inference. Uses the same artefacts
+  shipped to prod.
+* `Z6-cleanup` — P3. Delete the F16 intermediate LM GGUF (~10 GB) from
+  Drive once Q4_K_M is verified live in production for 7 days.
+
+## Known issue still pending across this whole project
+
+* Profile "Save changes" button always active — fix in
+  `frontend/src/components/ProfileDetailsCard.jsx` by diffing form state
+  against a loaded-values snapshot. NOT touched this session.

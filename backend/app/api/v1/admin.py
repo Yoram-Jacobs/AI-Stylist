@@ -15,6 +15,7 @@ Sections:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -377,7 +378,6 @@ async def eyes_diagnostics(
         "fallback_path": fallback_path,
         "notes": notes,
     }
-
     # Live Gemma Space probe — GET /health with a tight timeout. We
     # don't POST /predict because that would consume Gemma capacity
     # on every diagnostics call and risk a token-quota hit. /health
