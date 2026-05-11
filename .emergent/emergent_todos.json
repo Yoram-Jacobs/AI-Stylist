@@ -1,26 +1,30 @@
 [
   {
-    "content": "Write Eyes_v2_Merge_Quantize.ipynb with §1 setup, §2 paths, §3 LoRA merge",
+    "content": "Fetch authoritative Gemma 4 specs from HF + Google docs",
     "status": "completed"
   },
   {
-    "content": "Add §4 GGUF export (build llama.cpp + convert + 3 mixed-precision quant variants + mmproj)",
+    "content": "Confirm scope with user (adapter mode + GGUF-only)",
     "status": "completed"
   },
   {
-    "content": "Add §5 GGUF smoke test (llama-mtmd-cli with garment image)",
+    "content": "Rewrite notebook against Gemma 4 architecture (35 layers, AutoModelForMultimodalLM, native chat template)",
     "status": "completed"
   },
   {
-    "content": "Add §6 LiteRT/.task export with FP16 keep-list",
+    "content": "Add runtime module discovery (§3b) to replace hard-coded Gemma 3n module list",
     "status": "completed"
   },
   {
-    "content": "Add §7 troubleshooting playbook + artifact summary",
+    "content": "Collapse to single Q4_K_M target for 2-3 GB on-device footprint",
     "status": "completed"
   },
   {
-    "content": "Update chat_summary.md with handoff note",
+    "content": "Strip LiteRT path, keep GGUF only",
+    "status": "completed"
+  },
+  {
+    "content": "Update chat_summary with Phase Z6 pivot notes",
     "status": "completed"
   }
 ]

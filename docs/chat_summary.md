@@ -1333,3 +1333,101 @@ future task `Deploy DressApp Assistant to mobile devices`). When
 that lands, drop the `.task` into the Android assets folder and
 wire `MediaPipe LlmInference` into the existing
 `garmentVision.captureAndAnalyze()` call path.
+
+
+---
+
+# Phase Z6 — Pivot to Gemma 4 E2B (NEW base), GGUF-only, INT4 on-device
+
+User clarified that "Gemma4-E2B" was actually meant as a placeholder for the
+genuinely-new `google/gemma-4-E2B-it` (Apache-2, released April 2026), NOT
+Gemma 3n. Previous Z5 notebook assumed Gemma 3n architecture, which is
+architecturally invalid for Gemma 4. Phase Z6 rewrites the quantization
+notebook end-to-end against the real Gemma 4 specs.
+
+## 1. Decisions taken (with user)
+
+* **Base model:** `google/gemma-4-E2B-it` (verified architecture: 5.1B total
+  params / 2.3B effective, 35 LM layers, hybrid sliding+global attention with
+  unified K/V on global, p-RoPE, PLE retained from 3n, native trimodal
+  text+image+audio, 128K context, `AutoModelForMultimodalLM` loader).
+* **Mode:** auto-detect (option c) — notebook merges LoRA if
+  `ADAPTER_DIR/adapter_config.json` exists, otherwise quantizes the stock
+  model directly. Lets user benchmark vanilla Gemma 4 quality on Pi/phone
+  before deciding whether to retrain Eyes v3 on it.
+* **Target:** GGUF-only (no LiteRT) — llama.cpp now runs on Pi 5, Android
+  (Termux), and iOS (via Capacitor/Swift wrappers), so Q4_K_M GGUF + F16
+  mmproj covers the entire deployment matrix.
+* **Quantization:** single Q4_K_M build (~2-3 GB LM + ~600 MB mmproj = ~3 GB
+  total) — fits Pi 5 (8 GB) and any phone with ≥4 GB RAM comfortably.
+
+## 2. Critical architectural deltas from Z5 (Gemma 3n) to Z6 (Gemma 4)
+
+| Aspect                  | Z5 (Gemma 3n)                         | Z6 (Gemma 4)                              |
+|-------------------------|---------------------------------------|--------------------------------------------|
+| HF loader               | `AutoModelForImageTextToText`         | `AutoModelForMultimodalLM`                |
+| LM layers               | 30                                    | 35                                         |
+| Audio status            | Wired but unused by DressApp          | Native 1st-class modality (30s ASR/AST)   |
+| Chat template           | Gemma 3 (`<start_of_turn>`)           | Native `system`/`user`/`assistant`        |
+| Reasoning control       | n/a                                   | `<\|think\|>` token in system prompt       |
+| Image token budget      | n/a                                   | 70/140/280/560/1120 (configurable)        |
+| Context                 | 8K                                    | 128K                                       |
+| Module-list audit       | Hard-coded from user's manual listing | **Runtime-discovered** via state-dict keys |
+
+## 3. Files changed
+
+```
+docs/
+  Eyes_v2_Merge_Quantize.ipynb   (REWRITTEN — Gemma 4 E2B / GGUF-only / Q4_K_M only)
+  chat_summary.md                (this section)
+```
+
+Notebook section layout:
+* §0 Title + Gemma 4 fact box (pulled from official model card)
+* §1 Setup
+* §2 Paths + adapter auto-detection (sets `MODE = MERGE+QUANTIZE` or `QUANTIZE-ONLY`)
+* §3 Conditional merge (3 cells, all short-circuit if no adapter)
+* §3b **Runtime module discovery** — streams state-dict keys, classifies
+   them into 11 families, prints coverage. This replaces the hard-coded
+   Gemma-3n module list which would silently match zero tensors on Gemma 4.
+* §4 GGUF: build llama.cpp → `convert_hf_to_gguf.py --mmproj` → single
+   `llama-quantize` pass to Q4_K_M with FP16 overrides on PLE/norms/embeddings
+* §5 Smoke test (`llama-mtmd-cli` with the DressApp Eyes prompt)
+* §6 Troubleshooting (gemma4 arch missing → branch fallback; Q4 schema
+   regression → 3-step fix ladder; Pi 5 build instructions; backend wiring)
+
+## 4. Important caveat for next agent
+
+The user's old `Eyes_v2_Gemma4e2b` LoRA adapter (trained on Gemma 3n) is
+**incompatible** with Gemma 4. If the user wants Eyes-level garment quality
+on Gemma 4, they need to retrain. The notebook gracefully handles this by
+quantizing the stock model when no adapter is present, but a retrained
+`Eyes_v3_Gemma4_E2B` adapter is the production path.
+
+## 5. New backlog items
+
+### `Z6-eyes-v3-retrain` — P1 (user action)
+
+Retrain the Eyes LoRA on `google/gemma-4-E2B-it`. The existing v2 training
+notebook needs:
+1. `AutoModelForMultimodalLM` instead of `AutoModelForImageTextToText`.
+2. Updated chat template (native system/user/assistant, no
+   `<|think|>` for JSON-strict).
+3. Target modules will change — re-run `model.named_parameters()` and pick
+   LoRA target_modules accordingly (probably `q_proj`, `k_proj`, `v_proj`,
+   `o_proj`, `gate_proj`, `up_proj`, `down_proj` on `language_model.layers.*`
+   — vision/audio towers should be frozen).
+4. PEFT config: `r=16, alpha=32` is a fine starting point for Gemma 4 E2B.
+
+### `Z6-llama-cpp-gemma4-availability` — P1 (risk monitor)
+
+Gemma 4 is brand new. Verify `convert_hf_to_gguf.py` in current llama.cpp
+master accepts the architecture before kicking off a long Colab run. If
+not, fall back to the open Gemma-4 PR branch (§6a in the notebook documents
+the procedure).
+
+### `Z6-pi5-prod-test` — P2
+
+Once a Q4_K_M build passes the §5 smoke test in Colab, sync it to a Pi 5
+test rig and confirm 3-6 tok/s steady-state throughput on real DressApp
+garment uploads.
