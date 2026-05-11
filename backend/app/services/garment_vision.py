@@ -349,8 +349,8 @@ def _user_prompt(code: str | None) -> str:
     output language without altering the JSON schema.
     """
     base = (
-        "Analyse this garment photograph and return the "
-        "JSON object only \u2014 no commentary."
+        "Analyse this photograph: If any garments are present, "
+        "return the JSON objects only \u2014 no commentary."
     )
     code = (code or "en").lower()
     if code == "en":
