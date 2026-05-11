@@ -1,26 +1,26 @@
 [
   {
-    "content": "Add cameraInputRef + openCamera helper to ItemDetail",
+    "content": "Find closet card component for sparkle overlay placement",
     "status": "completed"
   },
   {
-    "content": "Add second hidden <input capture=environment> for camera capture",
+    "content": "Add _pendingSync state field + lastSaveFailures to closetStore",
     "status": "completed"
   },
   {
-    "content": "Update no-image state UI: dual buttons (library + camera)",
+    "content": "Refactor AddItem.saveAll: optimistic upsert + parallel background sync",
     "status": "completed"
   },
   {
-    "content": "Update image-exists state UI: add camera-capture button next to Replace",
+    "content": "Add sparkle overlay to closet card when _pendingSync=true",
     "status": "completed"
   },
   {
-    "content": "Add i18n keys (itemDetail.photo.takeLabel) to en.json",
+    "content": "Add post-save failures dialog (thumbnails + filenames) on Closet page",
     "status": "completed"
   },
   {
-    "content": "Take screenshot of edit-mode UI to verify layout",
+    "content": "i18n keys + lint + smoke screenshot",
     "status": "completed"
   }
 ]
