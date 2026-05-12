@@ -319,7 +319,7 @@
       "showingOriginal": "Originalausschnitt",
       "showOriginal": "Original anzeigen",
       "showRepaired": "Repariert anzeigen",
-      "toggleAI": "AI",
+      "toggleAI": "KI",
       "toggleOriginal": "Original",
       "ariaShowOriginal": "Originalausschnitt anzeigen",
       "ariaShowRepaired": "AI-repariertes Bild anzeigen",
@@ -405,7 +405,7 @@
     "delete": "Löschen",
     "deleteConfirm": "Diese Konversation löschen?",
     "renameConversation": "Umbenennen",
-    "fashionScout": "Fashion Scout",
+    "fashionScout": "Mode-Scout",
     "fashionScoutSub": "Live-Signale von Laufsteg, Straße, Nachhaltigkeit und Social Media.",
     "scoutEmpty": "Noch keine Scout-Karten vorhanden — schau bald wieder vorbei.",
     "refreshScout": "Aktualisieren",
@@ -415,7 +415,7 @@
     "scoutReadMore": "Mehr lesen",
     "chatPanel": "Chat",
     "openConversations": "Konversationen",
-    "openScout": "Fashion Scout",
+    "openScout": "Mode-Scout",
     "untitledConversation": "Unbenannter Chat",
     "todayLabel": "Heute",
     "yesterdayLabel": "Gestern",
@@ -492,7 +492,7 @@
     "status": "Status",
     "nearYou": "In deiner Nähe",
     "anyDistance": "Beliebige Entfernung",
-    "radius": "Radius",
+    "radius": "Umkreis",
     "radiusKm": "{{km}} km",
     "distanceKmAway": "{{km}} km entfernt",
     "needLocationForNearby": "Aktiviere den Standort, um nach Entfernung zu sortieren",
@@ -757,7 +757,7 @@
     "context": "Kontext",
     "notConnected": "Nicht verbunden",
     "connectedBadge": "Verbunden",
-    "title": "Google Calendar",
+    "title": "Google Kalender",
     "description": "Lass den Stylisten Outfits basierend auf deinem tatsächlichen Zeitplan erstellen. Wir fordern Lesezugriff auf deinen primären Kalender an und speichern Termine nur auf dem Server, während wir Empfehlungen erstellen.",
     "signedInAs": "Angemeldet als",
     "offlineHint": "Solange keine Verbindung besteht, verwendet der Stylist einen Platzhalter für einen „Arbeitstag“, wenn du das Häkchen setzt bei",
@@ -788,10 +788,10 @@
     "dress_code": {
       "casual": "Lässig",
       "smart-casual": "Smart-Casual",
-      "business": "Business",
-      "formal": "Formal",
+      "business": "Geschäftlich",
+      "formal": "Formell",
       "athletic": "Sportlich",
-      "loungewear": "Loungewear"
+      "loungewear": "Freizeitkleidung"
     },
     "gender": {
       "men": "Herren",
@@ -836,8 +836,8 @@
     "formality": {
       "casual": "Lässig",
       "smart-casual": "Smart-Casual",
-      "business": "Business",
-      "formal": "Formal"
+      "business": "Geschäftlich",
+      "formal": "Formell"
     },
     "intent": {
       "own": "Behalten",
@@ -862,12 +862,12 @@
     "sub_category": {
       "shirt": "Hemd",
       "t_shirt": "T-Shirt",
-      "tshirt": "T-shirt",
-      "t-shirt": "T-shirt",
+      "tshirt": "T-Shirt",
+      "t-shirt": "T-Shirt",
       "polo": "Polohemd",
       "blouse": "Bluse",
       "sweater": "Pullover",
-      "hoodie": "Hoodie",
+      "hoodie": "Kapuzenpullover",
       "tank": "Tanktop",
       "tank_top": "Tanktop",
       "jacket": "Jacke",
@@ -884,11 +884,11 @@
       "leggings": "Leggings",
       "dress": "Kleid",
       "jumpsuit": "Jumpsuit",
-      "romper": "Romper",
+      "romper": "Strampler",
       "sneakers": "Sneaker",
       "boots": "Stiefel",
       "sandals": "Sandalen",
-      "heels": "Heels",
+      "heels": "Absatzschuhe",
       "loafers": "Loafer",
       "flats": "Flache Schuhe",
       "bag": "Tasche",
@@ -898,7 +898,7 @@
       "scarf": "Schal",
       "hat": "Hut",
       "cap": "Kappe",
-      "beanie": "Beanie",
+      "beanie": "Beanie (Mütze)",
       "glasses": "Brille",
       "sunglasses": "Sonnenbrille",
       "watch": "Uhr",
@@ -923,7 +923,7 @@
       "crew_neck_sweater": "Rundhalspullover",
       "cardigan": "Strickjacke",
       "pullover": "Pullover",
-      "hoodie": "Hoodie",
+      "hoodie": "Kapuzenpullover",
       "zip_hoodie": "Zip-Hoodie",
       "bomber_jacket": "Bomberjacke",
       "denim_jacket": "Jeansjacke",
@@ -957,7 +957,7 @@
       "low_tops": "Low-Tops",
       "tote_bag": "Shopper",
       "crossbody_bag": "Umhängetasche",
-      "clutch": "Clutch"
+      "clutch": "Clutch / Abendtasche"
     }
   },
   "location": {
@@ -1049,7 +1049,7 @@
     "pause": "Pausieren",
     "resume": "Fortsetzen",
     "metrics": {
-      "impressions": "Impressions",
+      "impressions": "Impressionen",
       "clicks": "Klicks",
       "spent": "Ausgegeben"
     },
