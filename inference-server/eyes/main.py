@@ -215,19 +215,22 @@ def _build_llama_argv(model_path: Path, mmproj_path: Path | None) -> list[str]:
     Flags chosen:
       --jinja          — use the GGUF's embedded chat template (Gemma 4
                           ships its own template; the right thing here).
-      --reasoning-budget 0 — DISABLES the model's thinking phase. The
-                          fine-tune is a thinking model that wraps its
-                          output in ``<|think|> ... </think>``; on CPU
-                          that easily eats 60-120 s before any visible
-                          tokens are produced. Setting the budget to 0
-                          forces the server to emit the closing think
-                          tag immediately, so the model goes straight
-                          to producing JSON. ~3-4× speed-up on CPX32.
-      --chat-template-kwargs — belt-and-braces for templates that read
-                          the ``enable_thinking`` boolean directly from
-                          the Jinja env. Older llama.cpp builds without
-                          ``--reasoning-budget`` ignore this flag harm-
-                          lessly; newer builds honor both.
+      --reasoning off  — DISABLES the model's thinking phase entirely.
+                          The fine-tune is a thinking model that wraps
+                          its output in ``<|think|> ... </think>``; on
+                          CPU that easily eats 60-120 s before any
+                          visible tokens are produced. The newer
+                          ``--reasoning off`` flag injects the closing
+                          think tag at the start of the assistant turn,
+                          so the model skips reasoning entirely and
+                          goes straight to producing JSON.
+                          (Older builds: this flag is unknown and we
+                          fall back to ``--reasoning-budget 0`` below.)
+      --reasoning-budget 0 — belt-and-braces for older llama.cpp builds
+                          that don't yet support ``--reasoning``. Caps
+                          the reasoning token budget to zero so even
+                          if the model enters the think phase, it
+                          emits no tokens there.
       -fa              — flash-attention; meaningful speedup on CPU too.
       --no-warmup      — skip the synthetic warmup token; saves ~3 s
                           and the first real request will warm naturally.
@@ -242,8 +245,8 @@ def _build_llama_argv(model_path: Path, mmproj_path: Path | None) -> list[str]:
         "--batch-size", str(N_BATCH),
         "--n-predict", "1024",
         "--jinja",
+        "--reasoning", "off",
         "--reasoning-budget", "0",
-        "--chat-template-kwargs", '{"enable_thinking": false}',
         "-fa", "auto",
     ]
     if mmproj_path is not None:

@@ -313,9 +313,9 @@ SYSTEM_PROMPT = (
     "Each garment object has the following shape (all keys optional except "
     "`title`):\n"
     "{\n"
-    '  "name": string,                     // 2\u20135 words. Must be UNIQUE & distinguishing \u2014 weave in a defining detail (material, fit, vibe, pattern, era, hardware, neckline, wash) so the user never ends up with 12 generic "Black T-shirt" rows. Bad: "Black T-shirt". Good: "Heavyweight Boxy Black Tee", "Vintage Pocket Crewneck", "Slim Ribbed Black Tee". Write in the user\'s language.\n'
-    '  "title": string,                    // fallback short title (required). Same uniqueness & language rules as `name`.\n'
-    '  "caption": string,                  // ONE confident, vivid sentence in the user\'s language describing what makes this piece tick \u2014 silhouette, surface detail, what it pairs with. Max 240 chars. NEVER hedge: forbid "seems", "appears", "probably", "looks like", "might be". State observations directly. If `state` is "used" and `condition` is "bad", end with one short repair/enhancement tip.\n'
+    '  "name": string,                     // 2\u20135 words IN THE USER\'S LANGUAGE. Must be UNIQUE & distinguishing \u2014 weave in a defining detail (material, fit, vibe, pattern, era, hardware, neckline, wash) so the user never ends up with 12 generic "Black T-shirt" rows. The pattern is "<distinguishing detail> + <core garment>" \u2014 e.g. heavyweight boxy + tee, ribbed slim + crewneck, vintage pocket + tee. Render that pattern in the user\'s target language, do NOT echo the English examples verbatim.\n'
+    '  "title": string,                    // fallback short title (required). Same uniqueness & language rules as `name`. Must be written IN THE USER\'S LANGUAGE.\n'
+    '  "caption": string,                  // ONE confident, vivid sentence IN THE USER\'S LANGUAGE describing what makes this piece tick \u2014 silhouette, surface detail, what it pairs with. Max 240 chars. NEVER hedge: forbid "seems", "appears", "probably", "looks like", "might be". State observations directly. If `state` is "used" and `condition` is "bad", end with one short repair/enhancement tip.\n'
     '  "category": string,                 // top bucket: "Top", "Bottom", "Outerwear", "Full Body", "Footwear", "Accessories", "Underwear"\n'
     '  "sub_category": string,             // e.g. "Shirt", "Pants", "Dress", "Coat", "Sneakers"\n'
     '  "item_type": string,                // specific type: "Oxford shirt", "Mini-dress", "Crew-neck sweater"\n'
@@ -515,6 +515,12 @@ def _user_prompt(code: str | None) -> str:
     the freshest English instruction the model sees before generating.
     Reinforcing the language in the user text reliably anchors the
     output language without altering the JSON schema.
+
+    For non-English locales we also bookend the prompt: opening line
+    says "reply in <Language>"; closing line repeats that the FREE-TEXT
+    fields (``name`` / ``title`` / ``caption``) must be in <Language>
+    even though they are short, because the model loves to fall back
+    to English for label-like values.
     """
     base = (
         "Analyse this photograph. If one garment is visible return a single "
@@ -525,13 +531,12 @@ def _user_prompt(code: str | None) -> str:
     if code == "en":
         return base
     name = _LANG_NAMES.get(code, "English")
-    # Put the language line FIRST so it is the most prominent
-    # instruction; restate that keys/enums stay English so we don't
-    # localise the schema by accident.
     return (
         f"Reply in {name} ({code}). "
         f"Keep JSON keys and enum values in English. "
         + base
+        + f" Final reminder: `name`, `title`, and `caption` MUST be in "
+        f"{name} \u2014 do not default to English for these short fields."
     )
 
 
