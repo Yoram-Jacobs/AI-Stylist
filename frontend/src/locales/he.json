@@ -50,7 +50,8 @@
     "error": "שגיאה",
     "success": "הצלחה",
     "noResults": "אין תוצאות",
-    "comingSoon": "בקרוב"
+    "comingSoon": "בקרוב",
+    "gotIt": "הבנתי"
   },
   "auth": {
     "welcomeBack": "ברוך שובך",
@@ -95,7 +96,7 @@
     "activeListings": "מודעות פעילות בשוק",
     "platformFee": "עמלת פלטפורמה",
     "platformFeeSub": "לאחר עמלות סליקה",
-    "trendScout": "Trend-Scout",
+    "trendScout": "סייר טרנדים",
     "dailyEdit": "העריכה היומית",
     "dailyEditOn": "העריכה היומית · {{date}}"
   },
@@ -123,7 +124,13 @@
     "color": "צבע",
     "season": "עונה",
     "intent": "מטרה",
-    "anyCategory": "כל קטגוריה"
+    "anyCategory": "כל קטגוריה",
+    "duplicateBadge": "סומן כפריט כפול — נשמר במכוון, מוסתר מהצעות לבוש.",
+    "pendingSync": "מסנכרן",
+    "saveFailuresTitle_one": "תמונה אחת לא עלתה",
+    "saveFailuresTitle_other": "{{count}} תמונות לא עלו",
+    "saveFailuresBody": "פריטים אלו לא הצליחו להישמר בארון שלך. נסי להעלות אותם שוב.",
+    "saveFailuresUnnamed": "פריט ללא כותרת"
   },
   "addItem": {
     "title": "העלאה ומילוי אוטומטי",
@@ -145,7 +152,8 @@
       "incoming": "העלאה חדשה",
       "cancel": "בטל העלאה",
       "confirm": "הוסף בכל זאת",
-      "thisItem": "פריט זה"
+      "thisItem": "פריט זה",
+      "saveFailed": "לא ניתן לשמור את הפריט הכפול. בדקי ושתמשי בשמור הכל."
     },
     "saveAll": "שמור הכל",
     "savedAll": "כל הפריטים נשמרו",
@@ -212,7 +220,39 @@
     "removeTagAria": "הסר תגית {{label}}",
     "removeEntryAria": "הסר {{label}}",
     "colorSlotPlaceholder": "שם הצבע",
-    "fabricSlotPlaceholder": "שם הבד"
+    "fabricSlotPlaceholder": "שם הבד",
+    "preflight": {
+      "title": "{{count}} מהתמונות שבחרת נראות כפולות",
+      "body": "הקבצים האלה כבר קיימים בארון שלך. דלגי עליהם — או לחצי על ⭐ האדום כדי להוסיף בכל זאת. מוח הסטייליסט ישאיר פריטים כפולים מסומנים מחוץ להצעות לבוש כך שלא יוכל להמליץ על אותו פריט פעמיים.",
+      "existing": "בארון",
+      "incoming": "העלאה חדשה",
+      "noThumb": "אין תצוגה מקדימה",
+      "untitled": "פריט קיים",
+      "unnamedFile": "קובץ ללא כותרת",
+      "rowSkip": "דלגי",
+      "rowAdd": "הוסיפי בכל זאת",
+      "skipAll": "דלגי על כל הכפולים",
+      "addAll": "הוסיפי הכל בכל זאת",
+      "confirm": "המשיכי",
+      "summary": "{{willAdd}} יתווספו · {{willSkip}} ידולגו",
+      "allSkipped": "כל התמונות שנבחרו היו כפולות ודולגו.",
+      "allDuplicatesSkippedBatch": "דולגו {{count}} תמונות שכבר נמצאות בארון שלך — אין שום דבר חדש להעלות."
+    },
+    "savedOptimistic_one": "נוסף לארון שלך — מסתנכרן ברקע",
+    "savedOptimistic_other": "{{count}} פריטים נוספו לארון שלך — מסתנכרנים ברקע",
+    "bgUpload": {
+      "started": "מעלה {{count}} תמונות ברקע…",
+      "processingTitle": "מעבד את התמונות שלך…",
+      "processingBody": "אפשר לעזוב את העמוד הזה — נמשיך לעבוד ברקע. ערכי כל פריט שלא התאים בארון שלך כשנסיים.",
+      "savedFailed": "נשמרו {{saved}} · נכשלו {{failed}}",
+      "done": "נשמרו {{count}} פריטים. ערכי כל פריט שלא התאים בארון שלך.",
+      "partial": "נשמרו {{saved}} · {{failed}} נכשלו",
+      "partialAnalyze": "נשמרו {{saved}} פריטים · {{analyzeFailed}} דורשים מילוי שדות (ניתוח נכשל).",
+      "duplicatesPending": "נשמרו {{saved}} פריטים חדשים · {{pending}} נראים כפולים — בדקי אותם למטה.",
+      "duplicatesInline": "{{count}} פריט/ים דורשים את אישורך — הם נראים כפולים של פריטים שכבר נמצאים בארון שלך.",
+      "skippedDupSuffix": "(דולגו {{count}} שכבר נמצאים בארון)",
+      "failed": "לא ניתן לשמור שום פריט. נסי שוב."
+    }
   },
   "itemDetail": {
     "back": "חזור",
@@ -328,6 +368,17 @@
       "culturalTags": "תגיות תרבותיות",
       "culturalTagPlaceholder": "הוסף תגית תרבותית",
       "notes": "הערות"
+    },
+    "photo": {
+      "addLabel": "הוספת תמונה",
+      "takeLabel": "צילום תמונה",
+      "replaceLabel": "החלפת תמונה",
+      "subtitleEmpty": "לפריט הזה אין עדיין תמונה — צלמי או העלי אחת. השתמשי בניקוי רקע וניתוח אחר כך אם את רוצה חיתוך מחודש / מילוי שדות מחדש.",
+      "subtitleReplace": "העלי תמונה חדשה. המקורית נשמרת כמו שהיא — השתמשי בניקוי רקע וניתוח אחר כך כדי לרענן את החיתוך והשדות.",
+      "running": "מעלה…",
+      "success": "התמונה עודכנה",
+      "error": "לא ניתן לעדכן את התמונה. נסי שוב.",
+      "placeholderHint": "פריט DPP בלבד — אין תמונה מצורפת"
     }
   },
   "stylist": {
@@ -686,7 +737,7 @@
     "listings": "מודעות",
     "transactions": "עסקאות",
     "providers": "ספקים",
-    "trendScout": "Trend-Scout",
+    "trendScout": "סייר טרנדים",
     "system": "מערכת",
     "revenue": "הכנסות",
     "totalUsers": "סה\"כ משתמשים",
@@ -1025,5 +1076,57 @@
   "language": {
     "change": "שנה שפה",
     "label": "שפה"
+  },
+  "dpp": {
+    "nav": {
+      "scanLabel": "סריקת DPP",
+      "scanShort": "סריקת QR"
+    },
+    "addItem": {
+      "tileTitle": "סריקת DPP",
+      "tileSubtitle": "סרקי QR של דרכון מוצר דיגיטלי אירופי למילוי אוטומטי של חומרים, מותג, מקור, טיפול ועוד.",
+      "tileBadge": "עם מעקב"
+    },
+    "scanner": {
+      "title": "סריקת דרכון מוצר דיגיטלי",
+      "subtitle": "כווני את המצלמה לקוד QR על התווית או התג של הבגד.",
+      "tabCamera": "מצלמה",
+      "tabFile": "העלאת תמונה",
+      "starting": "מתחילה מצלמה…",
+      "cameraHint": "הסריקה תסתיים אוטומטית — אין צורך ללחוץ על כפתור.",
+      "permissionDenied": "הגישה למצלמה נדחתה. עדיין אפשר להעלות תמונה של קוד ה-QR.",
+      "noCamera": "לא נמצאה מצלמה במכשיר הזה. העלי תמונה במקום זאת.",
+      "cameraFailed": "לא ניתן להפעיל את המצלמה. נסי את לשונית ההעלאה.",
+      "switchToFile": "העלי תמונה במקום זאת",
+      "chooseFile": "בחרי תמונה",
+      "fileHint": "PNG, JPG או HEIC — כל תמונה שמראה בבירור את ה-QR.",
+      "decoding": "מפענח…",
+      "noCodeInImage": "לא ניתן לקרוא קוד QR מהתמונה הזו.",
+      "importing": "קורא דרכון…",
+      "imported": "הדרכון יובא — בדקי את הפרטים ושמרי.",
+      "importFailed": "לא ניתן לייבא את הדרכון הזה.",
+      "noData": "לא נמצא מידע מובנה מאחורי ה-QR הזה.",
+      "errors": {
+        "empty_payload": "קוד ה-QR היה ריק.",
+        "inline_json_invalid": "נתוני ה-QR אינם JSON תקין.",
+        "unsupported_scheme": "קוד QR זה אינו קישור אינטרנט שניתן לפתוח.",
+        "url_blocked": "ה-URL הזה מצביע לרשת פרטית ונחסם מטעמי בטיחות.",
+        "fetch_failed": "לא ניתן לאחזר את מסמך הדרכון.",
+        "no_structured_data": "לא נמצא מידע דרכון מובנה ב-URL הזה.",
+        "no_product_node": "המסמך לא הכיל רשומת מוצר מזוהה."
+      }
+    },
+    "panel": {
+      "title": "דרכון מוצר דיגיטלי",
+      "subtitle": "מקור יובא מקוד QR הדרכון של הבגד.",
+      "sourceLink": "צפייה בדרכון מקור",
+      "gtin": "GTIN",
+      "countryOfOrigin": "ארץ מקור",
+      "materials": "חומרים",
+      "carbonFootprint": "טביעת פחמן",
+      "careInstructions": "טיפול",
+      "repairInstructions": "תיקון",
+      "certifications": "הסמכות"
+    }
   }
 }

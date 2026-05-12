@@ -1,26 +1,22 @@
 [
   {
-    "content": "Update SYSTEM_PROMPT for Option A — support single object OR array of objects",
+    "content": "Get EMERGENT_LLM_KEY from integrations manager",
     "status": "completed"
   },
   {
-    "content": "Define EYES_JSON_SCHEMA constant matching the 18-field shape",
+    "content": "Write translation script (diff each locale vs en, batch-call Claude per locale, validate placeholders, deep-merge)",
     "status": "completed"
   },
   {
-    "content": "Pass json_schema in _call_gemma_space payload",
-    "status": "completed"
+    "content": "Run script for all 11 non-en locales",
+    "status": "in_progress"
   },
   {
-    "content": "Add switchable `think` parameter through analyze/analyze_outfit/_handle_already_cropped/_analyse_crops/_analyse_one_crop",
-    "status": "completed"
+    "content": "Verify per-locale parity vs en.json",
+    "status": "pending"
   },
   {
-    "content": "Lint, restart backend, schema sanity test",
-    "status": "completed"
-  },
-  {
-    "content": "Update dressapp-eyes proxy main.py on VPS to forward json_schema + enable_thinking (USER ACTION REQUIRED)",
+    "content": "Restart frontend & spot-check zh page renders fully translated",
     "status": "pending"
   }
 ]
