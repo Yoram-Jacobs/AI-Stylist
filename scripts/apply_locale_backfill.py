@@ -259,7 +259,9 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"Payload not found: {payload_path}", file=sys.stderr)
         return 1
     try:
-        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        # utf-8-sig transparently strips a BOM if present (Gemini/Word/Notepad
+        # often inject one) and falls back to plain utf-8 otherwise.
+        payload = json.loads(payload_path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         print(f"Payload is not valid JSON: {exc}", file=sys.stderr)
         return 1
