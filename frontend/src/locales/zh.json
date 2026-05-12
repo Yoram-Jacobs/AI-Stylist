@@ -14,7 +14,9 @@
     "openUserMenu": "打开用户菜单",
     "primary": "主导航",
     "mobilePrimary": "移动端主导航",
-    "guest": "访客"
+    "guest": "访客",
+    "experts": "专家",
+    "ads": "我的广告"
   },
   "common": {
     "save": "保存",
@@ -47,7 +49,9 @@
     "error": "错误",
     "success": "成功",
     "noResults": "无结果",
-    "comingSoon": "即将上线"
+    "comingSoon": "即将上线",
+    "gotIt": "知道了",
+    "selectAll": "全选"
   },
   "auth": {
     "welcomeBack": "欢迎回来",
@@ -70,7 +74,14 @@
     "register": "创建账号",
     "registerFailed": "注册失败",
     "alreadyHaveAccount": "已有账号？",
-    "signInLink": "登录"
+    "signInLink": "登录",
+    "continueWithGoogle": "通过 Google 继续",
+    "alsoConnectCalendar": "同时连接我的日历",
+    "signedInWithGoogle": "已通过 Google 登录",
+    "calendarPersistWarning": "已登录，但我们无法连接您的日历。您可以稍后在“个人资料”中重试。",
+    "finishingSignIn": "正在完成登录…",
+    "finishingSignInSub": "我们正在核对您的 Google 账号，请稍候。",
+    "backToLogin": "返回登录"
   },
   "home": {
     "todayLabel": "今天",
@@ -113,7 +124,13 @@
     "color": "颜色",
     "season": "季节",
     "intent": "意图",
-    "anyCategory": "任意分类"
+    "anyCategory": "任意分类",
+    "duplicateBadge": "已标记为重复单品 — 有意保留，已从穿搭建议中隐藏。",
+    "pendingSync": "同步中",
+    "saveFailuresTitle_one": "1 张照片未能保存",
+    "saveFailuresTitle_other": "{{count}} 张照片未能保存",
+    "saveFailuresBody": "这些单品无法保存到您的衣橱。请尝试重新上传。",
+    "saveFailuresUnnamed": "未命名单品"
   },
   "addItem": {
     "title": "添加单品",
@@ -190,7 +207,52 @@
       "duplicatesInline": "{{count}} 件单品需要您的确认——它们看起来与衣橱中已有的单品重复。",
       "skippedDupSuffix": "(已跳过 {{count}} 件衣橱中已有的)",
       "failed": "无法保存任何单品。请重试。"
-    }
+    },
+    "label": "添加到衣橱",
+    "addPhotos": "添加照片",
+    "dropzoneTitle": "让“The Eyes”看看您的单品",
+    "dropzoneBody": "使用相机即时拍摄或上传现有照片。支持 JPG、PNG、HEIC 格式 — 每件单品将并行分析。",
+    "duplicate": {
+      "title": "您的衣橱中已存在",
+      "body": "看起来“{{existing}}”已在您的衣橱中。您确定要将这张新照片“{{incoming}}”作为重复项添加吗？",
+      "existing": "现有",
+      "incoming": "新上传",
+      "cancel": "放弃上传",
+      "confirm": "仍然添加",
+      "thisItem": "该单品",
+      "saveFailed": "无法保存重复单品。请检查并使用“全部保存”。"
+    },
+    "preflight": {
+      "title": "您选中的照片中有 {{count}} 张看起来是重复的",
+      "body": "这些完全相同的文件已存在于您的衣橱中。您可以跳过它们 — 或点击红色 ⭐ 仍然添加。“Stylist Brain”会将带星标的重复项排除在穿搭建议之外，因此不会推荐同一件衣服两次。",
+      "existing": "已在衣橱",
+      "incoming": "新上传",
+      "noThumb": "无预览",
+      "untitled": "现有单品",
+      "unnamedFile": "未命名文件",
+      "rowSkip": "跳过",
+      "rowAdd": "仍然添加",
+      "skipAll": "跳过所有重复项",
+      "addAll": "全部仍然添加",
+      "confirm": "继续",
+      "summary": "将添加 {{willAdd}} · 将跳过 {{willSkip}}",
+      "allSkipped": "选中的照片均为重复项，已全部跳过。",
+      "allDuplicatesSkippedBatch": "已跳过 {{count}} 张已在衣橱中的照片 — 没有新内容需要上传。"
+    },
+    "savedCount_one": "已将 {{count}} 件单品保存到衣橱",
+    "savedCount_other": "已将 {{count}} 件单品保存到衣橱",
+    "savedOptimistic_one": "已添加到衣橱 — 正在后台同步",
+    "savedOptimistic_other": "已将 {{count}} 件单品添加到衣橱 — 正在后台同步",
+    "savedAndListed": "已保存 — 部分单品也已在市场发布。",
+    "noneSaved": "未保存任何单品",
+    "nothingToSave": "尚无可保存的内容",
+    "namePlaceholder": "奶油色亚麻西装外套",
+    "caption": "描述",
+    "captionPlaceholder": "为这件单品写一段亲切的、编辑风格的描述…",
+    "removePhoto": "移除这张照片",
+    "saved": "已保存",
+    "repairTip": "修补小贴士",
+    "selectPlaceholder": "选择…"
   },
   "itemDetail": {
     "back": "返回衣橱",
@@ -433,7 +495,36 @@
     "radius": "Radius",
     "radiusKm": "{{km}} km",
     "distanceKmAway": "{{km}} km away",
-    "needLocationForNearby": "Enable location to sort by nearest"
+    "needLocationForNearby": "Enable location to sort by nearest",
+    "hero": "购买、交换、捐赠",
+    "browse": "浏览",
+    "myListings": "我的发布",
+    "transactionsTab": "交易",
+    "noMatching": "暂无匹配内容",
+    "noMatchingSub": "尝试放宽筛选条件，或在今天的 Trend-Scout 更新后再次查看。",
+    "noMyListings": "您还没有任何发布。",
+    "reserveFor": "以 {{price}} 预订",
+    "buyFor": "以 {{price}} 购买",
+    "purchased": "支付完成 — 请查看您的交易记录",
+    "statusNotice": "此商品状态为 {{status}}。",
+    "similarVisual": "视觉相似",
+    "similarPopular": "此类热门",
+    "similarYouMightLike": "您可能也喜欢",
+    "viewsCount": "{{count}} 次查看",
+    "feeBreakdown": "费用明细",
+    "listPrice": "标价",
+    "manageInMine": "在“我的发布”中管理",
+    "loadFailed": "加载市场失败",
+    "listingNotFound": "未找到该商品",
+    "txReserved": "交易已预订",
+    "purchaseFailed": "购买失败",
+    "seeAll": "查看全部",
+    "loading": "加载中…",
+    "noTx": "暂无交易记录。",
+    "netShort": "净额 {{amount}}",
+    "sourceFilter": "来源",
+    "categoryFilter": "类别",
+    "noImage": "无图片"
   },
   "createListing": {
     "title": "创建商品",
@@ -454,7 +545,18 @@
     "publish": "发布商品",
     "feePreview": "费用预览",
     "youReceive": "您将收到",
-    "feeFootnote": "7% 按支付处理费 (2.9% + $0.30) 后计算。"
+    "feeFootnote": "7% 按支付处理费 (2.9% + $0.30) 后计算。",
+    "feeSubtitle": "平台费用为 7%，在支付手续费后计算。",
+    "linkItem": "链接到衣橱单品（可选）",
+    "linkNone": "无（自定义发布）",
+    "source": "来源",
+    "sourceShared": "共享（社区）",
+    "sourceRetail": "零售",
+    "mode": "模式",
+    "modeSell": "出售",
+    "modeSwap": "交换",
+    "modeDonate": "捐赠",
+    "titleField": "标题"
   },
   "transactions": {
     "title": "交易",
@@ -622,7 +724,9 @@
     },
     "payouts": {
       "sectionTitle": "收款 (PayPal)",
-      "description": "当您的商品售出时,我们将通过 PayPal Payouts 将您的净收益发送到此 PayPal 邮箱。留空则禁用自动收款。"
+      "description": "当您的商品售出时,我们将通过 PayPal Payouts 将您的净收益发送到此 PayPal 邮箱。留空则禁用自动收款。",
+      "paypalEmail": "用于收款的 PayPal 邮箱",
+      "linked": "已链接"
     }
   },
   "admin": {
