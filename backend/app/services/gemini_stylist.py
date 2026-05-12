@@ -49,40 +49,17 @@ Hard rules:
 """
 
 
-# Human-readable names for each supported UI language code (matches
-# frontend/src/lib/i18n.js). Enum/token-ish JSON fields must stay in English;
-# only the user-facing string fields should honor this language.
-_LANG_NAMES = {
-    "en": "English",
-    "he": "Hebrew",
-    "ar": "Arabic",
-    "es": "Spanish",
-    "fr": "French",
-    "de": "German",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "ru": "Russian",
-    "zh": "Chinese (Simplified)",
-    "ja": "Japanese",
-    "hi": "Hindi",
-}
+# Human-readable names for each supported UI language code — sourced from
+# app.services.i18n so the frontend, backend prompts, system emails, and
+# anything else stay in lock-step with a single dictionary.
+from app.services import i18n as _i18n
+
+_LANG_NAMES = _i18n.LANG_NAMES
 
 
 def _language_directive(code: str | None) -> str:
-    code = (code or "en").lower()
-    name = _LANG_NAMES.get(code, "English")
-    if code == "en":
-        return ""
-    return (
-        f"\n\nLANGUAGE DIRECTIVE: The user's preferred UI language is "
-        f"{name} (code: {code}). Write every human-readable string you "
-        f"return — including `reasoning_summary`, each item `description`, "
-        f"each recommendation `name` and `why`, every entry of `do_dont`, "
-        f"`shopping_suggestions`, and the final `spoken_reply` — in "
-        f"natural, idiomatic {name}. Keep JSON keys and enum-ish values "
-        f"(like `role: top|bottom|outerwear|shoes|accessory|dress`) "
-        f"in English exactly as specified above."
-    )
+    # Thin re-export so existing call-sites (stylist_brain etc.) keep working.
+    return _i18n.language_directive(code)
 
 
 class GeminiStylistService:
