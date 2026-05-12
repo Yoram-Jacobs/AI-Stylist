@@ -313,9 +313,9 @@ SYSTEM_PROMPT = (
     "Each garment object has the following shape (all keys optional except "
     "`title`):\n"
     "{\n"
-    '  "name": string,                     // short friendly descriptor, 2\u20135 words, e.g. "Cream Linen Blazer"\n'
-    '  "title": string,                    // fallback short title (required)\n'
-    '  "caption": string,                  // friendly natural one-paragraph description (<= 240 chars). If state is Bad, include kind, actionable repair/enhancement advice.\n'
+    '  "name": string,                     // 2\u20135 words. Must be UNIQUE & distinguishing \u2014 weave in a defining detail (material, fit, vibe, pattern, era, hardware, neckline, wash) so the user never ends up with 12 generic "Black T-shirt" rows. Bad: "Black T-shirt". Good: "Heavyweight Boxy Black Tee", "Vintage Pocket Crewneck", "Slim Ribbed Black Tee". Write in the user\'s language.\n'
+    '  "title": string,                    // fallback short title (required). Same uniqueness & language rules as `name`.\n'
+    '  "caption": string,                  // ONE confident, vivid sentence in the user\'s language describing what makes this piece tick \u2014 silhouette, surface detail, what it pairs with. Max 240 chars. NEVER hedge: forbid "seems", "appears", "probably", "looks like", "might be". State observations directly. If `state` is "used" and `condition` is "bad", end with one short repair/enhancement tip.\n'
     '  "category": string,                 // top bucket: "Top", "Bottom", "Outerwear", "Full Body", "Footwear", "Accessories", "Underwear"\n'
     '  "sub_category": string,             // e.g. "Shirt", "Pants", "Dress", "Coat", "Sneakers"\n'
     '  "item_type": string,                // specific type: "Oxford shirt", "Mini-dress", "Crew-neck sweater"\n'
@@ -335,9 +335,25 @@ SYSTEM_PROMPT = (
     '  "repair_advice": string|null,       // a short, warm, actionable tip if condition==\"bad\" (e.g. \"Minor pilling on the sleeves \u2014 a fabric shaver will restore the surface.\"); null otherwise\n'
     '  "tags": string[]                    // 3\u20138 searchable keywords\n'
     "}\n\n"
-    "Voice guidance for `name` and `caption`: friendly, professional, "
-    "natural \u2014 write like a thoughtful editor, never salesy, never "
-    "robotic. No emojis, no markdown, no hashtags."
+    "Style rules for the free-text fields (`name`, `title`, `caption`, "
+    "`tags`, `repair_advice`):\n"
+    "  1. LANGUAGE \u2014 write every free-text field in the user's "
+    "language as specified in the LANGUAGE DIRECTIVE (when present). "
+    "This applies equally to `name` and `title` even when they are "
+    "very short. Never default to English just because the field is "
+    "short or label-like.\n"
+    "  2. CONFIDENCE \u2014 state observations directly. Never hedge "
+    "with \"seems\", \"appears\", \"probably\", \"looks like\", "
+    "\"might be\", \"possibly\", \"kind of\". You are the expert; "
+    "commit to the call. \"There's a cute cat print.\" not \"There "
+    "seems to be an animal print, probably a cat.\"\n"
+    "  3. UNIQUENESS \u2014 `name` and `title` must be distinguishing. "
+    "Imagine the user already owns ten black tees; pick a detail no "
+    "other shirt in a closet would share (texture, weight, neckline, "
+    "wash, hardware, vibe, era).\n"
+    "  4. VOICE \u2014 thoughtful editor, never salesy, never robotic. "
+    "No emojis, no markdown, no hashtags, no #tags inside text "
+    "fields."
 )
 
 
@@ -478,13 +494,16 @@ def _language_directive(code: str | None) -> str:
     if code == "en":
         return ""
     return (
-        "\n\nLANGUAGE DIRECTIVE: Write the free-text fields (`name`, "
-        f"`title`, `caption`, `repair_advice`, `tags`, `sub_category`, "
-        f"`item_type`, `colors[*].name`, `fabric_materials[*].name`) in "
-        f"natural, idiomatic {name} (code: {code}). Keep all JSON keys in "
-        f"English. Keep the enum-ish values (`category`, `gender`, "
-        f"`dress_code`, `season`, `pattern`, `state`, `condition`, "
-        f"`quality`) in English exactly as specified."
+        "\n\nLANGUAGE DIRECTIVE: This applies to EVERY free-text field, "
+        f"including the short ones. Write `name`, `title`, and `caption` "
+        f"in natural, idiomatic {name} (code: {code}) \u2014 do NOT "
+        f"default to English just because these fields are short or "
+        f"label-like. Also localise `tags`, `repair_advice`, "
+        f"`sub_category`, `item_type`, `colors[*].name`, "
+        f"`fabric_materials[*].name`. Keep all JSON keys in English. "
+        f"Keep the enum-ish values (`category`, `gender`, `dress_code`, "
+        f"`season`, `pattern`, `state`, `condition`, `quality`) in "
+        f"English exactly as specified."
     )
 
 
