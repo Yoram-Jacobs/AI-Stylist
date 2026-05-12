@@ -1,6 +1,43 @@
 {
+  "_purpose": "INPUT IS ENGLISH. OUTPUT MUST BE FRENCH. Below is one JSON object whose ONLY locale block is \"fr\". Inside \"fr\", every VALUE is currently the English source string copied from en.json (because the French locale file still has English in those slots). Replace each VALUE with the French translation. Keep every KEY exactly as given (keys are i18n identifiers, not text).",
+  "_source_language": "English (en)",
   "_target_language": "French (fr-FR)",
-  "_instructions": "You are translating English UI strings into French (fr-FR) for a fashion/wardrobe app called DressApp.\n\nRULES (read every one):\n1. Translate ONLY into FRENCH. Do not output any other language.\n2. Return ONE JSON object with EXACTLY this top-level shape:\n   {\"_target_language\": ..., \"_instructions\": ..., \"fr\": {...}}\n3. The \"fr\" object MUST contain EXACTLY the same keys as the input fr block, in the same order. Do not add, remove, merge, reorder, or rename keys. Every key listed below must appear in your output.\n4. Preserve every placeholder verbatim: {name}, {{count}}, %s, %d. If the English contains {{count}}, the French value must too.\n5. Preserve markdown / HTML tags exactly (e.g. <em>, <strong>, **).\n6. Keep these proper nouns / brand terms untranslated: DressApp, Trend-Scout, Fashion Scout, FashionCLIP, Google Calendar, Levi's, Stripe, GitHub.\n7. Unit symbols (kg, lb, cm, in, m, km), measurement acronyms (GTIN, GMV), and ISO codes can stay as-is if standard French usage matches English — use your judgement.\n8. 'AI' should be translated to 'IA' in French (intelligence artificielle).\n9. Use straight ASCII quotes (\") as JSON delimiters. If a value contains a literal double quote, escape it with a backslash: \\\".\n10. Use French typographic conventions (espace insécable U+00A0 before « : ; ! ? », use « » or straight \" for inner quotes).\n11. Do NOT wrap the JSON in markdown code fences.\n12. Keys ending in _one are singular plural forms; _other are plural. Translate accordingly.\n",
+  "_direction": "en  ->  fr  (ONE-WAY, never the reverse)",
+  "_locales_in_this_file": [
+    "fr"
+  ],
+  "_examples": [
+    {
+      "key": "auth.welcomeBack",
+      "input_english": "Welcome back",
+      "expected_french": "Bon retour"
+    },
+    {
+      "key": "stylist.fashionScout",
+      "input_english": "Fashion Scout",
+      "expected_french": "Fashion Scout",
+      "note": "Proper noun / product name — keep as-is."
+    },
+    {
+      "key": "itemDetail.repair.toggleAI",
+      "input_english": "AI",
+      "expected_french": "IA",
+      "note": "Translate to IA (intelligence artificielle)."
+    },
+    {
+      "key": "nav.experts",
+      "input_english": "Experts",
+      "expected_french": "Experts",
+      "note": "Cognate — the French word IS 'Experts'. Echo it back."
+    },
+    {
+      "key": "experts.countLabel_one",
+      "input_english": "{{count}} expert",
+      "expected_french": "{{count}} expert",
+      "note": "Keep the {{count}} placeholder verbatim."
+    }
+  ],
+  "_instructions": "RULES (read every one):\n1. Output ONE valid JSON object with EXACTLY this top-level shape:\n   {\"_target_language\": \"French (fr-FR)\", \"fr\": {...}}\n   (the _purpose / _examples / _instructions blocks may be omitted in your output — only the \"fr\" block is required).\n2. Inside \"fr\", include EVERY key from the input \"fr\" block, in the same order. Do not add, remove, merge, rename, or skip keys.\n3. For every key, the value must be the FRENCH translation of the English source. If the French word is identical to the English (cognate, e.g. 'Description'), just echo it back.\n4. Preserve every placeholder verbatim: {name}, {{count}}, %s, %d.\n5. Preserve markdown / HTML tags exactly (e.g. <em>, <strong>, **).\n6. Keep these proper nouns / brand terms untranslated: DressApp, Trend-Scout, Fashion Scout, FashionCLIP, Google Calendar, Levi's, Stripe, GitHub.\n7. 'AI' translates to 'IA' in French.\n8. Use straight ASCII quotes (\") as JSON delimiters. Escape any literal double quote inside a value with a backslash: \\\".\n9. Use French typographic conventions where appropriate (espace insécable U+00A0 before « : ; ! ? »).\n10. Do NOT wrap the output in markdown code fences.\n11. Do NOT translate to German, Spanish, Italian, Portuguese, Chinese, or any other language. ONLY French.",
   "fr": {
     "nav.experts": "Experts",
     "nav.transactions": "Transactions",
