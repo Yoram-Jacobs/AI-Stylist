@@ -1,30 +1,26 @@
 [
   {
-    "content": "Phase 1.1: Add EYES_ONE_PASS flag to app/config.py (default False)",
+    "content": "Phase 2.1: Map existing /closet/save flow, find current rembg + reconstruction call sites",
     "status": "completed"
   },
   {
-    "content": "Phase 1.2: Extend _GARMENT_OBJECT_SCHEMA with region.bbox / confidence / is_full_frame block",
+    "content": "Phase 2.2: Add background rembg task at /save time for one-pass items (populates clean_image_url when done)",
     "status": "completed"
   },
   {
-    "content": "Phase 1.3: Extend SYSTEM_PROMPT with bbox-on-0..1000-grid instructions + one-shot example",
+    "content": "Phase 2.3: New endpoint POST /api/v1/closet/{id}/reconstruct — already exists as /closet/{id}/repair",
     "status": "completed"
   },
   {
-    "content": "Phase 1.4: Implement GarmentVisionService.analyze_outfit_one_pass(image_bytes, language, think)",
+    "content": "Phase 2.4: Surface clean_image_url + clean_image_status on GET /closet/{id} (auto via Pydantic model)",
     "status": "completed"
   },
   {
-    "content": "Phase 1.5: Branch closet.py /analyze endpoint on settings.EYES_ONE_PASS",
+    "content": "Phase 2.5: Lint, restart, smoke test the new endpoints against CCP image",
     "status": "completed"
   },
   {
-    "content": "Phase 1.6: Lint clean + restart backend + smoke test the new code path against a CCP test image",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 1 review checkpoint with user before Phase 2",
+    "content": "Phase 2 review checkpoint with user before Phase 3",
     "status": "in_progress"
   }
 ]

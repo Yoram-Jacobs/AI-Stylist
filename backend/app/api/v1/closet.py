@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
@@ -131,6 +131,14 @@ class CreateItemIn(BaseModel):
     # flagged as already in their closet. Closet card renders a red ⭐
     # and the Stylist Brain skips it during outfit composition.
     is_duplicate: bool = False
+    # Phase O.6 — when True, this item was created from a single-pass
+    # ``/analyze`` response (``EYES_ONE_PASS=true``) so the photo is
+    # already bbox-cropped to a single garment. Triggers the
+    # backgrounded rembg matte instead of the synchronous SegFormer
+    # cutout — saves ~10-17s of hot-path time at /save. Legacy clients
+    # omit this field and the synchronous SegFormer path runs as
+    # before.
+    from_one_pass: bool = False
 
 
 class UpdateItemIn(BaseModel):
@@ -180,9 +188,81 @@ class UpdateItemIn(BaseModel):
     clear_reconstruction: bool = False
 
 
+async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
+    """Phase O.6 — Background rembg matte runner.
+
+    Fired by :func:`create_item` for items that arrived through the
+    single-pass ``/analyze`` pipeline (``from_one_pass=True``). Runs
+    rembg here in the BackgroundTask so it doesn't block the HTTP
+    response that triggered it, and writes the alpha-channelled PNG
+    back to the item as a data URL under ``clean_image_url`` once it
+    finishes. The user's next ``GET /closet/{id}`` sees
+    ``clean_image_status="ready"`` and the populated URL — the
+    closet thumbnail then swaps from the JPEG bbox-crop to the clean
+    cutout in place.
+
+    Failure is intentionally soft: rembg occasionally returns ``None``
+    on tricky inputs (very dark photos, JPEG noise). In that case we
+    set ``clean_image_status="failed"`` so the UI can stop polling
+    without surfacing an error to the user.
+    """
+    from app.services import background_matting
+
+    db = get_db()
+    try:
+        result = await background_matting.matte_crop(raw_bytes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Background rembg matte FAILED for item %s: %s", item_id, exc,
+        )
+        await db.closet_items.update_one(
+            {"id": item_id},
+            {"$set": {
+                "clean_image_status": "failed",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return
+
+    if not result:
+        logger.info(
+            "Background rembg matte returned None for item %s "
+            "(clean cutout skipped)",
+            item_id,
+        )
+        await db.closet_items.update_one(
+            {"id": item_id},
+            {"$set": {
+                "clean_image_status": "failed",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return
+
+    data_url = (
+        "data:image/png;base64,"
+        + base64.b64encode(result).decode("ascii")
+    )
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {"$set": {
+            "clean_image_url": data_url,
+            "clean_image_status": "ready",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    logger.info(
+        "Background rembg matte READY for item %s (%d bytes png)",
+        item_id, len(result),
+    )
+
+
+
 @router.post("", status_code=201)
 async def create_item(
-    payload: CreateItemIn, user: dict = Depends(get_current_user)
+    payload: CreateItemIn,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     db = get_db()
     raw_bytes: bytes | None = None
@@ -271,7 +351,25 @@ async def create_item(
         )
 
     # Best-effort segmentation (non-blocking for POC latency): try once, soft-fail.
-    if raw_bytes and hf_segmentation_service is not None:
+    # Phase O.6 — when the item came from the single-pass /analyze path,
+    # the photo is already bbox-cropped to a single garment. Skip the
+    # synchronous SegFormer call (~2-4s on the hot path) and instead
+    # queue rembg as a fire-and-forget BackgroundTask that populates
+    # ``clean_image_url`` a few seconds later. Legacy clients (no
+    # ``from_one_pass`` flag) keep the existing synchronous SegFormer
+    # path bit-for-bit.
+    if payload.from_one_pass and raw_bytes:
+        doc["clean_image_status"] = "pending"
+        # Snapshot what the background task needs: the item id and the
+        # raw bytes. We do NOT capture ``doc`` directly because the
+        # callback may run after the response goes out and the local
+        # dict is mutated downstream.
+        item_id_for_bg = doc["id"]
+        raw_for_bg = raw_bytes
+        background_tasks.add_task(
+            _run_background_matte, item_id_for_bg, raw_for_bg,
+        )
+    elif raw_bytes and hf_segmentation_service is not None:
         try:
             seg = await hf_segmentation_service.segment_garment(raw_bytes)
             if seg.get("image_b64"):
