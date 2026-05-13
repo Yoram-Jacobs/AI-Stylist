@@ -1,22 +1,38 @@
 [
   {
-    "content": "Map the full AddItem garment-analysis call chain (entry route → services → model calls)",
+    "content": "A1: Delete QWEN_EYES_MODEL setting from /app/backend/app/config.py",
     "status": "completed"
   },
   {
-    "content": "Identify every external/network call and measure where time is spent (Gemini? Eyes? both?)",
+    "content": "A2: Change EYES_PROVIDER env default from 'qwen' to 'gemma' in /app/backend/app/config.py",
     "status": "completed"
   },
   {
-    "content": "Check whether Gemini is invoked for detection/segmentation alongside Eyes (the suspected wasteful round-trip)",
+    "content": "A3: Delete dead _hf_chat_json function from /app/backend/app/services/garment_vision.py",
     "status": "completed"
   },
   {
-    "content": "Verify Eyes' 18-field schema covers detection+segmentation+attributes — can it do it in ONE turn?",
+    "content": "A4: Sweep repo for any remaining QWEN_EYES_MODEL / _hf_chat_json / _hf_client / 'qwen' Eyes references",
     "status": "completed"
   },
   {
-    "content": "Produce a written RCA + concrete recommendation (no code changes until user approves)",
+    "content": "A5: Fix preview /app/backend/.env (EYES_PROVIDER=gemini, comment stale Space URL, remove QWEN_EYES_MODEL line)",
+    "status": "completed"
+  },
+  {
+    "content": "A6: Clear stale 'gemma' DB override in preview test_database",
+    "status": "completed"
+  },
+  {
+    "content": "A7: Restart backend, verify a sample Gemini-direct call works in preview",
+    "status": "completed"
+  },
+  {
+    "content": "B: Write /app/docs/PREVIEW_VS_PROD.md",
+    "status": "completed"
+  },
+  {
+    "content": "C: Write /app/docs/EYES_ONE_PASS_PROPOSAL.md",
     "status": "completed"
   }
 ]

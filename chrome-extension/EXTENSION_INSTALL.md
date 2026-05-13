@@ -90,7 +90,7 @@ Supported sites (Manifest V3 host matches):
 | Image chart | Size guide is rendered as a single `<img>` | `chart_screenshot_b64` (base64 JPEG of the image) |
 | Visible-tab capture | Neither of the above worked | `chart_screenshot_b64` (a JPEG of the active tab) |
 
-The backend tries Gemma (Eyes provider) first, falls back to Qwen, and finally to a numeric heuristic — so you should always get a 200 response, even on a chart the AI can't fully parse.
+The backend tries Gemma (Eyes provider) first, falls back to Gemini 2.5 Flash, and finally to a numeric heuristic — so you should always get a 200 response, even on a chart the AI can't fully parse.
 
 ---
 

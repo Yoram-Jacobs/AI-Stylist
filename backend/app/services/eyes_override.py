@@ -12,7 +12,7 @@ The override is stored in the singleton document
 
     {
         "_id":        "eyes_provider",
-        "value":      "gemma" | "qwen",     # the override
+        "value":      "gemma" | "gemini",   # the override
         "updated_at": "<iso8601>",
         "updated_by": "<email>",            # whoever flipped the switch
     }

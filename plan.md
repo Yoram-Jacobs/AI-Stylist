@@ -325,27 +325,25 @@ Delivered previously; unchanged.
 #### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
 Delivered previously; unchanged.
 
-#### Wave O.2 — Migrate AddItem garment_vision “Eyes” + “Brain” to Qwen-VL — **NEXT (P0/P1)**
-**Goal:** Fully migrate the AddItem multimodal pipeline off Gemini.
+#### Wave O.2 — Migrate AddItem garment_vision Eyes + Brain to Qwen-VL — **❌ CANCELLED (May 2026)**
+**Status:** User explicitly cancelled. Qwen-VL was only ever intended as
+a *contingency* if Eyes (Gemma 4 E2B) and Brain (Gemma 4 E4B) failed to
+deliver — never as the primary path. Wave O.3 (self-hosted Gemma 4 E2B
+Eyes) proved Eyes works, so Qwen-Eyes is no longer needed.
 
-**Where to resume**
-- `app/backend/app/services/garment_vision.py`
+**Cleanup performed (commit May 2026):**
+- Deleted ``_hf_chat_json`` + ``_hf_client`` from ``garment_vision.py``.
+- Removed ``QWEN_EYES_MODEL`` from ``app/config.py`` and ``.env.example``.
+- Flipped ``EYES_PROVIDER`` default from ``"qwen"`` to ``"gemma"`` so the
+  config no longer suggests Qwen-Eyes is a valid path.
+- ``eyes_override._VALID_PROVIDERS`` already excluded ``"qwen"``; left
+  as-is for defense-in-depth (any stale persisted override falls
+  through to env-default).
 
-**Implementation outline**
-1. Replace Gemini multimodal calls with DashScope Qwen-VL:
-   - Eyes tier: `qwen-vl-plus`
-   - Brain tier: `qwen-vl-max-latest`
-2. Maintain JSON output contract compatibility with:
-   - segmentation/background-removal pipeline
-   - closet item card parsing
-   - duplicate detection pre-flight pipeline
-3. Add careful validation:
-   - golden image fixtures
-   - prompt hardening + schema validation
-   - regression tests via curl/scripts
-
-**Testing**
-- Backend-only validation + targeted integration tests.
+**Still in place (intentional):** ``QWEN_BRAIN_MODEL=qwen-vl-max-latest``
++ ``STYLIST_PROVIDER=qwen`` for the Stylist chat pipeline (per Wave O.1).
+The Stylist Brain stays on Qwen until Wave O.4 ships a 24/7-hosted Gemma
+4 E4B endpoint.
 
 #### Wave O.3 — Eyes v3 (Gemma 4 E2B) self-host cutover — **SHIPPED & LIVE**
 See Objectives section above.
@@ -388,7 +386,7 @@ Delivered previously; unchanged.
 
 ### P0 — Next wave candidates
 1. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
-2. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
+2. **Eyes single-pass architecture** (see `docs/EYES_ONE_PASS_PROPOSAL.md`): retire SegFormer + rembg-as-precondition + reconstruction-revalidation in favour of one Gemma 4 E2B call with an extended schema (region + attributes). Replaces the cancelled Wave O.2.
 3. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
@@ -458,8 +456,7 @@ Delivered previously; unchanged.
   - `/api/v1/stylist` uses Qwen-VL-Max-Latest by default.
   - Gemini remains available as fallback.
   - Provider selection controlled by env vars.
-- ⏳ Wave O.2:
-  - AddItem pipeline (`garment_vision`) produces the same closet item cards using Qwen.
+- ❌ Wave O.2: CANCELLED (Qwen-Eyes was never the intended primary; Wave O.3 proved Eyes works on Gemma 4 E2B). See the Wave O.2 section above for the cleanup that was performed.
 - ✅ Wave O.3:
   - Self-hosted Gemma 4 E2B (custom LoRA, mixed-precision GGUF) live in `dressapp-eyes` container on Hetzner VPS.
   - 18-field JSON schema validated in Colab; live container boot + healthcheck green.

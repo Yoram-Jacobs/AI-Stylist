@@ -1,18 +1,29 @@
-"""The Eyes \u2014 multimodal garment analyzer.
+"""The Eyes — multimodal garment analyzer.
 
-Phase A implementation
-----------------------
-* Primary analyser: **Gemma 3 27B** via HuggingFace Inference (same model
-  family the user will fine-tune for the on-edge Gemma 4 E2B/E4B release).
-* Bounding-box detector: **Gemini 2.5 Flash** via Emergent universal key
-  (Gemma zero-shot detection is too weak; this stays until the fine-tune).
+Production architecture (Phase O.3+)
+------------------------------------
+* Primary analyser: self-hosted **Gemma 4 E2B** GGUF served by the
+  ``dressapp-eyes`` container (llama.cpp/llama-server). The backend
+  reaches it via ``EYES_GEMMA_SPACE_URL`` — on Hetzner production
+  this is ``http://eyes:7860`` (internal Docker network).
+* Bounding-box detector for the multi-item pipeline:
+  **SegFormer-b3** (sayeed99/segformer_b3_clothes) running LOCALLY
+  in-process via ``app.services.clothing_parser``. No external call.
+* Safety fallback when the Gemma container is unreachable:
+  **Gemini 2.5 Flash** via Emergent / direct Google chat key. Tagged
+  in the response with ``provider_fallback`` so the UI can surface
+  the degraded state.
 * Enum sanitiser, NMS, "already cropped" short-circuit, multi-item
   orchestration are all provider-agnostic and wrap either path.
 
-Swap path
----------
-Set ``GARMENT_VISION_PROVIDER=hf`` and ``GARMENT_VISION_MODEL=<hf repo>``
-(or ``=gemini`` + a Gemini model id) without touching any consumer code.
+Deprecated paths (removed in May 2026)
+--------------------------------------
+* Qwen-VL-Plus Eyes via HuggingFace Inference Providers
+  (``_hf_chat_json`` + ``_hf_client`` + ``QWEN_EYES_MODEL`` setting).
+  Never enabled in production; the user explicitly asked for it to be
+  removed. The DB-backed override layer (``eyes_override``) already
+  rejects ``"qwen"`` at ``_VALID_PROVIDERS`` so any stale persisted
+  override falls through to env-default.
 """
 from __future__ import annotations
 
@@ -34,25 +45,6 @@ from app.config import settings
 from app.services import provider_activity
 
 logger = logging.getLogger(__name__)
-
-
-# --- HF Inference client (Gemma) ---------------------------------------
-try:
-    from huggingface_hub import InferenceClient as _HFInferenceClient  # type: ignore
-except Exception:  # noqa: BLE001
-    _HFInferenceClient = None  # type: ignore[assignment]
-
-
-def _hf_client(token: str | None, *, base_url: str | None = None) -> Any:
-    if _HFInferenceClient is None:
-        raise RuntimeError("huggingface_hub is not installed.")
-    kwargs: dict[str, Any] = {"token": token}
-    if base_url:
-        # Lets us talk to a custom OpenAI-compatible endpoint (HF
-        # Dedicated Endpoint, llama.cpp --server, vLLM, Modal, etc.)
-        # without routing through HF Inference Providers.
-        kwargs["base_url"] = base_url
-    return _HFInferenceClient(**kwargs)
 
 
 async def _call_gemma_space(
@@ -188,113 +180,6 @@ async def _call_gemma_space(
     )
     return output
 
-
-
-async def _hf_chat_json(
-    *,
-    model: str,
-    system_prompt: str,
-    user_text: str,
-    image_b64_jpeg: str,
-    max_tokens: int = 900,
-    temperature: float = 0.1,
-    timeout: float = 45.0,
-) -> str:
-    """Fire a single multimodal chat_completion at the configured Eyes provider.
-
-    Provider routing (in priority order):
-      1. ``EYES_PROVIDER=gemma`` + ``EYES_GEMMA_SPACE_URL`` set ->
-         POST to the self-hosted Gemma-4 E2B HF Space. On any error we
-         log + fall through so AddItem never breaks while the Space is
-         flaky.
-      2. ``GARMENT_VISION_ENDPOINT_URL`` set -> that custom HF
-         Inference / DashScope endpoint (legacy Qwen-VL path).
-      3. Otherwise the HF Inference Providers default routing using
-         ``HF_TOKEN``.
-    """
-    # Step 1 -- Gemma feature flag (Phase O.3). Wrapped in a broad
-    # except so a cold/sleeping Space, network blip, or malformed
-    # JSON response never blocks the user. We record the failure on
-    # ``provider_activity`` so the dashboard can surface regressions.
-    #
-    # The active provider is resolved through ``eyes_override`` so an
-    # admin can flip Qwen<->Gemma at runtime via the Profile toggle
-    # without restarting the backend.
-    from app.services import eyes_override
-
-    active_provider = (await eyes_override.get_active_provider()).lower()
-    if (
-        active_provider == "gemma"
-        and settings.EYES_GEMMA_SPACE_URL
-    ):
-        t0 = time.perf_counter()
-        try:
-            out = await _call_gemma_space(
-                system_prompt=system_prompt,
-                user_text=user_text,
-                image_b64_jpeg=image_b64_jpeg,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=settings.EYES_GEMMA_TIMEOUT_S,
-            )
-            provider_activity.record(
-                "garment-vision",
-                ok=True,
-                latency_ms=int((time.perf_counter() - t0) * 1000),
-                extra={"provider": "gemma", "model": "gemma-4-e2b-q4_k_m"},
-            )
-            return out
-        except Exception as exc:  # noqa: BLE001
-            provider_activity.record(
-                "garment-vision",
-                ok=False,
-                latency_ms=int((time.perf_counter() - t0) * 1000),
-                error=repr(exc),
-                extra={"provider": "gemma", "fallback": "qwen"},
-            )
-            logger.warning(
-                "Gemma Space failed (%s); falling back to legacy provider",
-                exc,
-            )
-            # fall through to the existing path
-    endpoint_url = settings.GARMENT_VISION_ENDPOINT_URL
-    if endpoint_url:
-        token = settings.GARMENT_VISION_ENDPOINT_KEY or settings.HF_TOKEN
-    else:
-        token = settings.HF_TOKEN
-    if not token:
-        raise RuntimeError("HF_TOKEN (or endpoint key) is not configured.")
-
-    def _call() -> str:
-        client = _hf_client(token, base_url=endpoint_url)
-        # Gemma's HF Inference route requires strict user/assistant
-        # alternation with no top-level `system` role; we fold the
-        # system prompt into the first user message.
-        merged = (
-            f"{system_prompt.strip()}\n\n---\n\n{user_text.strip()}"
-        )
-        resp = client.chat_completion(
-            model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": merged},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_b64_jpeg}"
-                            },
-                        },
-                    ],
-                },
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
-
-    return await asyncio.wait_for(asyncio.to_thread(_call), timeout=timeout)
 
 
 SYSTEM_PROMPT = (

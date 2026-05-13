@@ -121,10 +121,6 @@ class Settings:
     QWEN_BRAIN_MODEL: str = os.environ.get(
         "QWEN_BRAIN_MODEL", "qwen-vl-max-latest"
     )
-    # Eyes tier — cheaper/faster multimodal model used for the
-    # on-the-wire detection pass. Not wired in Wave O.1 (stylist chat
-    # only); kept here so O.2 can pick it up without a config churn.
-    QWEN_EYES_MODEL: str = os.environ.get("QWEN_EYES_MODEL", "qwen-vl-plus")
 
     @property
     def gemini_chat_key(self) -> str | None:
@@ -192,13 +188,20 @@ class Settings:
     )
 
     # --- Phase O Wave O.3 — Self-hosted Gemma-4 E2B Eyes ---
-    # Feature flag for the new self-hosted Gemma-4 E2B GGUF served from a
-    # HF Space. Values: ``"qwen"`` (default — keep existing pipeline) or
-    # ``"gemma"`` (route through the HF Space's ``/predict``). Gemma
-    # failures auto-fall-back to the existing path so a flaky Space
-    # never breaks AddItem.
+    # Toggle for the AddItem garment-vision pipeline. Values:
+    #   "gemma"  — route through the self-hosted dressapp-eyes
+    #              container (production Hetzner deploy reaches it at
+    #              ``http://eyes:7860``). Failures auto-fall-back to
+    #              Gemini so a flaky container never breaks AddItem.
+    #   "gemini" — direct Gemini 2.5 Flash via Emergent/Google chat
+    #              key. Used in the Emergent preview pod, which has
+    #              no Eyes container on its network.
+    # The legacy ``"qwen"`` value is **deprecated** — the Qwen Eyes
+    # path was never enabled in production and was physically removed
+    # in May 2026. Any persisted ``"qwen"`` override falls through to
+    # the env default via ``eyes_override._VALID_PROVIDERS``.
     EYES_PROVIDER: str = (
-        os.environ.get("EYES_PROVIDER", "qwen") or "qwen"
+        os.environ.get("EYES_PROVIDER", "gemma") or "gemma"
     ).strip().lower()
     # Public HF Space URL exposing FastAPI ``/predict``.
     EYES_GEMMA_SPACE_URL: str | None = (
@@ -225,7 +228,7 @@ class Settings:
     )
     # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
     # vision is added). Match the timeout to the worst case and let the
-    # circuit breaker fall back to Qwen instead of stalling AddItem.
+    # circuit breaker fall back to Gemini instead of stalling AddItem.
     EYES_GEMMA_TIMEOUT_S: float = float(
         os.environ.get("EYES_GEMMA_TIMEOUT_S", "60") or "60"
     )
