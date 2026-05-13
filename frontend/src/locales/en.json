@@ -1140,7 +1140,10 @@
   },
   "language": {
     "change": "Change language",
-    "label": "Language"
+    "label": "Language",
+    "switching": "Switching language…",
+    "switchingTo": "Switching to {{language}}…",
+    "switchingHint": "This usually takes a few seconds."
   },
   "components": {
     "swapPickerModal": {

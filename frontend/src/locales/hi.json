@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "भाषा बदलें",
-    "label": "भाषा"
+    "label": "भाषा",
+    "switching": "भाषा बदली जा रही है…",
+    "switchingTo": "{{language}} में बदला जा रहा है…",
+    "switchingHint": "इसमें आमतौर पर कुछ सेकंड लगते हैं।"
   },
   "experts": {
     "title": "किसी प्रोफेशनल से पूछें",

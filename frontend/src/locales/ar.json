@@ -1088,7 +1088,10 @@
   },
   "language": {
     "change": "تغيير اللغة",
-    "label": "اللغة"
+    "label": "اللغة",
+    "switching": "جارٍ تغيير اللغة…",
+    "switchingTo": "جارٍ التغيير إلى {{language}}…",
+    "switchingHint": "يستغرق هذا عادةً بضع ثوانٍ."
   },
   "dpp": {
     "nav": {

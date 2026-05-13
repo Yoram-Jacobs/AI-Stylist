@@ -296,4 +296,87 @@ gap that translation alone can't reach.
 
 ---
 
-*End of Session 2.*
+## Session 3 — Language-switch UX + remaining TODO
+
+### Added: language-switch loading floater
+
+The picker's `change()` round-trip can take up to ~20 s on slow networks
+(i18n.changeLanguage + LanguageSync DOM re-paint + optional `PATCH /me`
+profile sync). Users were clicking the picker, seeing nothing visible
+happen, and assuming nothing did.
+
+#### Files added / changed
+
+```
+created  src/components/LanguageSwitchOverlay.jsx
+edited   src/App.js                        (mount overlay at BrowserRouter root)
+edited   src/components/LanguagePicker.jsx (dispatch start/done events)
+edited   12 × src/locales/<loc>.json       (3 new keys: language.switching,
+                                            language.switchingTo, language.switchingHint)
+```
+
+#### How it works
+
+* `LanguagePicker.change(code)` dispatches `dressapp:lang-switch-start`
+  *before* the async work begins, with `{ code, nativeName }` so the
+  overlay shows the target locale in its native script (e.g. `中文`).
+* The picker dispatches `dressapp:lang-switch-done` in a `finally` block
+  — guarantees the overlay closes even if `i18n.changeLanguage` or the
+  `PATCH /me` request throws.
+* Custom DOM events (not React context) so the overlay can mount once at
+  the root and doesn't require a provider wrapping every route.
+* The overlay has a 30 s safety-net timer that auto-closes itself if the
+  picker never emits the `done` event (e.g. network hangs).
+* Escape key dismisses immediately (a11y); `aria-live="polite"` announces
+  the state to screen readers; `aria-busy="true"` set on the backdrop.
+* Mounted at the `BrowserRouter` root so authenticated **and** logged-out
+  flows (Login / Register) get the affordance — the picker appears in all
+  three places.
+* Visual: 12 px `backdrop-blur` over `bg-background/60`, centred card with
+  `rounded-2xl` + `shadow-2xl`, `Loader2` spinner from lucide-react. No
+  raw red/green colours; uses the design-system accent token.
+
+### TODO — Experts → Profession dropdown is English-only across all locales
+
+Captured during user QA: in `/experts`, the Profession filter drop-down
+lists user-entered profession strings verbatim across every locale.
+
+Root cause: `professions` is derived from `p.professional?.profession`
+free-text values stored on each professional's profile (not an enum):
+
+```jsx
+// src/pages/ExpertsDirectory.jsx:83
+const professions = useMemo(() => {
+  const set = new Set((items || []).map((p) => p.professional?.profession).filter(Boolean));
+  return Array.from(set);
+}, [items]);
+```
+
+This is NOT a UI-copy translation gap — it's user data. Fixing it
+properly needs:
+
+1. **Backend** — canonicalise profession entries to a closed enum
+   (e.g. `stylist`, `personal_shopper`, `tailor`, `image_consultant`, …)
+   with a free-text `profession_other` escape hatch.
+2. **Taxonomy** — add `taxonomy.profession.<slug>` keys in all 12 locale
+   files (will go through the same Gemini/DeepSeek pipeline as before).
+3. **Frontend** — read the enum, render via
+   `t(\`taxonomy.profession.${item.professional.profession}\`)`.
+4. **Migration** — one-shot DB pass that maps existing free-text values
+   to the nearest enum slug.
+
+Estimated effort: ~2-3 hours total (mostly backend schema + migration).
+
+### Status snapshot at end of Session 3
+
+* Hard-coded English strings in scope: **0** (audit re-confirmed).
+* Locale parity: 12 / 12 locales now have language-switch copy + the 154
+  audit fills + the 13 redirected `defaultValue` keys + Session 1's bulk
+  translation work.
+* Frontend builds clean (`esbuild` in 399 ms).
+* Outstanding manual code patches: 4 (see `code_fixes_needed.md`).
+* Outstanding data/taxonomy work: 1 (Experts profession dropdown, above).
+
+---
+
+*End of Session 3.*

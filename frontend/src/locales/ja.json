@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "言語を変更",
-    "label": "言語"
+    "label": "言語",
+    "switching": "言語を切り替えています…",
+    "switchingTo": "{{language}}に切り替えています…",
+    "switchingHint": "通常、数秒で完了します。"
   },
   "experts": {
     "title": "専門家に相談",

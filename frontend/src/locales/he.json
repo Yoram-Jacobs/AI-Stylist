@@ -1088,7 +1088,10 @@
   },
   "language": {
     "change": "שנה שפה",
-    "label": "שפה"
+    "label": "שפה",
+    "switching": "מחליף שפה…",
+    "switchingTo": "מחליף ל-{{language}}…",
+    "switchingHint": "זה לוקח בדרך כלל כמה שניות."
   },
   "dpp": {
     "nav": {

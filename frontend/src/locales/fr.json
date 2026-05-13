@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "Changer de langue",
-    "label": "Langue"
+    "label": "Langue",
+    "switching": "Changement de langue…",
+    "switchingTo": "Passage à {{language}}…",
+    "switchingHint": "Cela prend généralement quelques secondes."
   },
   "experts": {
     "title": "Consultez un professionnel",

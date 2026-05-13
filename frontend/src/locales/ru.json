@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "Изменить язык",
-    "label": "Язык"
+    "label": "Язык",
+    "switching": "Смена языка…",
+    "switchingTo": "Переключение на {{language}}…",
+    "switchingHint": "Это обычно занимает несколько секунд."
   },
   "experts": {
     "title": "Спросить профессионала",

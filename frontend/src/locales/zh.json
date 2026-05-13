@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "更改语言",
-    "label": "语言"
+    "label": "语言",
+    "switching": "正在切换语言…",
+    "switchingTo": "正在切换到 {{language}}…",
+    "switchingHint": "通常需要几秒钟。"
   },
   "experts": {
     "title": "咨询专业人士",

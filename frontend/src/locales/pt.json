@@ -994,7 +994,10 @@
   },
   "language": {
     "change": "Alterar idioma",
-    "label": "Idioma"
+    "label": "Idioma",
+    "switching": "Mudando idioma…",
+    "switchingTo": "Mudando para {{language}}…",
+    "switchingHint": "Isso geralmente leva alguns segundos."
   },
   "experts": {
     "filters": {
