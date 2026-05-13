@@ -1,22 +1,22 @@
 [
   {
-    "content": "Get EMERGENT_LLM_KEY",
+    "content": "Inspect screenshots to identify which components are leaking English",
     "status": "completed"
   },
   {
-    "content": "Translate via LLM (achieved 6/12 then handed off to user)",
+    "content": "Build a regex-based audit script that flags JSX text literals, placeholders, aria-labels, alt text, toast strings, and other user-facing English in /app/frontend/src",
     "status": "completed"
   },
   {
-    "content": "Merge user-supplied translations + validate placeholders + brand",
+    "content": "Cross-reference findings against existing keys in en.json to avoid duplicates",
     "status": "completed"
   },
   {
-    "content": "Verify all 12 locales at 1004/1004 parity vs en.json",
+    "content": "Generate /app/docs/locale_backfill_untranslated.json with proposed new i18n keys + English source values + file:line reference",
     "status": "completed"
   },
   {
-    "content": "Restart frontend",
+    "content": "Spot-check 8-10 findings by opening the actual files to verify they're real leaks (not false positives)",
     "status": "completed"
   }
 ]
