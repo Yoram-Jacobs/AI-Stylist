@@ -8,7 +8,7 @@
     "me": "Yo",
     "settings": "Ajustes",
     "transactions": "Transacciones",
-    "admin": "Admin",
+    "admin": "Administrador",
     "signOut": "Cerrar sesión",
     "skipToContent": "Saltar al contenido principal",
     "openUserMenu": "Abrir menú de usuario",
@@ -730,7 +730,7 @@
     }
   },
   "admin": {
-    "title": "Admin",
+    "title": "Administrador",
     "subtitle": "Salud de la plataforma y moderación.",
     "overview": "Resumen",
     "users": "Usuarios",

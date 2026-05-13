@@ -877,7 +877,7 @@ export function ProfileDetailsCard() {
                       <Field label={t('profile.professional.businessWebsite')}>
                         <Input
                           type="url"
-                          placeholder={t('components.profileDetailsCard.https')}
+                          placeholder="https://"
                           value={form.professional.business.website}
                           onChange={(e) =>
                             setField('professional', {
@@ -948,7 +948,7 @@ export function ProfileDetailsCard() {
                     onChange={(e) =>
                       setField('paypal_receiver_email', e.target.value)
                     }
-                    placeholder={t('components.profileDetailsCard.nameexamplecom')}
+                    placeholder="name@example.com"
                     className="rounded-xl"
                     data-testid="profile-paypal-email"
                   />

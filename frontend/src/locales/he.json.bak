@@ -43,7 +43,7 @@
     "to": "עד",
     "all": "הכל",
     "apply": "החל",
-    "clear": "ניקוי חיפוש",
+    "clear": "נקה",
     "selectAll": "בחר הכל",
     "more": "עוד",
     "today": "היום",
@@ -98,11 +98,7 @@
     "platformFeeSub": "לאחר עמלות סליקה",
     "trendScout": "סייר טרנדים",
     "dailyEdit": "העריכה היומית",
-    "dailyEditOn": "העריכה היומית · {{date}}",
-    "trendsRefreshFailed": "לא ניתן היה לרענן טרנדים",
-    "trendReadSource": "קרא מקור",
-    "refreshTrends": "רענון טרנדים",
-    "trendsRefreshed": "הטרנדים רועננו"
+    "dailyEditOn": "העריכה היומית · {{date}}"
   },
   "closet": {
     "title": "הארון שלך",
@@ -134,9 +130,7 @@
     "saveFailuresTitle_one": "תמונה אחת לא עלתה",
     "saveFailuresTitle_other": "{{count}} תמונות לא עלו",
     "saveFailuresBody": "פריטים אלו לא הצליחו להישמר בארון שלך. נסי להעלות אותם שוב.",
-    "saveFailuresUnnamed": "פריט ללא כותרת",
-    "completeListingCta": "השלמת פרסום",
-    "clearSearch": "ניקוי חיפוש"
+    "saveFailuresUnnamed": "פריט ללא כותרת"
   },
   "addItem": {
     "title": "העלאה ומילוי אוטומטי",
@@ -530,13 +524,7 @@
     "radius": "רדיוס",
     "radiusKm": "{{km}} ק״מ",
     "distanceKmAway": "במרחק {{km}} ק״מ",
-    "needLocationForNearby": "אפשרי מיקום כדי למיין לפי קרבה",
-    "removeFailed": "לא ניתן היה להסיר את הפרסום",
-    "syncFailed": "לא ניתן היה לסנכרן את המרקטפלייס",
-    "removeListing": "הסרה מהמרקטפלייס",
-    "listingRemoved": "הוסר מהמרקטפלייס",
-    "removing": "מסיר…",
-    "syncing": "מסנכרן…"
+    "needLocationForNearby": "אפשרי מיקום כדי למיין לפי קרבה"
   },
   "createListing": {
     "title": "צור מודעה",
@@ -739,8 +727,7 @@
       "description": "כשמישהו קונה פריט שלך, שלם את חלקך יועבר לכתובת PayPal זו דרך PayPal Payouts. השאר ריק להשבתת תשלומים אוטומטיים.",
       "paypalEmail": "אימייל PayPal לקבלת תשלומים",
       "linked": "מקושר"
-    },
-    "occupation": "עיסוק"
+    }
   },
   "admin": {
     "title": "ניהול",
@@ -1140,183 +1127,6 @@
       "careInstructions": "טיפול",
       "repairInstructions": "תיקון",
       "certifications": "הסמכות"
-    }
-  },
-  "components": {
-    "swapPickerModal": {
-      "the_lister_will_be_emailed": ". הודעת דוא\"ל תישלח למפרסם לצורך אישור או דחייה.",
-      "add_items_to_your_closet": "הוסף פריטים לארון שלך תחילה, ואז נסה שוב.",
-      "could_not_load_your_closet": "לא ניתן היה לטעון את הארון שלך.",
-      "offer_an_item_in_exchange": "הצע פריט בתמורה",
-      "sending": "שולח…",
-      "swap_proposal_sent_the_lister": "הצעת החלפה נשלחה. המפרסם יקבל דוא\"ל עם קישורי אישור / דחייה."
-    },
-    "seoBase": {
-      "a_piece_for_sale_on": "פריט למכירה ב-DressApp.",
-      "a_piece_in_your_dressapp": "פריט בארון ה-DressApp שלך.",
-      "add_a_new_item_to": "הוסף פריט חדש לארון ה-DressApp שלך מתמונה או מכתובת אתר.",
-      "admin_dashboard": "לוח בקרת מנהל",
-      "buy_sell_swap_or_donate": "קנייה, מכירה, החלפה או תרומה של פריטי קהילה בשקיפות מלאה של עמלות.",
-      "closet_item": "פריט ארון",
-      "dressapp_operations_console_for_users": "קונסולת התפעול של DressApp למשתמשים, למרקטפלייס, לספקי AI ולסוכן ה-Trend-Scout.",
-      "every_piece_you_own_with": "כל פריט שבבעלותך — עם פילוח חכם, תגיות מקור ועריכה בנגיעה אחת באמצעות AI.",
-      "join_dressapp_your_closet_community": "הצטרף ל-DressApp — הארון שלך, מרקטפלייס קהילתי וסטייליסט AI במקום אחד.",
-      "list_a_piece": "פרסם פריט",
-      "list_one_of_your_closet": "פרסם את אחד מפריטי הארון שלך במרקטפלייס של DressApp.",
-      "manage_your_dressapp_profile_voice": "נהל את פרופיל ה-DressApp, הקול והחיבור ל-Google Calendar.",
-      "marketplace_listing": "פרסום במרקטפלייס",
-      "multimodal_ai_stylist_that_understands": "סטייליסט AI רב-מודאלי שמבין את הארון, היומן ומזג האוויר שלך.",
-      "my_closet": "הארון שלי",
-      "sign_in_to_dressapp_to": "התחבר ל-DressApp כדי לנהל את הארון שלך, לעיין במרקטפלייס ולשוחח עם סטייליסט ה-AI.",
-      "your_dressapp_purchases_and_sales": "הרכישות והמכירות שלך ב-DressApp, בשקיפות מלאה של עמלת 7%.",
-      "your_daily_dressapp_brief_trends": "תקציר ה-DressApp היומי שלך: טרנדים, סטטיסטיקות ארון וכתבות הסטייליסט האחרונות."
-    },
-    "developerPanel": {
-      "active": "פעיל:",
-      "clear_override": "ניקוי דריסה",
-      "developer_internal": "מפתח / פנימי",
-      "eyes_vision_provider": "ספק ראייה Eyes",
-      "gemini": "Gemini",
-      "gemma": "Gemma",
-      "last_analyze_call": "קריאת ניתוח אחרונה",
-      "override_set_by": "דריסה הוגדרה על ידי",
-      "refresh_status": "רענון סטטוס",
-      "routes_the_closet_analyzer_between": "מנתב את מנתח הארון בין Google Gemini 2.5 Flash לבין נקודת הקצה Gemma-4 E2B באירוח עצמי. הדריסה נשמרת ב-Mongo של הפוד הזה. אם Gemma לא זמין, המערכת חוזרת אוטומטית ל-Gemini.",
-      "toggle_eyes_provider": "שינוי ספק Eyes"
-    },
-    "outfitCanvas": {
-      "brief": "תקציר:",
-      "outfit_canvas": "קנבס אאוטפיט",
-      "the_look": "המראה",
-      "view_profile": "צפייה בפרופיל ←"
-    },
-    "profileDetailsCard": {
-      "eg_marketing_manager_student_barista": "למשל: מנהל שיווק, סטודנט, בריסטה",
-      "https": "https://",
-      "nameexamplecom": "name@example.com"
-    }
-  },
-  "pages": {
-    "transactionLanding": {
-      "accepted": "אושר",
-      "browse_marketplace": "עיון במרקטפלייס",
-      "declined": "נדחה",
-      "link_expired_or_already_used": "הקישור פג תוקף או שכבר נעשה בו שימוש",
-      "my_transactions": "העסקאות שלי",
-      "pending": "ממתין",
-      "transaction_status": "סטטוס עסקה"
-    },
-    "admin": {
-      "all_providers": "כל הספקים",
-      "calendar": "יומן",
-      "calls": "שיחות",
-      "closet_items": "פריטי ארון",
-      "created": "נוצר בתאריך",
-      "daily_utc": "יומי (UTC):",
-      "dev_bypass": "מעקף מפתח:",
-      "emergent_llm_key": "מפתח Emergent LLM",
-      "enabled": "פעיל:",
-      "error_rate": "שיעור שגיאות",
-      "errors": "שגיאות",
-      "failed_to_load_listings": "טעינת הפרסומים נכשלה",
-      "failed_to_load_provider_data": "טעינת נתוני הספק נכשלה",
-      "failed_to_load_system_info": "טעינת נתוני המערכת נכשלה",
-      "failed_to_load_trend_reports": "טעינת דוחות הטרנדים נכשלה",
-      "failed_to_load_users": "טעינת המשתמשים נכשלה",
-      "gross_volume": "נפח ברוטו",
-      "last": "אחרון",
-      "listing": "פרסום",
-      "manage_in_emergent_profile": "נהל בפרופיל Emergent",
-      "no_calls_recorded_yet": "עדיין לא תועדו שיחות.",
-      "no_listings": "אין פרסומים.",
-      "no_provider_activity_yet_trigger": "אין עדיין פעילות ספק. הפעל שיחת סטייליסט או הרצת טרנדים.",
-      "no_transactions": "אין עסקאות.",
-      "no_trend_reports_yet_hit": "אין דוחות טרנדים עדיין. לחץ על \"הפעל כעת\" כדי להתחיל.",
-      "no_users_match": "אין משתמשים תואמים.",
-      "platform": "פלטפורמה",
-      "platform_fees": "עמלות פלטפורמה",
-      "provider": "ספק",
-      "roles": "תפקידים",
-      "search_by_email_or_display": "חיפוש לפי דוא\"ל או שם תצוגה",
-      "seller_net": "נטו מוכר",
-      "source_tag": "תגית מקור",
-      "stripe": "Stripe",
-      "stripe_fees": "עמלות Stripe",
-      "stylist_24h": "סטייליסט 24 שעות",
-      "trend_cards_live": "כרטיסי טרנדים פעילים",
-      "tx": "עסקה",
-      "universal_key_usage": "שימוש במפתח אוניברסלי"
-    },
-    "closet": {
-      "back_to_full_closet": "חזרה לארון המלא",
-      "could_not_delete_the_selected": "לא ניתן היה למחוק את הפריטים שנבחרו",
-      "flat_lay_empty_state": "מצב ריק לתצוגת שטוחה",
-      "no_meaningful_matches_found_u2014": "לא נמצאו התאמות משמעותיות — נסה מילים אחרות.",
-      "selection_actions": "פעולות בחירה",
-      "showing": "מציג",
-      "indexed_items": "פריטים שאונדקסו."
-    },
-    "home": {
-      "butter_yellow_rules_milan": "צהוב חמאה שולט במילאנו",
-      "logos_out_fabric_in_cashmere": "בלי לוגואים, עם בדים: סוודרי קשמיר שולטים בסופי השבוע.",
-      "ss26_runway": "תצוגת אביב-קיץ 26",
-      "sustainability": "קיימות",
-      "swap_before_you_shop": "החלפה לפני קנייה",
-      "tailored_blazers_in_soft_butteryellow": "בלייזרים מחויטים בצהוב חמאה רך מחליפים את השנהב כצבע הנייטרלי של האביב.",
-      "the_quietluxe_swap": "החלפת Quiet-Luxe"
-    },
-    "transactions": {
-      "buying": "קנייה",
-      "confirm_receipt": "אישור קבלה",
-      "donation": "תרומה",
-      "donations": "תרומות",
-      "explore_the_marketplace": "גלה את המרקטפלייס",
-      "filter_by_status": "סינון לפי סטטוס",
-      "item_item": "פריט ↔ פריט",
-      "no_donations_yet": "אין תרומות עדיין",
-      "no_swaps_yet": "אין החלפות עדיין",
-      "no_transactions_yet": "אין עסקאות עדיין",
-      "purchase": "רכישה",
-      "receipt_confirmed_thanks_for_closing": "הקבלה אושרה. תודה על סגירת המעגל!",
-      "selling": "מכירה",
-      "swaps": "החלפות"
-    },
-    "listingDetail": {
-      "claim_this_donation": "בקש את התרומה הזו",
-      "donations_are_free_youre_only": "תרומות הן בחינם — עליך לשלם רק על המשלוח. או שלח הודעה לתורם לתיאום איסוף עצמי.",
-      "propose_a_swap": "הצע החלפה",
-      "this_donation_is_free_coordinate": "תרומה זו היא בחינם. תאם עם התורם פגישה מקומית או הסדר משלוח ישירות.",
-      "well_email_the_lister_a": "נשלח למפרסם קישור מאובטח לאישור / דחייה. ללא עמלות — הפריטים נשלחים ישירות ביניכם.",
-      "or_meet_locally_to_skip": "· או פגוש מקומית כדי לוותר על העמלה 🌱",
-      "local_pickup_preferred_no_shipping": "🌱 עדיפות לאיסוף עצמי — ללא דמי משלוח"
-    },
-    "extensionConnect": {
-      "connecting_to_dressapp_extension": "מתחבר לתוסף DressApp…",
-      "connection_failed": "ההתחברות נכשלה",
-      "dressapp_chrome_extension": "תוסף Chrome של DressApp",
-      "go_to_home": "מעבר לדף הבית",
-      "redirecting_to_sign_in": "מעביר לדף התחברות…",
-      "sharing_your_signin_with_the": "משתף את פרטי ההתחברות עם התוסף. חלון זה ייסגר אוטומטית.",
-      "the_extension_id": "מזהה התוסף",
-      "the_extension_is_signed_in": "התוסף מחובר כ-",
-      "untrusted_extension": "תוסף לא מהימן",
-      "you_can_close_this_tab": "ניתן לסגור את הלשונית הזו ולחזור לאתר הקניות."
-    },
-    "login": {
-      "editorial_street_style": "סטייל רחוב מערכתי"
-    },
-    "expertsDirectory": {
-      "il_us_fr": "ישראל, ארה\"ב, צרפת…"
-    },
-    "createListing": {
-      "leave_at": "השאר ב-",
-      "to_encourage_neighbours_to_meet": "כדי לעודד שכנים לפגוש אותך — אפס אריזה, אפס פליטות, ובנוסף אולי תכיר חבר עם סטייל נהדר. הוסף עמלה רק אם המשלוח בלתי נמנע.",
-      "prefer_local_pickup": "🌱 מעדיף איסוף עצמי"
-    },
-    "marketplace": {
-      "nothing_to_sync_no_closet": "אין מה לסנכרן — לא הוגדרה כוונת מרקטפלייס לאף פריט בארון.",
-      "remove_listing": "הסרת פרסום",
-      "sync_from_closet": "סנכרון מהארון"
     }
   }
 }

@@ -169,7 +169,7 @@ export default function ExpertsDirectory() {
                   }
                   onKeyDown={(e) => e.key === 'Enter' && apply()}
                   className="mt-1 rounded-xl"
-                  placeholder={t('pages.expertsDirectory.il_us_fr')}
+                  placeholder="IL, US, FR…"
                   data-testid="experts-filter-country"
                 />
               </div>

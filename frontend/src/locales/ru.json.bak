@@ -43,7 +43,7 @@
     "to": "до",
     "all": "Все",
     "apply": "Применить",
-    "clear": "Очистить поиск",
+    "clear": "Очистить",
     "more": "Ещё",
     "today": "Сегодня",
     "error": "Ошибка",
@@ -98,11 +98,7 @@
     "platformFeeSub": "после комиссий оплаты",
     "trendScout": "Скаут трендов",
     "dailyEdit": "Ежедневная подборка",
-    "dailyEditOn": "Ежедневная подборка · {{date}}",
-    "trendsRefreshFailed": "Не удалось обновить тренды",
-    "trendReadSource": "Читать источник",
-    "refreshTrends": "Обновить тренды",
-    "trendsRefreshed": "Тренды обновлены"
+    "dailyEditOn": "Ежедневная подборка · {{date}}"
   },
   "closet": {
     "title": "Ваш гардероб",
@@ -134,9 +130,7 @@
     "saveFailuresTitle_one": "1 фото не удалось загрузить",
     "saveFailuresTitle_other": "{{count}} фото не удалось загрузить",
     "saveFailuresBody": "Эти вещи не получилось сохранить в гардероб. Попробуйте загрузить их снова.",
-    "saveFailuresUnnamed": "Вещь без названия",
-    "completeListingCta": "Завершить создание объявления",
-    "clearSearch": "Очистить поиск"
+    "saveFailuresUnnamed": "Вещь без названия"
   },
   "addItem": {
     "title": "Добавить вещи",
@@ -530,13 +524,7 @@
     "netShort": "чистыми {{amount}}",
     "sourceFilter": "Источник",
     "categoryFilter": "Категория",
-    "noImage": "Нет изображения",
-    "removeFailed": "Не удалось удалить объявление",
-    "syncFailed": "Не удалось синхронизировать маркетплейс",
-    "removeListing": "Удалить с маркетплейса",
-    "listingRemoved": "Удалено с маркетплейса",
-    "removing": "Удаление…",
-    "syncing": "Синхронизация…"
+    "noImage": "Нет изображения"
   },
   "createListing": {
     "title": "Создать объявление",
@@ -739,8 +727,7 @@
       "description": "Когда ваше объявление продаётся, мы отправим вашу чистую выручку на этот PayPal email через PayPal Payouts. Оставьте пустым, чтобы отключить автоматические выплаты.",
       "paypalEmail": "Email PayPal для выплат",
       "linked": "Привязан"
-    },
-    "occupation": "Род деятельности"
+    }
   },
   "admin": {
     "title": "Админ",
@@ -1140,183 +1127,6 @@
       "careInstructions": "Уход",
       "repairInstructions": "Ремонт",
       "certifications": "Сертификаты"
-    }
-  },
-  "components": {
-    "swapPickerModal": {
-      "the_lister_will_be_emailed": ". Владельцу объявления будет отправлено письмо для принятия или отклонения.",
-      "add_items_to_your_closet": "Сначала добавьте вещи в гардероб, затем попробуйте снова.",
-      "could_not_load_your_closet": "Не удалось загрузить ваш гардероб.",
-      "offer_an_item_in_exchange": "Предложить вещь для обмена",
-      "sending": "Отправка…",
-      "swap_proposal_sent_the_lister": "Предложение обмена отправлено. Владелец получит письмо со ссылками для принятия или отклонения."
-    },
-    "seoBase": {
-      "a_piece_for_sale_on": "Вещь для продажи на DressApp.",
-      "a_piece_in_your_dressapp": "Вещь в вашем гардеробе DressApp.",
-      "add_a_new_item_to": "Добавьте новую вещь в свой гардероб DressApp по фото или ссылке.",
-      "admin_dashboard": "Панель администратора",
-      "buy_sell_swap_or_donate": "Покупайте, продавайте, обменивайте или дарите вещи сообщества с полной прозрачностью комиссий.",
-      "closet_item": "Предмет гардероба",
-      "dressapp_operations_console_for_users": "Операционная консоль DressApp для пользователей, маркетплейса, ИИ-провайдеров и агента Trend-Scout.",
-      "every_piece_you_own_with": "Каждая ваша вещь — с умной сегментацией, тегами источника и редактированием через ИИ в одно касание.",
-      "join_dressapp_your_closet_community": "Присоединяйтесь к DressApp — ваш гардероб, маркетплейс и ИИ-стилист в одном приложении.",
-      "list_a_piece": "Выставить вещь",
-      "list_one_of_your_closet": "Выставьте вещь из своего гардероба на маркетплейс DressApp.",
-      "manage_your_dressapp_profile_voice": "Управляйте своим профилем DressApp, голосом и подключением к Google Calendar.",
-      "marketplace_listing": "Объявление на маркетплейсе",
-      "multimodal_ai_stylist_that_understands": "Мультимодальный ИИ-стилист, который знает ваш гардероб, календарь и погоду.",
-      "my_closet": "Мой гардероб",
-      "sign_in_to_dressapp_to": "Войдите в DressApp, чтобы управлять гардеробом, просматривать маркетплейс и общаться с ИИ-стилистом.",
-      "your_dressapp_purchases_and_sales": "Ваши покупки и продажи в DressApp с полной прозрачностью комиссии 7%.",
-      "your_daily_dressapp_brief_trends": "Ваш ежедневный брифинг DressApp: тренды, статистика гардероба и свежие статьи стилиста."
-    },
-    "developerPanel": {
-      "active": "Активно:",
-      "clear_override": "Сбросить переопределение",
-      "developer_internal": "Разработчик / Внутренний",
-      "eyes_vision_provider": "Провайдер зрения Eyes",
-      "gemini": "Gemini",
-      "gemma": "Gemma",
-      "last_analyze_call": "Последний запрос анализа",
-      "override_set_by": "Переопределение задано пользователем",
-      "refresh_status": "Обновить статус",
-      "routes_the_closet_analyzer_between": "Маршрутизирует анализатор гардероба между Google Gemini 2.5 Flash и локальным эндпоинтом Gemma-4 E2B. Переопределение сохраняется в Mongo этого пода. Если Gemma недоступна, запрос автоматически уходит в Gemini.",
-      "toggle_eyes_provider": "Переключить провайдер Eyes"
-    },
-    "outfitCanvas": {
-      "brief": "Бриф:",
-      "outfit_canvas": "Холст образа",
-      "the_look": "Образ",
-      "view_profile": "Смотреть профиль ←"
-    },
-    "profileDetailsCard": {
-      "eg_marketing_manager_student_barista": "напр. Маркетолог, Студент, Бариста",
-      "https": "https://",
-      "nameexamplecom": "name@example.com"
-    }
-  },
-  "pages": {
-    "transactionLanding": {
-      "accepted": "Принято",
-      "browse_marketplace": "Просмотр маркетплейса",
-      "declined": "Отклонено",
-      "link_expired_or_already_used": "Ссылка истекла или уже использована",
-      "my_transactions": "Мои транзакции",
-      "pending": "В ожидании",
-      "transaction_status": "Статус транзакции"
-    },
-    "admin": {
-      "all_providers": "Все провайдеры",
-      "calendar": "Календарь",
-      "calls": "Вызовы",
-      "closet_items": "Предметы гардероба",
-      "created": "Создано",
-      "daily_utc": "Ежедневно (UTC):",
-      "dev_bypass": "Обход для разработчиков:",
-      "emergent_llm_key": "Ключ Emergent LLM",
-      "enabled": "Включено:",
-      "error_rate": "Доля ошибок",
-      "errors": "Ошибки",
-      "failed_to_load_listings": "Не удалось загрузить объявления",
-      "failed_to_load_provider_data": "Не удалось загрузить данные провайдера",
-      "failed_to_load_system_info": "Не удалось загрузить системную информацию",
-      "failed_to_load_trend_reports": "Не удалось загрузить отчеты о трендах",
-      "failed_to_load_users": "Не удалось загрузить пользователей",
-      "gross_volume": "Общий объем",
-      "last": "Последний",
-      "listing": "Объявление",
-      "manage_in_emergent_profile": "Управление в профиле Emergent",
-      "no_calls_recorded_yet": "Вызовы еще не записаны.",
-      "no_listings": "Объявлений нет.",
-      "no_provider_activity_yet_trigger": "Активности провайдера пока нет. Запустите вызов стилиста или поиск трендов.",
-      "no_transactions": "Транзакций нет.",
-      "no_trend_reports_yet_hit": "Отчетов о трендах пока нет. Нажмите «Запустить сейчас».",
-      "no_users_match": "Пользователи не найдены.",
-      "platform": "Платформа",
-      "platform_fees": "Комиссии платформы",
-      "provider": "Провайдер",
-      "roles": "Роли",
-      "search_by_email_or_display": "Поиск по email или имени",
-      "seller_net": "Чистая выручка продавца",
-      "source_tag": "Тег источника",
-      "stripe": "Stripe",
-      "stripe_fees": "Комиссии Stripe",
-      "stylist_24h": "Стилист 24ч",
-      "trend_cards_live": "Активные карточки трендов",
-      "tx": "Транзакция",
-      "universal_key_usage": "Использование универсального ключа"
-    },
-    "closet": {
-      "back_to_full_closet": "Вернуться ко всему гардеробу",
-      "could_not_delete_the_selected": "Не удалось удалить выбранные предметы",
-      "flat_lay_empty_state": "Пустое состояние раскладки",
-      "no_meaningful_matches_found_u2014": "Совпадений не найдено — попробуйте другие слова.",
-      "selection_actions": "Действия с выбором",
-      "showing": "Показано",
-      "indexed_items": "проиндексированных предметов."
-    },
-    "home": {
-      "butter_yellow_rules_milan": "Миланом правит нежно-желтый",
-      "logos_out_fabric_in_cashmere": "Логотипы в прошлом, ткани — в тренде: кашемировые джемперы вытесняют меринос на выходных.",
-      "ss26_runway": "Показ весна-лето 26",
-      "sustainability": "Устойчивое развитие",
-      "swap_before_you_shop": "Сначала обмен, потом покупка",
-      "tailored_blazers_in_soft_butteryellow": "Приталенные блейзеры нежно-желтого цвета заменяют цвет слоновой кости как весенний базовый тон.",
-      "the_quietluxe_swap": "Обмен в стиле «тихая роскошь»"
-    },
-    "transactions": {
-      "buying": "Покупка",
-      "confirm_receipt": "Подтвердить получение",
-      "donation": "Дар",
-      "donations": "Дары",
-      "explore_the_marketplace": "Исследовать маркетплейс",
-      "filter_by_status": "Фильтр по статусу",
-      "item_item": "Вещь ↔ Вещь",
-      "no_donations_yet": "Даров пока нет",
-      "no_swaps_yet": "Обменов пока нет",
-      "no_transactions_yet": "Транзакций пока нет",
-      "purchase": "Покупка",
-      "receipt_confirmed_thanks_for_closing": "Получение подтверждено. Спасибо за завершение сделки!",
-      "selling": "Продажа",
-      "swaps": "Обмены"
-    },
-    "listingDetail": {
-      "claim_this_donation": "Забрать этот дар",
-      "donations_are_free_youre_only": "Дары бесплатны — вы оплачиваете только доставку. Или напишите дарителю, чтобы договориться о самовывозе.",
-      "propose_a_swap": "Предложить обмен",
-      "this_donation_is_free_coordinate": "Этот дар бесплатен. Договоритесь с дарителем о встрече или доставке напрямую.",
-      "well_email_the_lister_a": "Мы отправим владельцу безопасную ссылку. Никаких комиссий — вещи пересылаются напрямую между вами.",
-      "or_meet_locally_to_skip": "· Или встретьтесь лично, чтобы не платить комиссию 🌱",
-      "local_pickup_preferred_no_shipping": "🌱 Предпочтителен самовывоз — без комиссии за доставку"
-    },
-    "extensionConnect": {
-      "connecting_to_dressapp_extension": "Подключение к расширению DressApp…",
-      "connection_failed": "Ошибка подключения",
-      "dressapp_chrome_extension": "Расширение DressApp для Chrome",
-      "go_to_home": "На главную",
-      "redirecting_to_sign_in": "Перенаправление на вход…",
-      "sharing_your_signin_with_the": "Передача данных входа в расширение. Это окно закроется автоматически.",
-      "the_extension_id": "ID расширения",
-      "the_extension_is_signed_in": "В расширении выполнен вход как",
-      "untrusted_extension": "Недоверенное расширение",
-      "you_can_close_this_tab": "Вы можете закрыть эту вкладку и вернуться в магазин."
-    },
-    "login": {
-      "editorial_street_style": "Эдиториал стрит-стайл"
-    },
-    "expertsDirectory": {
-      "il_us_fr": "IL, US, FR…"
-    },
-    "createListing": {
-      "leave_at": "Оставить в",
-      "to_encourage_neighbours_to_meet": "чтобы вы могли познакомиться с соседями — ноль упаковки, ноль выбросов, плюс вы можете найти друга с отличным вкусом. Добавляйте плату только за доставку.",
-      "prefer_local_pickup": "🌱 Предпочитаю самовывоз"
-    },
-    "marketplace": {
-      "nothing_to_sync_no_closet": "Нечего синхронизировать — ни для одной вещи не задано намерение продажи.",
-      "remove_listing": "Удалить объявление",
-      "sync_from_closet": "Синхронизировать из гардероба"
     }
   }
 }

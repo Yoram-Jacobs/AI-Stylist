@@ -43,7 +43,7 @@
     "to": "até",
     "all": "Todos",
     "apply": "Aplicar",
-    "clear": "Limpar",
+    "clear": "Limpar pesquisa",
     "more": "Mais",
     "today": "Hoje",
     "error": "Erro",
@@ -98,7 +98,11 @@
     "platformFeeSub": "após taxas de pagamento",
     "trendScout": "Trend-Scout",
     "dailyEdit": "Edição diária",
-    "dailyEditOn": "Edição diária · {{date}}"
+    "dailyEditOn": "Edição diária · {{date}}",
+    "trendsRefreshFailed": "Não foi possível atualizar as tendências",
+    "trendReadSource": "Ler fonte",
+    "refreshTrends": "Atualizar tendências",
+    "trendsRefreshed": "Tendências atualizadas"
   },
   "closet": {
     "title": "Seu closet",
@@ -130,7 +134,9 @@
     "saveFailuresTitle_one": "1 foto não foi guardada",
     "saveFailuresTitle_other": "{{count}} fotos não foram guardadas",
     "saveFailuresBody": "Estes artigos não puderam ser guardados no seu armário. Por favor, tente carregá-los novamente.",
-    "saveFailuresUnnamed": "Artigo sem título"
+    "saveFailuresUnnamed": "Artigo sem título",
+    "completeListingCta": "Completar anúncio",
+    "clearSearch": "Limpar pesquisa"
   },
   "addItem": {
     "title": "Adicionar peças",
@@ -524,7 +530,13 @@
     "netShort": "líquido {{amount}}",
     "sourceFilter": "Fonte",
     "categoryFilter": "Categoria",
-    "noImage": "Sem imagem"
+    "noImage": "Sem imagem",
+    "removeFailed": "Não foi possível remover o anúncio",
+    "syncFailed": "Não foi possível sincronizar o marketplace",
+    "removeListing": "Remover do marketplace",
+    "listingRemoved": "Removido do marketplace",
+    "removing": "A remover…",
+    "syncing": "A sincronizar…"
   },
   "createListing": {
     "title": "Criar anúncio",
@@ -727,7 +739,8 @@
       "description": "Quando um dos seus anúncios for vendido, enviaremos o valor líquido para este email PayPal através do PayPal Payouts. Deixe em branco para desativar pagamentos automáticos.",
       "paypalEmail": "Email PayPal para pagamentos",
       "linked": "Associado"
-    }
+    },
+    "occupation": "Profissão"
   },
   "admin": {
     "title": "Administrador",
@@ -1127,6 +1140,183 @@
       "careInstructions": "Cuidados",
       "repairInstructions": "Reparação",
       "certifications": "Certificações"
+    }
+  },
+  "components": {
+    "swapPickerModal": {
+      "the_lister_will_be_emailed": ". O anunciante receberá um e-mail para aceitar ou recusar.",
+      "add_items_to_your_closet": "Adiciona primeiro itens ao teu closet e tenta novamente.",
+      "could_not_load_your_closet": "Não foi possível carregar o teu closet.",
+      "offer_an_item_in_exchange": "Oferecer um item em troca",
+      "sending": "A enviar…",
+      "swap_proposal_sent_the_lister": "Proposta de troca enviada. O anunciante receberá um e-mail com links para aceitar ou recusar."
+    },
+    "seoBase": {
+      "a_piece_for_sale_on": "Uma peça à venda no DressApp.",
+      "a_piece_in_your_dressapp": "Uma peça no teu closet do DressApp.",
+      "add_a_new_item_to": "Adiciona uma nova peça ao teu closet do DressApp a partir de uma foto ou URL.",
+      "admin_dashboard": "Painel de administração",
+      "buy_sell_swap_or_donate": "Compra, vende, troca ou doa peças da comunidade com total transparência de taxas.",
+      "closet_item": "Item do closet",
+      "dressapp_operations_console_for_users": "Consola de operações DressApp para utilizadores, marketplace, fornecedores de AI e o agente Trend-Scout.",
+      "every_piece_you_own_with": "Cada peça que possuis — com segmentação inteligente, etiquetas de origem e edição com AI num toque.",
+      "join_dressapp_your_closet_community": "Junta-te ao DressApp — o teu closet, marketplace da comunidade e AI stylist num só lugar.",
+      "list_a_piece": "Anunciar uma peça",
+      "list_one_of_your_closet": "Anuncia um dos itens do teu closet no marketplace do DressApp.",
+      "manage_your_dressapp_profile_voice": "Gere o teu perfil do DressApp, voz e ligação ao Google Calendar.",
+      "marketplace_listing": "Anúncio de marketplace",
+      "multimodal_ai_stylist_that_understands": "AI stylist multimodal que compreende o teu closet, calendário e o tempo.",
+      "my_closet": "O meu closet",
+      "sign_in_to_dressapp_to": "Inicia sessão no DressApp para gerires o teu closet, explorares o marketplace e conversares com o AI stylist.",
+      "your_dressapp_purchases_and_sales": "As tuas compras e vendas no DressApp, com total transparência de taxas de 7%.",
+      "your_daily_dressapp_brief_trends": "O teu resumo diário DressApp: tendências, estatísticas do closet e as últimas leituras de stylist."
+    },
+    "developerPanel": {
+      "active": "Ativo:",
+      "clear_override": "Limpar substituição",
+      "developer_internal": "Programador / Interno",
+      "eyes_vision_provider": "Fornecedor de visão Eyes",
+      "gemini": "Gemini",
+      "gemma": "Gemma",
+      "last_analyze_call": "Última chamada de análise",
+      "override_set_by": "Substituição definida por",
+      "refresh_status": "Atualizar estado",
+      "routes_the_closet_analyzer_between": "Encaminha o analisador entre o Google Gemini 2.5 Flash e o endpoint autohospedado Gemma-4 E2B. A substituição é guardada no Mongo deste pod. Se o Gemma estiver inacessível, o pedido reverte para o Gemini.",
+      "toggle_eyes_provider": "Alternar fornecedor Eyes"
+    },
+    "outfitCanvas": {
+      "brief": "Briefing:",
+      "outfit_canvas": "Tela de looks",
+      "the_look": "O look",
+      "view_profile": "Ver perfil ←"
+    },
+    "profileDetailsCard": {
+      "eg_marketing_manager_student_barista": "ex. Gestor de marketing, Estudante, Barista",
+      "https": "https://",
+      "nameexamplecom": "nome@exemplo.com"
+    }
+  },
+  "pages": {
+    "transactionLanding": {
+      "accepted": "Aceite",
+      "browse_marketplace": "Explorar o marketplace",
+      "declined": "Recusado",
+      "link_expired_or_already_used": "Link expirado ou já utilizado",
+      "my_transactions": "As minhas transações",
+      "pending": "Pendente",
+      "transaction_status": "Estado da transação"
+    },
+    "admin": {
+      "all_providers": "Todos os fornecedores",
+      "calendar": "Calendário",
+      "calls": "Chamadas",
+      "closet_items": "Itens do closet",
+      "created": "Criado em",
+      "daily_utc": "Diário UTC:",
+      "dev_bypass": "Bypass de programador:",
+      "emergent_llm_key": "Chave LLM emergente",
+      "enabled": "Ativado:",
+      "error_rate": "Taxa de erro",
+      "errors": "Erros",
+      "failed_to_load_listings": "Falha ao carregar anúncios",
+      "failed_to_load_provider_data": "Falha ao carregar dados do fornecedor",
+      "failed_to_load_system_info": "Falha ao carregar info do sistema",
+      "failed_to_load_trend_reports": "Falha ao carregar relatórios de tendências",
+      "failed_to_load_users": "Falha ao carregar utilizadores",
+      "gross_volume": "Volume bruto",
+      "last": "Último",
+      "listing": "Anúncio",
+      "manage_in_emergent_profile": "Gerir no perfil emergente",
+      "no_calls_recorded_yet": "Ainda não foram registadas chamadas.",
+      "no_listings": "Não há anúncios.",
+      "no_provider_activity_yet_trigger": "Ainda sem atividade do fornecedor. Inicia uma chamada de stylist ou análise de tendências.",
+      "no_transactions": "Não há transações.",
+      "no_trend_reports_yet_hit": "Ainda não há relatórios. Clica em \"Forçar execução\".",
+      "no_users_match": "Nenhum utilizador corresponde.",
+      "platform": "Plataforma",
+      "platform_fees": "Taxas da plataforma",
+      "provider": "Fornecedor",
+      "roles": "Funções",
+      "search_by_email_or_display": "Procurar por email ou nome",
+      "seller_net": "Líquido do vendedor",
+      "source_tag": "Etiqueta de origem",
+      "stripe": "Stripe",
+      "stripe_fees": "Taxas Stripe",
+      "stylist_24h": "Stylist 24h",
+      "trend_cards_live": "Cartões de tendências ativos",
+      "tx": "Tx",
+      "universal_key_usage": "Uso de chave universal"
+    },
+    "closet": {
+      "back_to_full_closet": "Voltar ao closet completo",
+      "could_not_delete_the_selected": "Não foi possível eliminar os itens selecionados",
+      "flat_lay_empty_state": "Estado vazio de plano detalhe",
+      "no_meaningful_matches_found_u2014": "Não foram encontradas correspondências — tenta palavras diferentes.",
+      "selection_actions": "Ações de seleção",
+      "showing": "A mostrar",
+      "indexed_items": "itens indexados."
+    },
+    "home": {
+      "butter_yellow_rules_milan": "Amarelo-manteiga domina Milão",
+      "logos_out_fabric_in_cashmere": "Adeus logótipos, olá tecidos: as camisolas de caxemira dominam o fim de semana.",
+      "ss26_runway": "Passarela PV26",
+      "sustainability": "Sustentabilidade",
+      "swap_before_you_shop": "Troca antes de comprares",
+      "tailored_blazers_in_soft_butteryellow": "Blazers cintados em amarelo-manteiga suave substituem o marfim como neutro de primavera.",
+      "the_quietluxe_swap": "A troca quiet-luxe"
+    },
+    "transactions": {
+      "buying": "Comprar",
+      "confirm_receipt": "Confirmar recepção",
+      "donation": "Doação",
+      "donations": "Doações",
+      "explore_the_marketplace": "Explorar o marketplace",
+      "filter_by_status": "Filtrar por estado",
+      "item_item": "Item ↔ Item",
+      "no_donations_yet": "Ainda não há doações",
+      "no_swaps_yet": "Ainda não há trocas",
+      "no_transactions_yet": "Ainda não há transações",
+      "purchase": "Compra",
+      "receipt_confirmed_thanks_for_closing": "Recepção confirmada. Obrigado por fechares o ciclo!",
+      "selling": "Vender",
+      "swaps": "Trocas"
+    },
+    "listingDetail": {
+      "claim_this_donation": "Reivindicar esta doação",
+      "donations_are_free_youre_only": "As doações são gratuitas — apenas reembolsas o envio. Ou envia mensagem ao doador para combinar a recolha local.",
+      "propose_a_swap": "Propor uma troca",
+      "this_donation_is_free_coordinate": "Esta doação é gratuita. Coordena com o doador um encontro local ou combina o envio diretamente.",
+      "well_email_the_lister_a": "Enviaremos ao anunciante um link seguro. Sem custos — os itens são enviados diretamente entre vocês.",
+      "or_meet_locally_to_skip": "· Ou encontra-te localmente para poupar a taxa 🌱",
+      "local_pickup_preferred_no_shipping": "🌱 Recolha local preferida — sem taxa de envio"
+    },
+    "extensionConnect": {
+      "connecting_to_dressapp_extension": "A ligar à extensão DressApp…",
+      "connection_failed": "A ligação falhou",
+      "dressapp_chrome_extension": "Extensão Chrome DressApp",
+      "go_to_home": "Ir para o início",
+      "redirecting_to_sign_in": "A redirecionar para o início de sessão…",
+      "sharing_your_signin_with_the": "A partilhar o teu início de sessão com a extensão. Esta janela fechará automaticamente.",
+      "the_extension_id": "O ID da extensão",
+      "the_extension_is_signed_in": "A extensão tem sessão iniciada como",
+      "untrusted_extension": "Extensão não confiável",
+      "you_can_close_this_tab": "Podes fechar este separador e voltar ao site de compras."
+    },
+    "login": {
+      "editorial_street_style": "Street style editorial"
+    },
+    "expertsDirectory": {
+      "il_us_fr": "IL, US, FR…"
+    },
+    "createListing": {
+      "leave_at": "Deixar em",
+      "to_encourage_neighbours_to_meet": "para incentivar os vizinhos a conhecerem-te — zero embalagens, zero emissões, e podes ganhar um amigo com muito estilo. Adiciona uma taxa apenas se o envio for inevitável.",
+      "prefer_local_pickup": "🌱 Prefiro recolha local"
+    },
+    "marketplace": {
+      "nothing_to_sync_no_closet": "Nada para sincronizar — nenhum item do closet tem intenção de venda.",
+      "remove_listing": "Remover anúncio",
+      "sync_from_closet": "Sincronizar a partir do closet"
     }
   }
 }

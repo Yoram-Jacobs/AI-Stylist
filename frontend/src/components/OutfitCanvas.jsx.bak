@@ -180,7 +180,7 @@ function ProfessionalCard({ pro }) {
           to={`/experts/${pro.professional_id}`}
           className="text-xs font-medium text-[hsl(var(--accent))] hover:underline mt-1 inline-block"
         >
-          {t('components.outfitCanvas.view_profile')}
+          View profile →
         </Link>
       </div>
     </div>
@@ -259,11 +259,11 @@ export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[hsl(var(--accent))]">
             <Sparkles className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wide">{t('components.outfitCanvas.outfit_canvas')}</span>
+            <span className="text-xs font-semibold uppercase tracking-wide">Outfit canvas</span>
           </div>
           <h2 className="text-lg font-semibold mt-1 leading-snug">{canvas.summary || 'Your outfit'}</h2>
           {canvas.brief && (
-            <p className="text-xs text-muted-foreground mt-1">{t('components.outfitCanvas.brief')} <span className="italic">{canvas.brief}</span></p>
+            <p className="text-xs text-muted-foreground mt-1">Brief: <span className="italic">{canvas.brief}</span></p>
           )}
         </div>
         {onClose && (
@@ -279,7 +279,7 @@ export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
 
       {/* Selected slots */}
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{t('components.outfitCanvas.the_look')}</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">The look</div>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
           {slots.map((slot, i) => (
             <SlotCard

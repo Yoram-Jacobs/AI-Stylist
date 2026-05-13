@@ -133,7 +133,7 @@ export default function ListingDetail() {
                     + {fmt(listing.shipping_fee_cents, fm.currency)} shipping
                   </span>
                   <span className="text-[hsl(var(--accent))] text-xs">
-                    {t('pages.listingDetail.or_meet_locally_to_skip')}
+                    · Or meet locally to skip the fee 🌱
                   </span>
                 </div>
               ) : (
@@ -141,7 +141,7 @@ export default function ListingDetail() {
                   className="mt-2 text-xs text-[hsl(var(--accent))]"
                   data-testid="listing-detail-shipping-free"
                 >
-                  {t('pages.listingDetail.local_pickup_preferred_no_shipping')}
+                  🌱 Local pickup preferred — no shipping fee
                 </div>
               )}
 
@@ -312,10 +312,11 @@ export default function ListingDetail() {
                     data-testid="listing-swap-button"
                   >
                     <Repeat className="h-4 w-4 mr-2" />
-                    {t('pages.listingDetail.propose_a_swap')}
+                    Propose a swap
                   </Button>
                   <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
-                    {t('pages.listingDetail.well_email_the_lister_a')}
+                    We'll email the lister a secure accept / decline link. No
+                    charges — items ship directly between you.
                   </div>
                 </>
               ) : listing.mode === 'donate' ? (
@@ -357,7 +358,8 @@ export default function ListingDetail() {
                         testId="listing-donate-button"
                       />
                       <div className="text-[11px] text-muted-foreground text-center mt-2 leading-relaxed">
-                        {t('pages.listingDetail.donations_are_free_youre_only')}
+                        Donations are free — you're only reimbursing shipping.
+                        Or message the donor to arrange local pickup.
                       </div>
                     </div>
                   ) : (
@@ -388,17 +390,18 @@ export default function ListingDetail() {
                         {donateSubmitting ? (
                           <>
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            {t('components.swapPickerModal.sending')}
+                            Sending…
                           </>
                         ) : (
                           <>
                             <HeartHandshake className="h-4 w-4 mr-2" />
-                            {t('pages.listingDetail.claim_this_donation')}
+                            Claim this donation
                           </>
                         )}
                       </Button>
                       <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
-                        {t('pages.listingDetail.this_donation_is_free_coordinate')}
+                        This donation is free. Coordinate with the donor to
+                        meet locally or arrange shipping directly.
                       </div>
                     </>
                   )}

@@ -148,7 +148,7 @@ export default function Closet() {
       setSemanticIndexed(res.indexed || 0);
       setSemanticActive(true);
       if (sItems.length === 0) {
-        toast.message(t('pages.closet.no_meaningful_matches_found_u2014'));
+        toast.message('No meaningful matches found \u2014 try different words.');
       }
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Semantic search failed.');
@@ -251,7 +251,7 @@ export default function Closet() {
     } else if (ok && fail) {
       toast.message(`Deleted ${ok}, failed ${fail}`);
     } else {
-      toast.error(t('pages.closet.could_not_delete_the_selected'));
+      toast.error('Could not delete the selected items');
     }
     // Drop deleted items from the global store so every page sees
     // the change immediately (Closet, AddItem duplicate-check,
@@ -358,7 +358,7 @@ export default function Closet() {
               <button
                 type="button"
                 onClick={clearSearch}
-                aria-label={t('closet.clearSearch', { defaultValue: 'Clear search' })}
+                aria-label={t('common.clear', { defaultValue: 'Clear search' })}
                 data-testid="closet-search-clear"
                 className="absolute right-[9.25rem] top-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-foreground/15 hover:text-foreground flex items-center justify-center transition-colors"
               >
@@ -445,8 +445,8 @@ export default function Closet() {
           <div className="flex items-center gap-2 text-sm">
             <Sparkles className="h-4 w-4 text-[hsl(var(--accent))]" />
             <span>
-              {t('pages.closet.showing')} <span className="font-medium">{items.length}</span> semantic match
-              {items.length === 1 ? '' : 'es'} across <span className="font-medium">{semanticIndexed}</span> {t('pages.closet.indexed_items')}
+              Showing <span className="font-medium">{items.length}</span> semantic match
+              {items.length === 1 ? '' : 'es'} across <span className="font-medium">{semanticIndexed}</span> indexed items.
             </span>
           </div>
           <Button
@@ -457,7 +457,7 @@ export default function Closet() {
             className="rounded-lg"
             data-testid="closet-semantic-clear"
           >
-            <X className="h-4 w-4 mr-1.5" /> {t('pages.closet.back_to_full_closet')}
+            <X className="h-4 w-4 mr-1.5" /> Back to full closet
           </Button>
         </div>
       )}
@@ -474,7 +474,7 @@ export default function Closet() {
           className="sticky top-0 md:top-16 z-20 mt-4 flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-border bg-secondary/95 supports-[backdrop-filter]:bg-secondary/80 supports-[backdrop-filter]:backdrop-blur shadow-editorial"
           data-testid="closet-selection-bar"
           role="toolbar"
-          aria-label={t('pages.closet.selection_actions')}
+          aria-label="Selection actions"
         >
           <div className="flex items-center gap-3 text-sm">
             <CheckCircle2 className="h-4 w-4 text-[hsl(var(--accent))]" />
@@ -553,7 +553,7 @@ export default function Closet() {
           <div className="mx-auto w-40 h-40 rounded-full bg-secondary/70 mb-6 overflow-hidden">
             <img
               src="https://images.unsplash.com/photo-1654773125909-6d73f0c12407?w=600&q=80"
-              alt={t('pages.closet.flat_lay_empty_state')}
+              alt="Flat lay empty state"
               className="w-full h-full object-cover"
             />
           </div>

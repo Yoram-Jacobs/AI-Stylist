@@ -43,7 +43,7 @@
     "to": "तक",
     "all": "सभी",
     "apply": "लागू करें",
-    "clear": "साफ़ करें",
+    "clear": "खोज साफ़ करें",
     "more": "और",
     "today": "आज",
     "error": "त्रुटि",
@@ -98,7 +98,11 @@
     "platformFeeSub": "प्रोसेसिंग शुल्क के बाद",
     "trendScout": "ट्रेंड-स्काउट",
     "dailyEdit": "दैनिक एडिट",
-    "dailyEditOn": "दैनिक एडिट · {{date}}"
+    "dailyEditOn": "दैनिक एडिट · {{date}}",
+    "trendsRefreshFailed": "ट्रेंड्स को रिफ्रेश नहीं किया जा सका",
+    "trendReadSource": "स्रोत पढ़ें",
+    "refreshTrends": "ट्रेंड्स रिफ्रेश करें",
+    "trendsRefreshed": "ट्रेंड्स रिफ्रेश हुए"
   },
   "closet": {
     "title": "आपकी अलमारी",
@@ -130,7 +134,9 @@
     "saveFailuresTitle_one": "1 फ़ोटो सेव नहीं हुई",
     "saveFailuresTitle_other": "{{count}} फ़ोटो सेव नहीं हुईं",
     "saveFailuresBody": "ये आइटम आपकी अलमारी में सेव नहीं हो सके। कृपया इन्हें दोबारा अपलोड करने का प्रयास करें।",
-    "saveFailuresUnnamed": "बिना शीर्षक वाली आइटम"
+    "saveFailuresUnnamed": "बिना शीर्षक वाली आइटम",
+    "completeListingCta": "लिस्टिंग पूरी करें",
+    "clearSearch": "खोज साफ़ करें"
   },
   "addItem": {
     "title": "आइटम जोड़ें",
@@ -524,7 +530,13 @@
     "netShort": "कुल {{amount}}",
     "sourceFilter": "स्रोत",
     "categoryFilter": "श्रेणी",
-    "noImage": "कोई छवि नहीं"
+    "noImage": "कोई छवि नहीं",
+    "removeFailed": "लिस्टिंग हटाई नहीं जा सकी",
+    "syncFailed": "मार्केटप्लेस सिंक नहीं किया जा सका",
+    "removeListing": "मार्केटप्लेस से हटाएँ",
+    "listingRemoved": "मार्केटप्लेस से हटाया गया",
+    "removing": "हटा रहा है…",
+    "syncing": "सिंक हो रहा है…"
   },
   "createListing": {
     "title": "लिस्टिंग बनाएं",
@@ -727,7 +739,8 @@
       "description": "जब आपकी कोई लिस्टिंग बिकती है, तो हम आपकी शुद्ध राशि PayPal Payouts के ज़रिए इस PayPal ईमेल पर भेजेंगे। स्वचालित पेआउट निष्क्रिय करने के लिए खाली छोड़ें।",
       "paypalEmail": "भुगतान के लिए PayPal ईमेल",
       "linked": "लिंक किया गया"
-    }
+    },
+    "occupation": "व्यवसाय"
   },
   "admin": {
     "title": "व्यवस्थापक",
@@ -1127,6 +1140,183 @@
       "careInstructions": "देखभाल",
       "repairInstructions": "मरम्मत",
       "certifications": "प्रमाणपत्र"
+    }
+  },
+  "components": {
+    "swapPickerModal": {
+      "the_lister_will_be_emailed": "। स्वीकार या अस्वीकार करने के लिए लिस्टर को ईमेल किया जाएगा।",
+      "add_items_to_your_closet": "पहले अपने क्लोसेट में आइटम जोड़ें, फिर दोबारा प्रयास करें।",
+      "could_not_load_your_closet": "आपका क्लोसेट लोड नहीं किया जा सका।",
+      "offer_an_item_in_exchange": "बदले में एक आइटम पेश करें",
+      "sending": "भेज रहा है…",
+      "swap_proposal_sent_the_lister": "स्वैप प्रस्ताव भेजा गया। लिस्टर को स्वीकार / अस्वीकार लिंक के साथ एक ईमेल मिलेगा।"
+    },
+    "seoBase": {
+      "a_piece_for_sale_on": "DressApp पर बिक्री के लिए एक आइटम।",
+      "a_piece_in_your_dressapp": "आपके DressApp क्लोसेट में एक आइटम।",
+      "add_a_new_item_to": "फ़ोटो या URL से अपने DressApp क्लोसेट में एक नया आइटम जोड़ें।",
+      "admin_dashboard": "एडमिन डैशबोर्ड",
+      "buy_sell_swap_or_donate": "पूरी शुल्क पारदर्शिता के साथ कम्युनिटी आइटम्स खरीदें, बेचें, स्वैप करें या दान करें।",
+      "closet_item": "क्लोसेट आइटम",
+      "dressapp_operations_console_for_users": "उपयोगकर्ताओं, मार्केटप्लेस, AI प्रदाताओं और ट्रेंड-स्काउट एजेंट के लिए DressApp ऑपरेशंस कंसोल।",
+      "every_piece_you_own_with": "आपके पास मौजूद हर आइटम — स्मार्ट सेगमेंटेशन, सोर्स टैग और वन-टैप एडिट-विद-AI के साथ।",
+      "join_dressapp_your_closet_community": "DressApp से जुड़ें — आपका क्लोसेट, कम्युनिटी मार्केटप्लेस और AI स्टाइलिस्ट एक ही स्थान पर।",
+      "list_a_piece": "एक आइटम लिस्ट करें",
+      "list_one_of_your_closet": "अपने क्लोसेट के किसी आइटम को DressApp मार्केटप्लेस पर लिस्ट करें।",
+      "manage_your_dressapp_profile_voice": "अपनी DressApp प्रोफ़ाइल, वॉयस और Google Calendar कनेक्शन प्रबंधित करें।",
+      "marketplace_listing": "मार्केटप्लेस लिस्टिंग",
+      "multimodal_ai_stylist_that_understands": "मल्टीमॉडल AI स्टाइलिस्ट जो आपके क्लोसेट, कैलेंडर और मौसम को समझता है।",
+      "my_closet": "मेरा क्लोसेट",
+      "sign_in_to_dressapp_to": "अपने क्लोसेट को प्रबंधित करने, मार्केटप्लेस ब्राउज़ करने और AI स्टाइलिस्ट के साथ चैट करने के लिए DressApp में साइन इन करें।",
+      "your_dressapp_purchases_and_sales": "पूरी 7% शुल्क पारदर्शिता के साथ आपकी DressApp खरीदारी और बिक्री।",
+      "your_daily_dressapp_brief_trends": "आपका दैनिक DressApp ब्रीफ: ट्रेंड्स, क्लोसेट आंकड़े और नवीनतम स्टाइलिस्ट लेख।"
+    },
+    "developerPanel": {
+      "active": "सक्रिय:",
+      "clear_override": "ओवरराइड साफ़ करें",
+      "developer_internal": "डेवलपर / आंतरिक",
+      "eyes_vision_provider": "Eyes विजन प्रदाता",
+      "gemini": "Gemini",
+      "gemma": "Gemma",
+      "last_analyze_call": "अंतिम विश्लेषण कॉल",
+      "override_set_by": "ओवरराइड इनके द्वारा सेट किया गया",
+      "refresh_status": "स्थिति रिफ्रेश करें",
+      "routes_the_closet_analyzer_between": "क्लोसेट एनालाइज़र को Google के Gemini 2.5 Flash और सेल्फ-होस्टेड Gemma-4 E2B एंडपॉइंट के बीच रूट करता है। ओवरराइड इस पॉड के मोंगो में बना रहता है और कंटेनर रीस्टार्ट होने पर भी बचा रहता है। यदि Gemma उपलब्ध नहीं है, तो अनुरोध स्वचालित रूप से Gemini पर वापस आ जाता है।",
+      "toggle_eyes_provider": "Eyes प्रदाता टॉगल करें"
+    },
+    "outfitCanvas": {
+      "brief": "ब्रीफ:",
+      "outfit_canvas": "आउटफ़िट कैनवास",
+      "the_look": "लुक",
+      "view_profile": "प्रोफ़ाइल देखें ←"
+    },
+    "profileDetailsCard": {
+      "eg_marketing_manager_student_barista": "उदा. मार्केटिंग मैनेजर, छात्र, बरिस्ता",
+      "https": "https://",
+      "nameexamplecom": "name@example.com"
+    }
+  },
+  "pages": {
+    "transactionLanding": {
+      "accepted": "स्वीकार किया गया",
+      "browse_marketplace": "मार्केटप्लेस ब्राउज़ करें",
+      "declined": "अस्वीकार कर दिया गया",
+      "link_expired_or_already_used": "लिंक समाप्त हो गया या पहले ही उपयोग किया जा चुका है",
+      "my_transactions": "मेरे लेन-देन",
+      "pending": "लंबित",
+      "transaction_status": "लेन-देन की स्थिति"
+    },
+    "admin": {
+      "all_providers": "सभी प्रदाता",
+      "calendar": "कैलेंडर",
+      "calls": "कॉल्स",
+      "closet_items": "क्लोसेट आइटम्स",
+      "created": "बनाया गया",
+      "daily_utc": "दैनिक UTC:",
+      "dev_bypass": "देव बाईपास:",
+      "emergent_llm_key": "Emergent LLM कुंजी",
+      "enabled": "सक्षम:",
+      "error_rate": "त्रुटि दर",
+      "errors": "त्रुटियां",
+      "failed_to_load_listings": "लिस्टिंग लोड करने में विफल",
+      "failed_to_load_provider_data": "प्रदाता डेटा लोड करने में विफल",
+      "failed_to_load_system_info": "सिस्टम जानकारी लोड करने में विफल",
+      "failed_to_load_trend_reports": "ट्रेंड रिपोर्ट लोड करने में विफल",
+      "failed_to_load_users": "उपयोगकर्ता लोड करने में विफल",
+      "gross_volume": "कुल वॉल्यूम",
+      "last": "अंतिम",
+      "listing": "लिस्टिंग",
+      "manage_in_emergent_profile": "Emergent प्रोफ़ाइल में प्रबंधित करें",
+      "no_calls_recorded_yet": "अभी तक कोई कॉल रिकॉर्ड नहीं हुई है।",
+      "no_listings": "कोई लिस्टिंग नहीं।",
+      "no_provider_activity_yet_trigger": "अभी तक कोई प्रदाता गतिविधि नहीं। पॉप्युलेट करने के लिए एक स्टाइलिस्ट कॉल या ट्रेंड रन ट्रिगर करें।",
+      "no_transactions": "कोई लेन-देन नहीं।",
+      "no_trend_reports_yet_hit": "अभी तक कोई ट्रेंड रिपोर्ट नहीं। सीड करने के लिए \"अभी फ़ोर्स रन करें\" पर क्लिक करें।",
+      "no_users_match": "कोई उपयोगकर्ता मेल नहीं खाता।",
+      "platform": "प्लेटफ़ॉर्म",
+      "platform_fees": "प्लेटफ़ॉर्म शुल्क",
+      "provider": "प्रदाता",
+      "roles": "भूमिकाएँ",
+      "search_by_email_or_display": "ईमेल या डिस्प्ले नाम से खोजें",
+      "seller_net": "विक्रेता नेट",
+      "source_tag": "सोर्स टैग",
+      "stripe": "Stripe",
+      "stripe_fees": "Stripe शुल्क",
+      "stylist_24h": "स्टाइलिस्ट 24h",
+      "trend_cards_live": "ट्रेंड कार्ड लाइव",
+      "tx": "Tx",
+      "universal_key_usage": "यूनिवर्सल कुंजी उपयोग"
+    },
+    "closet": {
+      "back_to_full_closet": "पूर्ण क्लोसेट पर वापस जाएं",
+      "could_not_delete_the_selected": "चयनित आइटम्स को हटाया नहीं जा सका",
+      "flat_lay_empty_state": "फ्लैट ले खाली स्थिति",
+      "no_meaningful_matches_found_u2014": "कोई सार्थक मिलान नहीं मिला — अलग शब्दों का प्रयास करें।",
+      "selection_actions": "चयन क्रियाएं",
+      "showing": "दिखा रहा है",
+      "indexed_items": "इंडेक्स किए गए आइटम।"
+    },
+    "home": {
+      "butter_yellow_rules_milan": "मिलान में बटर येलो का राज",
+      "logos_out_fabric_in_cashmere": "लोगो बाहर, फ़ैब्रिक अंदर: वीकेंड पर मेरिनो रोल-नेक्स पर कश्मीरी क्रूनेक्स हावी हैं।",
+      "ss26_runway": "SS26 रनवे",
+      "sustainability": "सस्टेनेबिलिटी",
+      "swap_before_you_shop": "खरीदारी से पहले स्वैप करें",
+      "tailored_blazers_in_soft_butteryellow": "सॉफ्ट बटर-येलो में टेलर्ड ब्लेज़र वसंत के न्यूट्रल के रूप में आइवरी की जगह ले रहे हैं।",
+      "the_quietluxe_swap": "क्वाइट-लक्स स्वैप"
+    },
+    "transactions": {
+      "buying": "खरीद रहे हैं",
+      "confirm_receipt": "रसीद की पुष्टि करें",
+      "donation": "दान",
+      "donations": "दान",
+      "explore_the_marketplace": "मार्केटप्लेस एक्सप्लोर करें",
+      "filter_by_status": "स्थिति के अनुसार फ़िल्टर करें",
+      "item_item": "आइटम ↔ आइटम",
+      "no_donations_yet": "अभी तक कोई दान नहीं",
+      "no_swaps_yet": "अभी तक कोई स्वैप नहीं",
+      "no_transactions_yet": "अभी तक कोई लेन-देन नहीं",
+      "purchase": "खरीद",
+      "receipt_confirmed_thanks_for_closing": "रसीद की पुष्टि हुई। लूप को बंद करने के लिए धन्यवाद!",
+      "selling": "बेच रहे हैं",
+      "swaps": "स्वैप"
+    },
+    "listingDetail": {
+      "claim_this_donation": "इस दान का दावा करें",
+      "donations_are_free_youre_only": "दान मुफ़्त है — आप केवल शिपिंग की प्रतिपूर्ति कर रहे हैं। या स्थानीय पिकअप की व्यवस्था करने के लिए डोनर को संदेश भेजें।",
+      "propose_a_swap": "स्वैप का प्रस्ताव दें",
+      "this_donation_is_free_coordinate": "यह दान मुफ़्त है। स्थानीय स्तर पर मिलने या सीधे शिपिंग की व्यवस्था करने के लिए डोनर के साथ समन्वय करें।",
+      "well_email_the_lister_a": "हम लिस्टर को एक सुरक्षित स्वीकार / अस्वीकार लिंक ईमेल करेंगे। कोई शुल्क नहीं — आइटम सीधे आपके बीच शिप होते हैं।",
+      "or_meet_locally_to_skip": "· या शुल्क से बचने के लिए स्थानीय रूप से मिलें 🌱",
+      "local_pickup_preferred_no_shipping": "🌱 स्थानीय पिकअप को प्राथमिकता — कोई शिपिंग शुल्क नहीं"
+    },
+    "extensionConnect": {
+      "connecting_to_dressapp_extension": "DressApp एक्सटेंशन से जुड़ रहा है…",
+      "connection_failed": "कनेक्शन विफल",
+      "dressapp_chrome_extension": "DressApp क्रोम एक्सटेंशन",
+      "go_to_home": "होम पर जाएं",
+      "redirecting_to_sign_in": "साइन इन करने के लिए रीडायरेक्ट कर रहा है…",
+      "sharing_your_signin_with_the": "एक्सटेंशन के साथ आपका साइन-इन साझा कर रहा है। यह विंडो स्वचालित रूप से बंद हो जाएगी।",
+      "the_extension_id": "एक्सटेंशन आईडी",
+      "the_extension_is_signed_in": "एक्सटेंशन इस रूप में साइन इन है",
+      "untrusted_extension": "अविश्वसनीय एक्सटेंशन",
+      "you_can_close_this_tab": "आप इस टैब को बंद कर सकते हैं और वापस शॉपिंग साइट पर जा सकते हैं।"
+    },
+    "login": {
+      "editorial_street_style": "एडिटोरियल स्ट्रीट स्टाइल"
+    },
+    "expertsDirectory": {
+      "il_us_fr": "IL, US, FR…"
+    },
+    "createListing": {
+      "leave_at": "यहाँ छोड़ें",
+      "to_encourage_neighbours_to_meet": "पड़ोसियों को आपसे मिलने के लिए प्रोत्साहित करने के लिए — शून्य पैकेजिंग, शून्य उत्सर्जन, साथ ही आप एक बेहतरीन स्टाइल वाले मित्र बना सकते हैं। शुल्क केवल तभी जोड़ें जब शिपिंग अपरिहार्य हो।",
+      "prefer_local_pickup": "🌱 स्थानीय पिकअप को प्राथमिकता दें"
+    },
+    "marketplace": {
+      "nothing_to_sync_no_closet": "सिंक करने के लिए कुछ भी नहीं है — किसी भी क्लोसेट आइटम के लिए मार्केटप्लेस उद्देश्य सेट नहीं है।",
+      "remove_listing": "लिस्टिंग हटाएँ",
+      "sync_from_closet": "क्लोसेट से सिंक करें"
     }
   }
 }

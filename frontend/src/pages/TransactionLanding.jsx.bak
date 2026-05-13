@@ -116,7 +116,7 @@ export default function TransactionLanding() {
             <Icon className="h-10 w-10" aria-hidden />
           </div>
           <div className="min-w-0">
-            <div className="caps-label opacity-70">{t('pages.transactionLanding.transaction_status')}</div>
+            <div className="caps-label opacity-70">Transaction status</div>
             <h1
               className="font-display text-3xl leading-tight mt-1"
               data-testid="transaction-landing-title"
@@ -197,12 +197,12 @@ export default function TransactionLanding() {
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button asChild variant="secondary" className="rounded-xl" data-testid="transaction-landing-back-market">
                   <Link to="/market">
-                    {t('pages.transactionLanding.browse_marketplace')}
+                    Browse marketplace
                     <ArrowRight className="h-4 w-4 ms-1" />
                   </Link>
                 </Button>
                 <Button asChild variant="ghost" className="rounded-xl" data-testid="transaction-landing-my-transactions">
-                  <Link to="/transactions">{t('pages.transactionLanding.my_transactions')}</Link>
+                  <Link to="/transactions">My transactions</Link>
                 </Button>
               </div>
             </CardContent>

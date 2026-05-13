@@ -43,7 +43,7 @@
     "to": "到",
     "all": "全部",
     "apply": "应用",
-    "clear": "清除",
+    "clear": "清除搜索",
     "more": "更多",
     "today": "今天",
     "error": "错误",
@@ -98,7 +98,11 @@
     "platformFeeSub": "扌除支付费用",
     "trendScout": "潮流侦察机",
     "dailyEdit": "每日精选",
-    "dailyEditOn": "每日精选 · {{date}}"
+    "dailyEditOn": "每日精选 · {{date}}",
+    "trendsRefreshFailed": "无法刷新趋势",
+    "trendReadSource": "阅读原文",
+    "refreshTrends": "刷新趋势",
+    "trendsRefreshed": "趋势已刷新"
   },
   "closet": {
     "title": "您的衣橱",
@@ -130,7 +134,9 @@
     "saveFailuresTitle_one": "1 张照片未能保存",
     "saveFailuresTitle_other": "{{count}} 张照片未能保存",
     "saveFailuresBody": "这些单品无法保存到您的衣橱。请尝试重新上传。",
-    "saveFailuresUnnamed": "未命名单品"
+    "saveFailuresUnnamed": "未命名单品",
+    "completeListingCta": "完成发布",
+    "clearSearch": "清除搜索"
   },
   "addItem": {
     "title": "添加单品",
@@ -524,7 +530,13 @@
     "netShort": "净额 {{amount}}",
     "sourceFilter": "来源",
     "categoryFilter": "类别",
-    "noImage": "无图片"
+    "noImage": "无图片",
+    "removeFailed": "无法移除发布",
+    "syncFailed": "无法同步市场",
+    "removeListing": "从市场移除",
+    "listingRemoved": "已从市场移除",
+    "removing": "正在移除…",
+    "syncing": "正在同步…"
   },
   "createListing": {
     "title": "创建商品",
@@ -727,7 +739,8 @@
       "description": "当您的商品售出时,我们将通过 PayPal Payouts 将您的净收益发送到此 PayPal 邮箱。留空则禁用自动收款。",
       "paypalEmail": "用于收款的 PayPal 邮箱",
       "linked": "已链接"
-    }
+    },
+    "occupation": "职业"
   },
   "admin": {
     "title": "管理",
@@ -1127,6 +1140,183 @@
       "careInstructions": "护理",
       "repairInstructions": "修复",
       "certifications": "认证"
+    }
+  },
+  "components": {
+    "swapPickerModal": {
+      "the_lister_will_be_emailed": "。系统将向发布者发送电子邮件以供其接受或拒绝。",
+      "add_items_to_your_closet": "请先向衣橱添加商品，然后重试。",
+      "could_not_load_your_closet": "无法加载衣橱。",
+      "offer_an_item_in_exchange": "提供一件商品进行交换",
+      "sending": "发送中…",
+      "swap_proposal_sent_the_lister": "交换请求已发送。发布者将收到一封带有接受/拒绝链接的邮件。"
+    },
+    "seoBase": {
+      "a_piece_for_sale_on": "在 DressApp 上出售的一件商品。",
+      "a_piece_in_your_dressapp": "你 DressApp 衣橱里的一件商品。",
+      "add_a_new_item_to": "通过照片或 URL 向你的 DressApp 衣橱添加新商品。",
+      "admin_dashboard": "管理后台",
+      "buy_sell_swap_or_donate": "在完全透明的费率下购买、出售、交换或捐赠社区商品。",
+      "closet_item": "衣橱商品",
+      "dressapp_operations_console_for_users": "面向用户、市场、AI 供应商和 Trend-Scout 代理的 DressApp 运营控制台。",
+      "every_piece_you_own_with": "管理你的每一件单品——拥有智能分类、来源标签和一键 AI 编辑功能。",
+      "join_dressapp_your_closet_community": "加入 DressApp——衣橱管理、社区市场和 AI 搭配师，一应俱全。",
+      "list_a_piece": "发布商品",
+      "list_one_of_your_closet": "在 DressApp 市场上发布你的衣橱商品。",
+      "manage_your_dressapp_profile_voice": "管理你的 DressApp 档案、语音和 Google Calendar 连接。",
+      "marketplace_listing": "市场发布内容",
+      "multimodal_ai_stylist_that_understands": "多模态 AI 搭配师，了解你的衣橱、日程和天气。",
+      "my_closet": "我的衣橱",
+      "sign_in_to_dressapp_to": "登录 DressApp 管理你的衣橱、浏览市场并与 AI 搭配师聊天。",
+      "your_dressapp_purchases_and_sales": "你在 DressApp 的买卖记录，包含透明的 7% 手续费。",
+      "your_daily_dressapp_brief_trends": "你的 DressApp 每日简报：趋势、衣橱数据和最新穿搭读物。"
+    },
+    "developerPanel": {
+      "active": "活跃：",
+      "clear_override": "清除覆盖",
+      "developer_internal": "开发者 / 内部",
+      "eyes_vision_provider": "Eyes 视觉供应商",
+      "gemini": "Gemini",
+      "gemma": "Gemma",
+      "last_analyze_call": "最后一次分析调用",
+      "override_set_by": "覆盖设置者：",
+      "refresh_status": "刷新状态",
+      "routes_the_closet_analyzer_between": "在 Google 的 Gemini 2.5 Flash 和自托管的 Gemma-4 E2B 端点之间路由衣橱分析器。覆盖设置保存在此 pod 的 Mongo 中，且在容器重启后仍然有效。如果 Gemma 无法访问，请求将自动退回到 Gemini。",
+      "toggle_eyes_provider": "切换 Eyes 供应商"
+    },
+    "outfitCanvas": {
+      "brief": "简报：",
+      "outfit_canvas": "穿搭画布",
+      "the_look": "造型",
+      "view_profile": "查看档案 ←"
+    },
+    "profileDetailsCard": {
+      "eg_marketing_manager_student_barista": "例如：市场经理、学生、咖啡师",
+      "https": "https://",
+      "nameexamplecom": "name@example.com"
+    }
+  },
+  "pages": {
+    "transactionLanding": {
+      "accepted": "已接受",
+      "browse_marketplace": "浏览市场",
+      "declined": "已拒绝",
+      "link_expired_or_already_used": "链接已过期或已被使用",
+      "my_transactions": "我的交易",
+      "pending": "待处理",
+      "transaction_status": "交易状态"
+    },
+    "admin": {
+      "all_providers": "所有供应商",
+      "calendar": "日历",
+      "calls": "调用",
+      "closet_items": "衣橱商品",
+      "created": "创建时间",
+      "daily_utc": "每日 UTC：",
+      "dev_bypass": "开发绕过：",
+      "emergent_llm_key": "Emergent LLM 密钥",
+      "enabled": "已启用：",
+      "error_rate": "错误率",
+      "errors": "错误",
+      "failed_to_load_listings": "加载列表失败",
+      "failed_to_load_provider_data": "加载供应商数据失败",
+      "failed_to_load_system_info": "加载系统信息失败",
+      "failed_to_load_trend_reports": "加载趋势报告失败",
+      "failed_to_load_users": "加载用户失败",
+      "gross_volume": "总成交额",
+      "last": "最后",
+      "listing": "发布列表",
+      "manage_in_emergent_profile": "在 Emergent 档案中管理",
+      "no_calls_recorded_yet": "尚无记录。",
+      "no_listings": "尚无发布。",
+      "no_provider_activity_yet_trigger": "尚无供应商活动。触发搭配师调用或趋势分析以填充数据。",
+      "no_transactions": "尚无交易。",
+      "no_trend_reports_yet_hit": "尚无趋势报告。点击“立即强制运行”以生成。",
+      "no_users_match": "无匹配用户。",
+      "platform": "平台",
+      "platform_fees": "平台费",
+      "provider": "供应商",
+      "roles": "角色",
+      "search_by_email_or_display": "按电子邮件或显示名称搜索",
+      "seller_net": "卖家净额",
+      "source_tag": "来源标签",
+      "stripe": "Stripe",
+      "stripe_fees": "Stripe 手续费",
+      "stylist_24h": "24h 搭配师",
+      "trend_cards_live": "活跃趋势卡片",
+      "tx": "交易",
+      "universal_key_usage": "通用密钥使用情况"
+    },
+    "closet": {
+      "back_to_full_closet": "返回完整衣橱",
+      "could_not_delete_the_selected": "无法删除所选商品",
+      "flat_lay_empty_state": "平铺图为空状态",
+      "no_meaningful_matches_found_u2014": "未找到有效匹配——请尝试其他词汇。",
+      "selection_actions": "批量操作",
+      "showing": "正在显示",
+      "indexed_items": "件已索引商品。"
+    },
+    "home": {
+      "butter_yellow_rules_milan": "黄油色主宰米兰",
+      "logos_out_fabric_in_cashmere": "去 Logo 化，重材质：羊绒圆领衫在周末取代美利奴高领衫。",
+      "ss26_runway": "SS26 秀场",
+      "sustainability": "可持续发展",
+      "swap_before_you_shop": "以物易物",
+      "tailored_blazers_in_soft_butteryellow": "柔和黄油色的剪裁西装取代乳白色成为春季中性色新宠。",
+      "the_quietluxe_swap": "静奢风交换"
+    },
+    "transactions": {
+      "buying": "买入",
+      "confirm_receipt": "确认收货",
+      "donation": "捐赠",
+      "donations": "捐赠",
+      "explore_the_marketplace": "探索市场",
+      "filter_by_status": "按状态筛选",
+      "item_item": "商品 ↔ 商品",
+      "no_donations_yet": "尚无捐赠",
+      "no_swaps_yet": "尚无交换",
+      "no_transactions_yet": "尚无交易",
+      "purchase": "购买",
+      "receipt_confirmed_thanks_for_closing": "已确认收货。感谢完成闭环交易！",
+      "selling": "卖出",
+      "swaps": "交换"
+    },
+    "listingDetail": {
+      "claim_this_donation": "领取此捐赠",
+      "donations_are_free_youre_only": "捐赠是免费的——你只需支付运费。或者联系捐赠者安排线下取货。",
+      "propose_a_swap": "提议交换",
+      "this_donation_is_free_coordinate": "此捐赠是免费的。请与捐赠者协商面交或直接安排寄送。",
+      "well_email_the_lister_a": "我们将向发布者发送安全的接受/拒绝链接。无须手续费——商品直接在双方之间寄送。",
+      "or_meet_locally_to_skip": "· 或面交以减免费用 🌱",
+      "local_pickup_preferred_no_shipping": "🌱 优先面交——无运费"
+    },
+    "extensionConnect": {
+      "connecting_to_dressapp_extension": "正在连接到 DressApp 浏览器扩展…",
+      "connection_failed": "连接失败",
+      "dressapp_chrome_extension": "DressApp Chrome 浏览器扩展",
+      "go_to_home": "返回首页",
+      "redirecting_to_sign_in": "正在重定向到登录页面…",
+      "sharing_your_signin_with_the": "正在与扩展程序共享你的登录信息。此窗口将自动关闭。",
+      "the_extension_id": "扩展程序 ID",
+      "the_extension_is_signed_in": "扩展程序已登录为",
+      "untrusted_extension": "不受信任的扩展程序",
+      "you_can_close_this_tab": "你可以关闭此标签页并返回购物网站。"
+    },
+    "login": {
+      "editorial_street_style": "杂志感街拍"
+    },
+    "expertsDirectory": {
+      "il_us_fr": "以色列、美国、法国…"
+    },
+    "createListing": {
+      "leave_at": "留在",
+      "to_encourage_neighbours_to_meet": "鼓励邻里面交——零包装、零排放，还能交到品味不凡的朋友。仅在不可避免需要快递时才增加运费。",
+      "prefer_local_pickup": "🌱 优先面交"
+    },
+    "marketplace": {
+      "nothing_to_sync_no_closet": "无可同步内容——衣橱商品均未设置市场发布意向。",
+      "remove_listing": "移除发布",
+      "sync_from_closet": "从衣橱同步"
     }
   }
 }

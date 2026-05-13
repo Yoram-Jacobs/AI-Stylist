@@ -220,4 +220,80 @@ edited    /app/frontend/src/locales/zh.json               (+50 fills)
 
 ---
 
-*End of session log.*
+## Session 2 — Hard-coded string audit + auto-patch
+
+After the first round of locale fills, several UI screens still showed
+English fragments on non-English locales (screenshots provided by the user:
+Profile occupation field, listing detail chips, donation banner, trend cards,
+duplicate-detection dialog). Cause: **hard-coded English strings in JSX/JS
+source that never went through `react-i18next`**.
+
+### Tooling added
+
+```
+/app/scripts/audit_hardcoded_strings.py     — finds user-facing English in /app/frontend/src
+/app/scripts/apply_audit_translations.py    — merges LLM-translated dict back into the 12 locale JSON files
+/app/scripts/patch_hardcoded_strings.py     — rewrites JSX/JS to replace English literals with t('key') calls
+/app/scripts/inject_use_translation.py      — bootstraps the useTranslation hook + import in components missing it
+/app/docs/locale_backfill_untranslated.json — audit output (post-merge: 0 findings)
+/app/docs/code_fixes_needed.md              — module-scope literals & raw-enum bleeds that need manual code work
+```
+
+The audit detects: JSX text content (multi-line tolerant), HTML-attribute
+strings (`placeholder`, `title`, `aria-label`, `alt`), toast/alert calls,
+`t('key', { defaultValue: 'English' })` patterns where the key is missing in
+en.json, and object-literal labels in fixture/array data.
+
+Cross-references every candidate against existing values in `en.json` so
+already-translated strings (rendered raw because the code uses a raw enum
+rather than `t()`) are skipped — those are listed in
+`code_fixes_needed.md` for manual fixes.
+
+### Translation round
+
+* Audit found **154 distinct English strings** across **68 files**.
+* DeepSeek translated all 154 × 11 locales in one shot — payload validated
+  clean (the script auto-repaired 10 inner-quote escapes).
+* Apply script detected **13 `defaultValue` findings** whose existing i18n
+  key was already chosen by the developer (e.g. `home.trendsRefreshed`) —
+  translations got written under the developer's key, not the audit's
+  synthetic `suggested_key`. Avoids dead translation entries.
+* `apply_audit_translations.py` then wrote 154 × 12 locales = **1,848
+  merged entries** (zero placeholder drift).
+
+### Source-code patch round
+
+* `patch_hardcoded_strings.py` rewrote each finding in place. Two passes:
+  - **Pass 1:** 69 patches applied across 8 files.
+  - **Pass 2** (after `inject_use_translation.py` added the hook to four
+    components missing it): 23 more patches across SwapPickerModal,
+    OutfitCanvas, ExtensionConnect, TransactionLanding.
+* **92 source-code patches total** across 12 files.
+* Backups (`.bak`) written alongside every modified file.
+* Whitespace-flexible multi-line JSX regex handles `<p>multi-line\nblock</p>`
+  patterns automatically.
+
+### Final state after Session 2
+
+* **Audit re-run shows 0 hard-coded English strings** in the auditable scope.
+* Frontend builds clean (`esbuild` no errors).
+* All 12 locale files extended with the 154 new keys.
+
+### Manual code work still required (see code_fixes_needed.md)
+
+* `src/pages/ListingDetail.jsx` — 4 chip patches to pipe `listing.mode` /
+  `listing.category` / `listing.condition` / `listing.size` through their
+  existing `taxonomy.*` translations.
+* `src/pages/Home.jsx` — restructure `FALLBACK_TRENDS` (module scope), add
+  `trends.bucket.*` map for Trend-Scout backend labels.
+* `src/components/SeoBase.jsx` — META map at module scope, refactor to use
+  i18n keys.
+* `src/lib/countries.js` — adopt `Intl.DisplayNames` instead of translating
+  the 250-entry ISO country list through the same dictionary.
+
+Estimated effort for the manual fixes: **~50 minutes** to close the last
+gap that translation alone can't reach.
+
+---
+
+*End of Session 2.*

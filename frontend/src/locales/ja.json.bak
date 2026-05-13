@@ -43,7 +43,7 @@
     "to": "まで",
     "all": "すべて",
     "apply": "適用",
-    "clear": "検索をクリア",
+    "clear": "クリア",
     "more": "もっと",
     "today": "今日",
     "error": "エラー",
@@ -98,11 +98,7 @@
     "platformFeeSub": "決済手数料後",
     "trendScout": "トレンドスカウト",
     "dailyEdit": "デイリーエディット",
-    "dailyEditOn": "デイリーエディット · {{date}}",
-    "trendsRefreshFailed": "トレンドを更新できませんでした",
-    "trendReadSource": "ソースを読む",
-    "refreshTrends": "トレンドを更新",
-    "trendsRefreshed": "トレンドが更新されました"
+    "dailyEditOn": "デイリーエディット · {{date}}"
   },
   "closet": {
     "title": "あなたのクローゼット",
@@ -134,9 +130,7 @@
     "saveFailuresTitle_one": "1枚の写真を保存できませんでした",
     "saveFailuresTitle_other": "{{count}}枚の写真を保存できませんでした",
     "saveFailuresBody": "これらのアイテムをクローゼットに保存できませんでした。もう一度アップロードしてください。",
-    "saveFailuresUnnamed": "無題のアイテム",
-    "completeListingCta": "出品を完了",
-    "clearSearch": "検索をクリア"
+    "saveFailuresUnnamed": "無題のアイテム"
   },
   "addItem": {
     "title": "アイテムを追加",
@@ -530,13 +524,7 @@
     "netShort": "実質{{amount}}",
     "sourceFilter": "ソース",
     "categoryFilter": "カテゴリー",
-    "noImage": "画像なし",
-    "removeFailed": "出品を削除できませんでした",
-    "syncFailed": "マーケットプレイスを同期できませんでした",
-    "removeListing": "マーケットプレイスから削除",
-    "listingRemoved": "マーケットプレイスから削除されました",
-    "removing": "削除中…",
-    "syncing": "同期中…"
+    "noImage": "画像なし"
   },
   "createListing": {
     "title": "出品を作成",
@@ -739,8 +727,7 @@
       "description": "出品が売れた際、PayPal Payoutsを通じてこのPayPalメールアドレスに純受取額を送金します。自動支払いを無効にする場合は空白のままにしてください。",
       "paypalEmail": "支払い用PayPalメールアドレス",
       "linked": "連携済み"
-    },
-    "occupation": "職業"
+    }
   },
   "admin": {
     "title": "管理",
@@ -1140,183 +1127,6 @@
       "careInstructions": "ケア方法",
       "repairInstructions": "修理方法",
       "certifications": "認証"
-    }
-  },
-  "components": {
-    "swapPickerModal": {
-      "the_lister_will_be_emailed": "。出品者に、承認または拒否のためのメールが送信されます。",
-      "add_items_to_your_closet": "まずクローゼットにアイテムを追加してから、もう一度お試しください。",
-      "could_not_load_your_closet": "クローゼットを読み込めませんでした。",
-      "offer_an_item_in_exchange": "交換するアイテムを提示",
-      "sending": "送信中…",
-      "swap_proposal_sent_the_lister": "交換提案を送信しました。出品者に、承認/拒否リンクを含むメールが届きます。"
-    },
-    "seoBase": {
-      "a_piece_for_sale_on": "DressAppで販売中のアイテム。",
-      "a_piece_in_your_dressapp": "あなたのDressAppクローゼット内のアイテム。",
-      "add_a_new_item_to": "写真やURLから、DressAppクローゼットに新しいアイテムを追加します。",
-      "admin_dashboard": "管理者ダッシュボード",
-      "buy_sell_swap_or_donate": "コミュニティアイテムを、手数料の完全な透明性のもとで、売買、交換、寄付できます。",
-      "closet_item": "クローゼットアイテム",
-      "dressapp_operations_console_for_users": "ユーザー、マーケットプレイス、AIプロバイダー、Trend-ScoutエージェントのためのDressApp運用コンソール。",
-      "every_piece_you_own_with": "所有するすべてのアイテムを、スマートなセグメンテーション、ソースタグ、AIによるワンタップ編集で管理できます。",
-      "join_dressapp_your_closet_community": "DressAppに参加しましょう。あなたのクローゼット、コミュニティマーケットプレイス、AIスタイリストが一つに。",
-      "list_a_piece": "アイテムを出品",
-      "list_one_of_your_closet": "クローゼットのアイテムをDressAppマーケットプレイスに出品します。",
-      "manage_your_dressapp_profile_voice": "DressAppのプロファイル、ボイス、Google Calendarとの連携を管理します。",
-      "marketplace_listing": "マーケットプレイスの出品",
-      "multimodal_ai_stylist_that_understands": "クローゼット、カレンダー、天気を理解するマルチモーダルAIスタイリスト。",
-      "my_closet": "マイクローゼット",
-      "sign_in_to_dressapp_to": "DressAppにサインインして、クローゼットの管理、マーケットプレイスの閲覧、AIスタイリストとのチャットを始めましょう。",
-      "your_dressapp_purchases_and_sales": "DressAppでの購入と販売。7%の手数料は完全に透明化されています。",
-      "your_daily_dressapp_brief_trends": "DressAppデイリーブリーフ：トレンド、クローゼット統計、最新のスタイリスト記事。"
-    },
-    "developerPanel": {
-      "active": "アクティブ：",
-      "clear_override": "オーバーライドをクリア",
-      "developer_internal": "開発者 / 内部用",
-      "eyes_vision_provider": "Eyesビジョンプロバイダー",
-      "gemini": "Gemini",
-      "gemma": "Gemma",
-      "last_analyze_call": "最終解析コール",
-      "override_set_by": "オーバーライド設定者：",
-      "refresh_status": "ステータスを更新",
-      "routes_the_closet_analyzer_between": "クローゼット解析のルーティングを、GoogleのGemini 2.5 FlashとセルフホストのGemma-4 E2Bエンドポイントの間で切り替えます。オーバーライドはこのポッドのMongoに保存され、コンテナの再起動後も保持されます。Gemmaに接続できない場合は、自動的にGeminiにフォールバックされます。",
-      "toggle_eyes_provider": "Eyesプロバイダーを切り替え"
-    },
-    "outfitCanvas": {
-      "brief": "ブリーフ：",
-      "outfit_canvas": "コーディネートキャンバス",
-      "the_look": "ルック",
-      "view_profile": "プロファイルを見る ←"
-    },
-    "profileDetailsCard": {
-      "eg_marketing_manager_student_barista": "例：マーケティングマネージャー、学生、バリスタ",
-      "https": "https://",
-      "nameexamplecom": "name@example.com"
-    }
-  },
-  "pages": {
-    "transactionLanding": {
-      "accepted": "承認済み",
-      "browse_marketplace": "マーケットプレイスを見る",
-      "declined": "拒否済み",
-      "link_expired_or_already_used": "リンクの期限が切れているか、既に使用されています",
-      "my_transactions": "取引履歴",
-      "pending": "保留中",
-      "transaction_status": "取引ステータス"
-    },
-    "admin": {
-      "all_providers": "すべてのプロバイダー",
-      "calendar": "カレンダー",
-      "calls": "コール",
-      "closet_items": "クローゼットアイテム",
-      "created": "作成日時",
-      "daily_utc": "毎日 UTC：",
-      "dev_bypass": "開発用バイパス：",
-      "emergent_llm_key": "Emergent LLMキー",
-      "enabled": "有効：",
-      "error_rate": "エラー率",
-      "errors": "エラー",
-      "failed_to_load_listings": "出品情報の読み込みに失敗しました",
-      "failed_to_load_provider_data": "プロバイダーデータの読み込みに失敗しました",
-      "failed_to_load_system_info": "システム情報の読み込みに失敗しました",
-      "failed_to_load_trend_reports": "トレンドレポートの読み込みに失敗しました",
-      "failed_to_load_users": "ユーザーの読み込みに失敗しました",
-      "gross_volume": "総取引額",
-      "last": "最後",
-      "listing": "出品",
-      "manage_in_emergent_profile": "Emergentプロファイルで管理",
-      "no_calls_recorded_yet": "まだコールは記録されていません。",
-      "no_listings": "出品はありません。",
-      "no_provider_activity_yet_trigger": "プロバイダーのアクティビティはまだありません。スタイリストコールやトレンド分析を実行してください。",
-      "no_transactions": "取引はありません。",
-      "no_trend_reports_yet_hit": "トレンドレポートはまだありません。「今すぐ強制実行」をクリックしてください。",
-      "no_users_match": "一致するユーザーはいません。",
-      "platform": "プラットフォーム",
-      "platform_fees": "プラットフォーム手数料",
-      "provider": "プロバイダー",
-      "roles": "ロール",
-      "search_by_email_or_display": "メールアドレスまたは表示名で検索",
-      "seller_net": "出品者受取額",
-      "source_tag": "ソースタグ",
-      "stripe": "Stripe",
-      "stripe_fees": "Stripe手数料",
-      "stylist_24h": "スタイリスト 24h",
-      "trend_cards_live": "公開中のトレンドカード",
-      "tx": "取引",
-      "universal_key_usage": "ユニバーサルキーの使用状況"
-    },
-    "closet": {
-      "back_to_full_closet": "フルクローゼットに戻る",
-      "could_not_delete_the_selected": "選択したアイテムを削除できませんでした",
-      "flat_lay_empty_state": "平置き画像なし",
-      "no_meaningful_matches_found_u2014": "一致するアイテムが見つかりませんでした。別の言葉をお試しください。",
-      "selection_actions": "選択したアイテムの操作",
-      "showing": "表示中：",
-      "indexed_items": "個のアイテムをインデックス済み。"
-    },
-    "home": {
-      "butter_yellow_rules_milan": "ミラノを席巻するバターイエロー",
-      "logos_out_fabric_in_cashmere": "ロゴよりも素材重視：週末はメリノのタートルネックよりも、カシミアのクルーネックが主流に。",
-      "ss26_runway": "SS26 ランウェイ",
-      "sustainability": "サステナビリティ",
-      "swap_before_you_shop": "買う前に交換",
-      "tailored_blazers_in_soft_butteryellow": "柔らかなバターイエローのテーラードジャケットが、春の定番色アイボリーに取って代わります。",
-      "the_quietluxe_swap": "クワイエット・ラグジュアリーな交換"
-    },
-    "transactions": {
-      "buying": "購入中",
-      "confirm_receipt": "受取を確認",
-      "donation": "寄付",
-      "donations": "寄付",
-      "explore_the_marketplace": "マーケットプレイスを探索",
-      "filter_by_status": "ステータスで絞り込む",
-      "item_item": "アイテム ↔ アイテム",
-      "no_donations_yet": "まだ寄付はありません",
-      "no_swaps_yet": "まだ交換はありません",
-      "no_transactions_yet": "まだ取引はありません",
-      "purchase": "購入",
-      "receipt_confirmed_thanks_for_closing": "受取が確認されました。取引を完了していただきありがとうございます！",
-      "selling": "販売中",
-      "swaps": "交換"
-    },
-    "listingDetail": {
-      "claim_this_donation": "この寄付を受け取る",
-      "donations_are_free_youre_only": "寄付は無料です。配送料のみをご負担ください。または、出品者にメッセージを送って直接手渡しを相談してください。",
-      "propose_a_swap": "交換を提案",
-      "this_donation_is_free_coordinate": "この寄付は無料です。直接会っての手渡し、または配送方法について出品者と調整してください。",
-      "well_email_the_lister_a": "出品者に、安全な承認/拒否リンクをメールで送信します。手数料はかかりません。アイテムは直接やり取りされます。",
-      "or_meet_locally_to_skip": "· または直接会って手数料を節約 🌱",
-      "local_pickup_preferred_no_shipping": "🌱 直接手渡しを希望 — 配送料なし"
-    },
-    "extensionConnect": {
-      "connecting_to_dressapp_extension": "DressApp拡張機能に接続中…",
-      "connection_failed": "接続に失敗しました",
-      "dressapp_chrome_extension": "DressApp Chrome拡張機能",
-      "go_to_home": "ホームへ",
-      "redirecting_to_sign_in": "サインイン画面に転送中…",
-      "sharing_your_signin_with_the": "拡張機能とサインイン情報を共有しています。このウィンドウは自動的に閉じます。",
-      "the_extension_id": "拡張機能ID",
-      "the_extension_is_signed_in": "拡張機能にサインイン中のユーザー：",
-      "untrusted_extension": "信頼できない拡張機能",
-      "you_can_close_this_tab": "このタブを閉じて、ショッピングサイトに戻ることができます。"
-    },
-    "login": {
-      "editorial_street_style": "エディトリアル・ストリートスタイル"
-    },
-    "expertsDirectory": {
-      "il_us_fr": "イスラエル、米国、フランス…"
-    },
-    "createListing": {
-      "leave_at": "置く場所",
-      "to_encourage_neighbours_to_meet": "近所の人との出会いを促進するために。梱包ゼロ、排出ゼロ、そして素敵なセンスの友人ができるかもしれません。配送料がどうしても必要な場合のみ、手数料を追加してください。",
-      "prefer_local_pickup": "🌱 直接手渡しを希望"
-    },
-    "marketplace": {
-      "nothing_to_sync_no_closet": "同期するものがありません。マーケットプレイス出品設定がされているアイテムがありません。",
-      "remove_listing": "出品を削除",
-      "sync_from_closet": "クローゼットから同期"
     }
   }
 }

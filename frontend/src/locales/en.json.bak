@@ -98,11 +98,7 @@
     "platformFeeSub": "after processing fees",
     "trendScout": "Trend-Scout",
     "dailyEdit": "Daily edit",
-    "dailyEditOn": "Daily edit · {{date}}",
-    "trendsRefreshFailed": "Could not refresh trends",
-    "trendReadSource": "Read source",
-    "refreshTrends": "Refresh trends",
-    "trendsRefreshed": "Trends refreshed"
+    "dailyEditOn": "Daily edit · {{date}}"
   },
   "closet": {
     "title": "Your closet",
@@ -134,9 +130,7 @@
     "color": "Color",
     "season": "Season",
     "intent": "Intent",
-    "anyCategory": "Any category",
-    "completeListingCta": "Complete listing",
-    "clearSearch": "Clear search"
+    "anyCategory": "Any category"
   },
   "addItem": {
     "title": "Upload & auto-fill",
@@ -530,13 +524,7 @@
     "radius": "Radius",
     "radiusKm": "{{km}} km",
     "distanceKmAway": "{{km}} km away",
-    "needLocationForNearby": "Enable location to sort by nearest",
-    "removeFailed": "Could not remove listing",
-    "syncFailed": "Could not sync marketplace",
-    "removeListing": "Remove from marketplace",
-    "listingRemoved": "Removed from marketplace",
-    "removing": "Removing…",
-    "syncing": "Syncing…"
+    "needLocationForNearby": "Enable location to sort by nearest"
   },
   "createListing": {
     "title": "Create a listing",
@@ -739,8 +727,7 @@
       "description": "When one of your listings sells, we'll send your net to this PayPal email via PayPal Payouts. Leave blank to disable automatic payouts.",
       "paypalEmail": "PayPal email for payouts",
       "linked": "Linked"
-    },
-    "occupation": "Occupation"
+    }
   },
   "admin": {
     "title": "Admin",
@@ -1141,182 +1128,5 @@
   "language": {
     "change": "Change language",
     "label": "Language"
-  },
-  "components": {
-    "swapPickerModal": {
-      "the_lister_will_be_emailed": ". The lister will be emailed to accept or decline.",
-      "add_items_to_your_closet": "Add items to your closet first, then try again.",
-      "could_not_load_your_closet": "Could not load your closet.",
-      "offer_an_item_in_exchange": "Offer an item in exchange",
-      "sending": "Sending…",
-      "swap_proposal_sent_the_lister": "Swap proposal sent. The lister will get an email with accept / decline links."
-    },
-    "seoBase": {
-      "a_piece_for_sale_on": "A piece for sale on DressApp.",
-      "a_piece_in_your_dressapp": "A piece in your DressApp closet.",
-      "add_a_new_item_to": "Add a new item to your DressApp closet from a photo or URL.",
-      "admin_dashboard": "Admin dashboard",
-      "buy_sell_swap_or_donate": "Buy, sell, swap, or donate community pieces with full fee transparency.",
-      "closet_item": "Closet item",
-      "dressapp_operations_console_for_users": "DressApp operations console for users, marketplace, AI providers, and the Trend-Scout agent.",
-      "every_piece_you_own_with": "Every piece you own — with smart segmentation, source tags, and one-tap edit-with-AI.",
-      "join_dressapp_your_closet_community": "Join DressApp — your closet, community marketplace, and AI stylist in one place.",
-      "list_a_piece": "List a piece",
-      "list_one_of_your_closet": "List one of your closet items on the DressApp marketplace.",
-      "manage_your_dressapp_profile_voice": "Manage your DressApp profile, voice, and Google Calendar connection.",
-      "marketplace_listing": "Marketplace listing",
-      "multimodal_ai_stylist_that_understands": "Multimodal AI stylist that understands your closet, calendar, and the weather.",
-      "my_closet": "My closet",
-      "sign_in_to_dressapp_to": "Sign in to DressApp to manage your closet, browse the marketplace, and chat with the AI stylist.",
-      "your_dressapp_purchases_and_sales": "Your DressApp purchases and sales, with full 7% fee transparency.",
-      "your_daily_dressapp_brief_trends": "Your daily DressApp brief: trends, closet stats, and the latest stylist reads."
-    },
-    "developerPanel": {
-      "active": "Active:",
-      "clear_override": "Clear override",
-      "developer_internal": "Developer / Internal",
-      "eyes_vision_provider": "Eyes vision provider",
-      "gemini": "Gemini",
-      "gemma": "Gemma",
-      "last_analyze_call": "Last analyze call",
-      "override_set_by": "Override set by",
-      "refresh_status": "Refresh status",
-      "routes_the_closet_analyzer_between": "Routes the closet analyzer between Google's Gemini 2.5 Flash and the self-hosted Gemma-4 E2B endpoint. Override is persisted in this pod's Mongo and survives container restarts. If Gemma is unreachable, the request automatically falls back to Gemini.",
-      "toggle_eyes_provider": "Toggle Eyes provider"
-    },
-    "outfitCanvas": {
-      "brief": "Brief:",
-      "outfit_canvas": "Outfit canvas",
-      "the_look": "The look",
-      "view_profile": "View profile →"
-    },
-    "profileDetailsCard": {
-      "eg_marketing_manager_student_barista": "e.g. Marketing manager, Student, Barista",
-      "https": "https://",
-      "nameexamplecom": "name@example.com"
-    }
-  },
-  "pages": {
-    "transactionLanding": {
-      "accepted": "Accepted",
-      "browse_marketplace": "Browse marketplace",
-      "declined": "Declined",
-      "link_expired_or_already_used": "Link expired or already used",
-      "my_transactions": "My transactions",
-      "pending": "Pending",
-      "transaction_status": "Transaction status"
-    },
-    "admin": {
-      "all_providers": "All providers",
-      "calendar": "Calendar",
-      "calls": "Calls",
-      "closet_items": "Closet items",
-      "created": "Created",
-      "daily_utc": "Daily UTC:",
-      "dev_bypass": "Dev bypass:",
-      "emergent_llm_key": "Emergent LLM Key",
-      "enabled": "Enabled:",
-      "error_rate": "Error rate",
-      "errors": "Errors",
-      "failed_to_load_listings": "Failed to load listings",
-      "failed_to_load_provider_data": "Failed to load provider data",
-      "failed_to_load_system_info": "Failed to load system info",
-      "failed_to_load_trend_reports": "Failed to load trend reports",
-      "failed_to_load_users": "Failed to load users",
-      "gross_volume": "Gross volume",
-      "last": "Last",
-      "listing": "Listing",
-      "manage_in_emergent_profile": "Manage in Emergent profile",
-      "no_calls_recorded_yet": "No calls recorded yet.",
-      "no_listings": "No listings.",
-      "no_provider_activity_yet_trigger": "No provider activity yet. Trigger a stylist call or trend run to populate.",
-      "no_transactions": "No transactions.",
-      "no_trend_reports_yet_hit": "No trend reports yet. Hit \"Force run now\" to seed.",
-      "no_users_match": "No users match.",
-      "platform": "Platform",
-      "platform_fees": "Platform fees",
-      "provider": "Provider",
-      "roles": "Roles",
-      "search_by_email_or_display": "Search by email or display name",
-      "seller_net": "Seller net",
-      "source_tag": "Source tag",
-      "stripe": "Stripe",
-      "stripe_fees": "Stripe fees",
-      "stylist_24h": "Stylist 24h",
-      "trend_cards_live": "Trend cards live",
-      "tx": "Tx",
-      "universal_key_usage": "Universal key usage"
-    },
-    "closet": {
-      "back_to_full_closet": "Back to full closet",
-      "could_not_delete_the_selected": "Could not delete the selected items",
-      "flat_lay_empty_state": "Flat lay empty state",
-      "no_meaningful_matches_found_u2014": "No meaningful matches found \\u2014 try different words.",
-      "selection_actions": "Selection actions",
-      "showing": "Showing",
-      "indexed_items": "indexed items."
-    },
-    "home": {
-      "butter_yellow_rules_milan": "Butter yellow rules Milan",
-      "logos_out_fabric_in_cashmere": "Logos out, fabric in: cashmere crewnecks over merino roll-necks dominate weekends.",
-      "ss26_runway": "SS26 Runway",
-      "sustainability": "Sustainability",
-      "swap_before_you_shop": "Swap before you shop",
-      "tailored_blazers_in_soft_butteryellow": "Tailored blazers in soft butter-yellow replace ivory as the spring neutral.",
-      "the_quietluxe_swap": "The quiet-luxe swap"
-    },
-    "transactions": {
-      "buying": "Buying",
-      "confirm_receipt": "Confirm receipt",
-      "donation": "Donation",
-      "donations": "Donations",
-      "explore_the_marketplace": "Explore the marketplace",
-      "filter_by_status": "Filter by status",
-      "item_item": "Item ↔ Item",
-      "no_donations_yet": "No donations yet",
-      "no_swaps_yet": "No swaps yet",
-      "no_transactions_yet": "No transactions yet",
-      "purchase": "Purchase",
-      "receipt_confirmed_thanks_for_closing": "Receipt confirmed. Thanks for closing the loop!",
-      "selling": "Selling",
-      "swaps": "Swaps"
-    },
-    "listingDetail": {
-      "claim_this_donation": "Claim this donation",
-      "donations_are_free_youre_only": "Donations are free — you're only reimbursing shipping. Or message the donor to arrange local pickup.",
-      "propose_a_swap": "Propose a swap",
-      "this_donation_is_free_coordinate": "This donation is free. Coordinate with the donor to meet locally or arrange shipping directly.",
-      "well_email_the_lister_a": "We'll email the lister a secure accept / decline link. No charges — items ship directly between you.",
-      "or_meet_locally_to_skip": "· Or meet locally to skip the fee 🌱",
-      "local_pickup_preferred_no_shipping": "🌱 Local pickup preferred — no shipping fee"
-    },
-    "extensionConnect": {
-      "connecting_to_dressapp_extension": "Connecting to DressApp Extension…",
-      "connection_failed": "Connection failed",
-      "dressapp_chrome_extension": "DressApp Chrome Extension",
-      "go_to_home": "Go to home",
-      "redirecting_to_sign_in": "Redirecting to sign in…",
-      "sharing_your_signin_with_the": "Sharing your sign-in with the extension. This window will close automatically.",
-      "the_extension_id": "The extension ID",
-      "the_extension_is_signed_in": "The extension is signed in as",
-      "untrusted_extension": "Untrusted extension",
-      "you_can_close_this_tab": "You can close this tab and head back to the shopping site."
-    },
-    "login": {
-      "editorial_street_style": "Editorial street style"
-    },
-    "expertsDirectory": {
-      "il_us_fr": "IL, US, FR…"
-    },
-    "createListing": {
-      "leave_at": "Leave at",
-      "to_encourage_neighbours_to_meet": "to encourage neighbours to meet you — zero packaging, zero emissions, plus you might make a friend with great style. Add a fee only if shipping is unavoidable.",
-      "prefer_local_pickup": "🌱 Prefer local pickup"
-    },
-    "marketplace": {
-      "nothing_to_sync_no_closet": "Nothing to sync — no closet items have a marketplace intent set.",
-      "remove_listing": "Remove listing",
-      "sync_from_closet": "Sync from closet"
-    }
   }
 }

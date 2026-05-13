@@ -1,22 +1,22 @@
 [
   {
-    "content": "Inspect screenshots to identify which components are leaking English",
+    "content": "Write /app/docs/code_fixes_needed.md documenting the 'already-translated, needs-code-wire' bugs",
     "status": "completed"
   },
   {
-    "content": "Build a regex-based audit script that flags JSX text literals, placeholders, aria-labels, alt text, toast strings, and other user-facing English in /app/frontend/src",
+    "content": "Build /app/scripts/apply_audit_translations.py — merges 154 keys × 12 locales with defaultValue redirection",
     "status": "completed"
   },
   {
-    "content": "Cross-reference findings against existing keys in en.json to avoid duplicates",
+    "content": "Build /app/scripts/patch_hardcoded_strings.py — rewrites JSX/JS source to use t('key'), handles module-scope skip",
     "status": "completed"
   },
   {
-    "content": "Generate /app/docs/locale_backfill_untranslated.json with proposed new i18n keys + English source values + file:line reference",
+    "content": "Run merge + patch end-to-end (92 source patches, 1,848 locale entries) and verify esbuild clean",
     "status": "completed"
   },
   {
-    "content": "Spot-check 8-10 findings by opening the actual files to verify they're real leaks (not false positives)",
+    "content": "Update /app/docs/Languages_chat.md with Session 2 deliverables",
     "status": "completed"
   }
 ]

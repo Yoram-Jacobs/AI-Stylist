@@ -151,10 +151,10 @@ export default function Transactions() {
 
   const TAB_DEFS = [
     { value: 'all', label: 'All', count: partitioned.all.length },
-    { value: 'buying', label: t('pages.transactions.buying'), count: partitioned.buying.length },
-    { value: 'selling', label: t('pages.transactions.selling'), count: partitioned.selling.length },
-    { value: 'swaps', label: t('pages.transactions.swaps'), count: partitioned.swaps.length },
-    { value: 'donations', label: t('pages.transactions.donations'), count: partitioned.donations.length },
+    { value: 'buying', label: 'Buying', count: partitioned.buying.length },
+    { value: 'selling', label: 'Selling', count: partitioned.selling.length },
+    { value: 'swaps', label: 'Swaps', count: partitioned.swaps.length },
+    { value: 'donations', label: 'Donations', count: partitioned.donations.length },
   ];
 
   return (
@@ -198,7 +198,7 @@ export default function Transactions() {
         <div
           className="flex flex-wrap gap-2 mt-5"
           data-testid="transactions-status-filters"
-          aria-label={t('pages.transactions.filter_by_status')}
+          aria-label="Filter by status"
         >
           {STATUS_FILTER_OPTIONS.map((s) => {
             const Icon = STATUS_ICON[s];
@@ -228,7 +228,7 @@ export default function Transactions() {
               className="h-8 text-xs"
               data-testid="transactions-status-clear"
             >
-              {t('common.clear', { defaultValue: 'Clear' })}
+              Clear
             </Button>
           )}
         </div>
@@ -298,7 +298,7 @@ function EmptyState({ kind, hasFilter }) {
           : copy.sub}
       </p>
       <Button asChild className="mt-4 rounded-xl" data-testid="transactions-empty-cta">
-        <Link to="/market">{t('pages.transactions.explore_the_marketplace')}</Link>
+        <Link to="/market">Explore the marketplace</Link>
       </Button>
     </div>
   );
@@ -319,7 +319,7 @@ function TransactionRow({ tx, userId, onConfirmed }) {
     setBusy(true);
     try {
       await api.confirmReceipt(tx.id);
-      toast.success(t('pages.transactions.receipt_confirmed_thanks_for_closing'));
+      toast.success('Receipt confirmed. Thanks for closing the loop!');
       onConfirmed?.();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Could not confirm receipt.');
@@ -387,7 +387,7 @@ function TransactionRow({ tx, userId, onConfirmed }) {
           ) : (
             <div>
               <div className="caps-label text-muted-foreground">Swap</div>
-              <div className="font-display text-base">{t('pages.transactions.item_item')}</div>
+              <div className="font-display text-base">Item ↔ Item</div>
             </div>
           )}
 
@@ -404,7 +404,7 @@ function TransactionRow({ tx, userId, onConfirmed }) {
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <>
-                    <Check className="h-3.5 w-3.5 me-1" /> {t('pages.transactions.confirm_receipt')}
+                    <Check className="h-3.5 w-3.5 me-1" /> Confirm receipt
                   </>
                 )}
               </Button>
