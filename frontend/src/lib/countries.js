@@ -5,13 +5,17 @@
  * without any network. ~250 entries, ~10 KB minified — negligible
  * vs. pulling a third-party "all countries" library.
  *
- * Display names are English; localisation can be layered on later
- * via `Intl.DisplayNames` (no extra dataset needed):
+ * The bundled English ``name`` field is used only as a fallback for
+ * three things: (1) older browsers that don't expose
+ * ``Intl.DisplayNames`` for the active locale, (2) free-text user
+ * input matching in ``resolveCountry`` below, and (3) a secondary
+ * hint shown beside the localised name in the combobox so users who
+ * know a country only by its English name can still recognise it.
  *
- *     new Intl.DisplayNames([locale], { type: 'region' }).of(c.code)
- *
- * which the `CountryCombobox` already calls when the active i18n
- * locale isn't English.
+ * For the **display** name, prefer ``localisedCountryName(code, lang)``
+ * over reading ``c.name`` directly — it returns the browser's native
+ * translation for every locale, with zero maintenance cost and zero
+ * locale-bundle bloat.
  *
  * Flag emoji is rendered from the country code via the regional
  * indicator characters trick (works on every modern OS that ships
@@ -22,6 +26,28 @@ export function flagEmoji(code) {
   return [...code.toUpperCase()]
     .map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65))
     .join('');
+}
+
+/**
+ * Return the localised country name for an ISO-3166-1 alpha-2 code
+ * using the browser's built-in ``Intl.DisplayNames`` table.
+ *
+ * Falls back gracefully to the raw ISO code when:
+ *  - the browser doesn't support ``Intl.DisplayNames`` (very old),
+ *  - the active locale has no region table compiled in,
+ *  - the input code is malformed.
+ *
+ * Callers that need a non-code fallback (e.g. the English
+ * ``COUNTRIES[i].name``) can pass it via ``fallback``.
+ */
+export function localisedCountryName(code, lang, fallback) {
+  if (!code) return fallback || '';
+  try {
+    const dn = new Intl.DisplayNames([lang || 'en'], { type: 'region' });
+    return dn.of(code) || fallback || code;
+  } catch {
+    return fallback || code;
+  }
 }
 
 export const COUNTRIES = [

@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "Impossibile aggiornare i trend",
     "trendReadSource": "Leggi fonte",
     "refreshTrends": "Aggiorna trend",
-    "trendsRefreshed": "Trend aggiornati"
+    "trendsRefreshed": "Trend aggiornati",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "Passerella PE26",
+        "headline": "Il giallo burro domina Milano",
+        "summary": "I blazer sartoriali in giallo burro morbido sostituiscono l'avorio come neutro di stagione."
+      },
+      "fb2": {
+        "label": "Street",
+        "headline": "Lo scambio quiet-luxe",
+        "summary": "Loghi fuori, tessuti dentro: girocollo in cashmere su dolcevita merino dominano i weekend."
+      },
+      "fb3": {
+        "label": "Sostenibilità",
+        "headline": "Scambia prima di comprare",
+        "summary": "Le sale di swap di quartiere sono triplicate anno su anno; i retailer iniziano finalmente ad ascoltare."
+      }
+    }
   },
   "closet": {
     "title": "Il tuo armadio",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — Il tuo armadio, elevato",
-    "defaultDescription": "Cataloga il guardaroba, chiedi a una stylist AI e scambia o vendi con una commissione equa del 7%."
+    "defaultDescription": "Cataloga il guardaroba, chiedi a una stylist AI e scambia o vendi con una commissione equa del 7%.",
+    "routes": {
+      "login": {
+        "title": "Accedi",
+        "description": "Accedi a DressApp per gestire il tuo guardaroba, esplorare il marketplace e chattare con la stylist AI."
+      },
+      "register": {
+        "title": "Crea account",
+        "description": "Unisciti a DressApp — il tuo guardaroba, marketplace della community e stylist AI in un unico posto."
+      },
+      "home": {
+        "title": "Oggi",
+        "description": "Il tuo brief quotidiano DressApp: tendenze, statistiche del guardaroba e le ultime letture della stylist."
+      },
+      "closet": {
+        "title": "Il mio guardaroba",
+        "description": "Ogni capo che possiedi — con segmentazione intelligente, tag di origine ed edit-with-AI con un tap."
+      },
+      "closet_add": {
+        "title": "Aggiungi al guardaroba",
+        "description": "Aggiungi un nuovo capo al tuo guardaroba DressApp da una foto o da un URL."
+      },
+      "stylist": {
+        "title": "Stylist",
+        "description": "Stylist AI multimodale che comprende il tuo guardaroba, il calendario e il meteo."
+      },
+      "market": {
+        "title": "Marketplace",
+        "description": "Compra, vendi, scambia o dona capi della community con piena trasparenza sulle commissioni."
+      },
+      "market_create": {
+        "title": "Metti in vendita",
+        "description": "Metti in vendita uno dei capi del tuo guardaroba sul marketplace DressApp."
+      },
+      "transactions": {
+        "title": "Transazioni",
+        "description": "I tuoi acquisti e le tue vendite su DressApp, con piena trasparenza sulla commissione del 7%."
+      },
+      "admin": {
+        "title": "Dashboard admin",
+        "description": "Console operativa DressApp per utenti, marketplace, provider AI e l'agente Trend-Scout."
+      },
+      "me": {
+        "title": "Profilo e impostazioni",
+        "description": "Gestisci il tuo profilo DressApp, la voce e la connessione a Google Calendar."
+      },
+      "closet_item": {
+        "title": "Capo del guardaroba",
+        "description": "Un capo nel tuo guardaroba DressApp."
+      },
+      "market_listing": {
+        "title": "Annuncio marketplace",
+        "description": "Un capo in vendita su DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "Nulla da sincronizzare — nessun capo ha un intento di vendita impostato.",
       "remove_listing": "Rimuovi annuncio",
       "sync_from_closet": "Sincronizza dall'armadio"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "Passerella PE26",
+      "street": "Street",
+      "sustainability": "Sostenibilità",
+      "influencers": "Influencer",
+      "second_hand": "Usato",
+      "recycling": "Riciclo",
+      "news_flash": "Ultim'ora"
     }
   }
 }

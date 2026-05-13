@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "Não foi possível atualizar as tendências",
     "trendReadSource": "Ler fonte",
     "refreshTrends": "Atualizar tendências",
-    "trendsRefreshed": "Tendências atualizadas"
+    "trendsRefreshed": "Tendências atualizadas",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "Passarela PV26",
+        "headline": "O amarelo manteiga reina em Milão",
+        "summary": "Blazers ajustados em amarelo manteiga suave substituem o marfim como neutro da primavera."
+      },
+      "fb2": {
+        "label": "Street",
+        "headline": "A virada do quiet luxury",
+        "summary": "Logos para fora, tecido para dentro: tricôs de cashmere sobre gola alta de merino dominam os fins de semana."
+      },
+      "fb3": {
+        "label": "Sustentabilidade",
+        "headline": "Troque antes de comprar",
+        "summary": "Salas comunitárias de troca triplicaram ano a ano; o varejo finalmente está ouvindo."
+      }
+    }
   },
   "closet": {
     "title": "Seu closet",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — Seu closet, elevado",
-    "defaultDescription": "Catalogue seu guarda-roupa, pergunte à stylist IA e troque ou venda com uma taxa justa de 7%."
+    "defaultDescription": "Catalogue seu guarda-roupa, pergunte à stylist IA e troque ou venda com uma taxa justa de 7%.",
+    "routes": {
+      "login": {
+        "title": "Entrar",
+        "description": "Entre no DressApp para gerir o seu armário, explorar o marketplace e conversar com a stylist de IA."
+      },
+      "register": {
+        "title": "Criar conta",
+        "description": "Junte-se ao DressApp — o seu armário, marketplace comunitário e stylist de IA num só lugar."
+      },
+      "home": {
+        "title": "Hoje",
+        "description": "O seu resumo diário DressApp: tendências, estatísticas do armário e as últimas leituras da stylist."
+      },
+      "closet": {
+        "title": "O meu armário",
+        "description": "Cada peça que possui — com segmentação inteligente, etiquetas de origem e edit-with-AI num toque."
+      },
+      "closet_add": {
+        "title": "Adicionar ao armário",
+        "description": "Adicione uma nova peça ao seu armário DressApp a partir de uma foto ou URL."
+      },
+      "stylist": {
+        "title": "Stylist",
+        "description": "Stylist de IA multimodal que entende o seu armário, calendário e o clima."
+      },
+      "market": {
+        "title": "Marketplace",
+        "description": "Compre, venda, troque ou doe peças da comunidade com total transparência de taxas."
+      },
+      "market_create": {
+        "title": "Anunciar uma peça",
+        "description": "Anuncie uma das peças do seu armário no marketplace DressApp."
+      },
+      "transactions": {
+        "title": "Transações",
+        "description": "As suas compras e vendas no DressApp, com total transparência sobre a taxa de 7%."
+      },
+      "admin": {
+        "title": "Painel de administração",
+        "description": "Consola de operações DressApp para utilizadores, marketplace, provedores de IA e o agente Trend-Scout."
+      },
+      "me": {
+        "title": "Perfil e definições",
+        "description": "Gira o seu perfil DressApp, voz e a ligação ao Google Calendar."
+      },
+      "closet_item": {
+        "title": "Peça do armário",
+        "description": "Uma peça no seu armário DressApp."
+      },
+      "market_listing": {
+        "title": "Anúncio do marketplace",
+        "description": "Uma peça à venda no DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "Nada para sincronizar — nenhum item do closet tem intenção de venda.",
       "remove_listing": "Remover anúncio",
       "sync_from_closet": "Sincronizar a partir do closet"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "Passarela PV26",
+      "street": "Street",
+      "sustainability": "Sustentabilidade",
+      "influencers": "Influencers",
+      "second_hand": "Segunda mão",
+      "recycling": "Reciclagem",
+      "news_flash": "Última hora"
     }
   }
 }

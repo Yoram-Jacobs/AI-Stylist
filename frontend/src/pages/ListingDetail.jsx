@@ -154,25 +154,32 @@ export default function ListingDetail() {
               >
                 {listing.size && (
                   <Badge variant="outline" data-testid="listing-detail-size">
-                    {t('market.sizeLabel', { defaultValue: 'Size' })}: {listing.size}
+                    {t('addItem.size')}: {listing.size}
                   </Badge>
                 )}
                 {listing.condition && (
                   <Badge variant="outline" data-testid="listing-detail-condition">
-                    {t('market.conditionLabel', { defaultValue: 'Condition' })}:{' '}
-                    {String(listing.condition).replace('_', ' ')}
+                    {t('addItem.condition')}:{' '}
+                    {t(`taxonomy.condition.${listing.condition}`, {
+                      defaultValue: String(listing.condition).replace('_', ' '),
+                    })}
                   </Badge>
                 )}
                 {listing.category && (
-                  <Badge variant="secondary">{listing.category}</Badge>
+                  <Badge variant="secondary" data-testid="listing-detail-category">
+                    {t(`taxonomy.categories.${listing.category}`, {
+                      defaultValue: listing.category,
+                    })}
+                  </Badge>
                 )}
                 {listing.mode && listing.mode !== 'sell' && (
                   <Badge
-                    className="capitalize"
                     variant="outline"
                     data-testid="listing-detail-mode"
                   >
-                    {listing.mode}
+                    {t(`taxonomy.intent.${listing.mode}`, {
+                      defaultValue: listing.mode,
+                    })}
                   </Badge>
                 )}
               </div>

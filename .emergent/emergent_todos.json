@@ -1,22 +1,26 @@
 [
   {
-    "content": "Write /app/docs/code_fixes_needed.md documenting the 'already-translated, needs-code-wire' bugs",
+    "content": "Patch 1: Wire ListingDetail.jsx chips (category, mode, condition, size) through existing taxonomy keys",
     "status": "completed"
   },
   {
-    "content": "Build /app/scripts/apply_audit_translations.py — merges 154 keys × 12 locales with defaultValue redirection",
+    "content": "Patch 2: Home.jsx — add trends.bucket.* keys to all 12 locales + wire chip + restructure FALLBACK_TRENDS",
     "status": "completed"
   },
   {
-    "content": "Build /app/scripts/patch_hardcoded_strings.py — rewrites JSX/JS source to use t('key'), handles module-scope skip",
+    "content": "Patch 3: Refactor SeoBase.jsx META → i18n keys + add seo.* keys to all 12 locales",
     "status": "completed"
   },
   {
-    "content": "Run merge + patch end-to-end (92 source patches, 1,848 locale entries) and verify esbuild clean",
+    "content": "Patch 4: Refactor countries.js to use Intl.DisplayNames (add localisedCountryName helper)",
     "status": "completed"
   },
   {
-    "content": "Update /app/docs/Languages_chat.md with Session 2 deliverables",
+    "content": "Lint + esbuild + screenshot verification of all patches",
     "status": "completed"
+  },
+  {
+    "content": "Plan mobile (Capacitor) port for Chrome extension shopping assistant — gather requirements",
+    "status": "in_progress"
   }
 ]

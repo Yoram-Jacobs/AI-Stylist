@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "Trends konnten nicht aktualisiert werden",
     "trendReadSource": "Quelle lesen",
     "refreshTrends": "Trends aktualisieren",
-    "trendsRefreshed": "Trends aktualisiert"
+    "trendsRefreshed": "Trends aktualisiert",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "SS26 Laufsteg",
+        "headline": "Butter-Gelb regiert Mailand",
+        "summary": "Tailliierte Blazer in weichem Butter-Gelb ersetzen Elfenbein als Frühlings-Neutral."
+      },
+      "fb2": {
+        "label": "Street",
+        "headline": "Der Quiet-Luxe-Wechsel",
+        "summary": "Logos raus, Stoff rein: Kaschmir-Rundhalspullover über Merino-Rollkragen dominieren die Wochenenden."
+      },
+      "fb3": {
+        "label": "Nachhaltigkeit",
+        "headline": "Tauschen statt kaufen",
+        "summary": "Community-Tauschräume wuchsen im Jahresvergleich um das Dreifache; der Handel hört endlich zu."
+      }
+    }
   },
   "closet": {
     "title": "Deine Garderobe",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — Deine Garderobe, veredelt",
-    "defaultDescription": "Katalogisiere deine Garderobe, frag eine KI-Stylistin und tausche oder verkaufe für faire 7%."
+    "defaultDescription": "Katalogisiere deine Garderobe, frag eine KI-Stylistin und tausche oder verkaufe für faire 7%.",
+    "routes": {
+      "login": {
+        "title": "Anmelden",
+        "description": "Melde dich bei DressApp an, um deine Garderobe zu verwalten, den Marktplatz zu durchstöbern und mit der KI-Stylistin zu chatten."
+      },
+      "register": {
+        "title": "Konto erstellen",
+        "description": "Tritt DressApp bei — deine Garderobe, dein Community-Marktplatz und deine KI-Stylistin an einem Ort."
+      },
+      "home": {
+        "title": "Heute",
+        "description": "Dein tägliches DressApp-Briefing: Trends, Garderoben-Statistiken und die neuesten Stylistin-Beiträge."
+      },
+      "closet": {
+        "title": "Meine Garderobe",
+        "description": "Jedes Teil, das du besitzt — mit smarter Segmentierung, Quellen-Tags und Edit-with-AI per Tipp."
+      },
+      "closet_add": {
+        "title": "Zur Garderobe hinzufügen",
+        "description": "Füge ein neues Teil aus einem Foto oder einer URL zu deiner DressApp-Garderobe hinzu."
+      },
+      "stylist": {
+        "title": "Stylistin",
+        "description": "Multimodale KI-Stylistin, die deine Garderobe, deinen Kalender und das Wetter versteht."
+      },
+      "market": {
+        "title": "Marktplatz",
+        "description": "Kaufe, verkaufe, tausche oder spende Community-Teile mit voller Gebühren-Transparenz."
+      },
+      "market_create": {
+        "title": "Teil einstellen",
+        "description": "Stelle eines deiner Garderoben-Teile auf dem DressApp-Marktplatz ein."
+      },
+      "transactions": {
+        "title": "Transaktionen",
+        "description": "Deine DressApp-Käufe und -Verkäufe mit voller 7%-Gebühren-Transparenz."
+      },
+      "admin": {
+        "title": "Admin-Dashboard",
+        "description": "DressApp-Operationskonsole für Nutzer, Marktplatz, KI-Provider und den Trend-Scout-Agenten."
+      },
+      "me": {
+        "title": "Profil und Einstellungen",
+        "description": "Verwalte dein DressApp-Profil, deine Stimme und die Google-Kalender-Verbindung."
+      },
+      "closet_item": {
+        "title": "Garderoben-Teil",
+        "description": "Ein Teil in deiner DressApp-Garderobe."
+      },
+      "market_listing": {
+        "title": "Marktplatz-Eintrag",
+        "description": "Ein Teil zum Verkauf auf DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "Nichts zu synchronisieren — keine Artikel im Kleiderschrank haben eine Marktplatz-Absicht.",
       "remove_listing": "Eintrag entfernen",
       "sync_from_closet": "Aus Kleiderschrank synchronisieren"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "SS26 Laufsteg",
+      "street": "Street",
+      "sustainability": "Nachhaltigkeit",
+      "influencers": "Influencer",
+      "second_hand": "Second-Hand",
+      "recycling": "Recycling",
+      "news_flash": "Eilmeldung"
     }
   }
 }

@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "トレンドを更新できませんでした",
     "trendReadSource": "ソースを読む",
     "refreshTrends": "トレンドを更新",
-    "trendsRefreshed": "トレンドが更新されました"
+    "trendsRefreshed": "トレンドが更新されました",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "SS26 ランウェイ",
+        "headline": "バターイエローがミラノを席巻",
+        "summary": "柔らかなバターイエローのテーラードブレザーが、春の定番ニュートラルとしてアイボリーに取って代わる。"
+      },
+      "fb2": {
+        "label": "ストリート",
+        "headline": "クワイエットラックスへの転換",
+        "summary": "ロゴはアウト、素材がイン。カシミアのクルーネックをメリノのタートルに重ねるスタイルが週末を支配。"
+      },
+      "fb3": {
+        "label": "サステナビリティ",
+        "headline": "買う前に交換しよう",
+        "summary": "地域のスワップルームは前年比3倍に成長。小売もついに耳を傾け始めた。"
+      }
+    }
   },
   "closet": {
     "title": "あなたのクローゼット",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — あなたのクローゼット、グレードアップ",
-    "defaultDescription": "ワードローブをカタログ化し、AIスタイリストに聞き、公正な7%の手数料で交換や販売。"
+    "defaultDescription": "ワードローブをカタログ化し、AIスタイリストに聞き、公正な7%の手数料で交換や販売。",
+    "routes": {
+      "login": {
+        "title": "サインイン",
+        "description": "DressApp にサインインして、クローゼットの管理、マーケットの閲覧、AI スタイリストとのチャットを始めましょう。"
+      },
+      "register": {
+        "title": "アカウント作成",
+        "description": "DressApp に参加 — クローゼット・コミュニティマーケット・AI スタイリストをひとつに。"
+      },
+      "home": {
+        "title": "今日",
+        "description": "あなたの日次 DressApp ブリーフ：トレンド、クローゼット統計、最新のスタイリストコラム。"
+      },
+      "closet": {
+        "title": "マイクローゼット",
+        "description": "あなたが持っているすべてのアイテムを、スマートな分類・出所タグ・ワンタップの AI 編集とともに。"
+      },
+      "closet_add": {
+        "title": "クローゼットに追加",
+        "description": "写真または URL から DressApp クローゼットに新しいアイテムを追加します。"
+      },
+      "stylist": {
+        "title": "スタイリスト",
+        "description": "クローゼット・カレンダー・天気を理解するマルチモーダル AI スタイリスト。"
+      },
+      "market": {
+        "title": "マーケット",
+        "description": "コミュニティのアイテムを購入・販売・スワップ・寄付。手数料は完全に透明。"
+      },
+      "market_create": {
+        "title": "アイテムを出品",
+        "description": "クローゼットのアイテムを DressApp マーケットに出品します。"
+      },
+      "transactions": {
+        "title": "取引履歴",
+        "description": "DressApp の購入・販売履歴。7% の手数料も完全に透明。"
+      },
+      "admin": {
+        "title": "管理ダッシュボード",
+        "description": "ユーザー・マーケット・AI プロバイダー・Trend-Scout エージェントのための DressApp 運用コンソール。"
+      },
+      "me": {
+        "title": "プロフィールと設定",
+        "description": "DressApp のプロフィール、ボイス、Google カレンダー連携を管理します。"
+      },
+      "closet_item": {
+        "title": "クローゼットのアイテム",
+        "description": "あなたの DressApp クローゼットのアイテム。"
+      },
+      "market_listing": {
+        "title": "マーケット出品",
+        "description": "DressApp で販売中のアイテム。"
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "同期するものがありません。マーケットプレイス出品設定がされているアイテムがありません。",
       "remove_listing": "出品を削除",
       "sync_from_closet": "クローゼットから同期"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "SS26 ランウェイ",
+      "street": "ストリート",
+      "sustainability": "サステナビリティ",
+      "influencers": "インフルエンサー",
+      "second_hand": "セカンドハンド",
+      "recycling": "リサイクル",
+      "news_flash": "ニュース速報"
     }
   }
 }

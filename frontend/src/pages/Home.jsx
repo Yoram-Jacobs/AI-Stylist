@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
@@ -31,12 +31,16 @@ import { toast } from 'sonner';
 
 // Fallback cards used only if the Trend-Scout endpoint fails or returns empty.
 // Shape mirrors the real API (``label``, ``headline``, ``summary``) so the
-// renderer below can read ONE consistent set of fields.
-const FALLBACK_TRENDS = [
-  { id: 'fb-1', label: 'SS26 Runway', headline: 'Butter yellow rules Milan', summary: 'Tailored blazers in soft butter-yellow replace ivory as the spring neutral.' },
-  { id: 'fb-2', label: 'Street', headline: 'The quiet-luxe swap', summary: 'Logos out, fabric in: cashmere crewnecks over merino roll-necks dominate weekends.' },
-  { id: 'fb-3', label: 'Sustainability', headline: 'Swap before you shop', summary: 'Community swap rooms grew 3x year-over-year; retailers are finally listening.' },
-];
+// renderer below can read ONE consistent set of fields. The actual strings
+// live in ``home.fallbackTrends.fbN`` in every locale JSON — see
+// ``buildFallbackTrends(t)`` in the component below.
+const FALLBACK_TREND_KEYS = ['fb1', 'fb2', 'fb3'];
+
+const FALLBACK_TREND_BUCKETS = {
+  fb1: 'ss26-runway',
+  fb2: 'street',
+  fb3: 'sustainability',
+};
 
 // Per-bucket visual treatment for Trend-Scout cards.
 //
@@ -69,6 +73,30 @@ export default function Home() {
   const [trends, setTrends] = useState(null); // null = loading, [] = empty, [...]
   const [trendDate, setTrendDate] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Localised fallback cards — rebuilt whenever the active language
+  // changes so a mid-session language switch immediately re-renders
+  // the cards in the new locale. Bucket slugs match the BUCKETS list
+  // in ``backend/app/services/trend_scout.py`` so the chip pill
+  // also picks up the correct localised label.
+  const FALLBACK_TRENDS = useMemo(
+    () =>
+      FALLBACK_TREND_KEYS.map((key, idx) => ({
+        id: `fb-${idx + 1}`,
+        bucket: FALLBACK_TREND_BUCKETS[key],
+        label: t(`home.fallbackTrends.${key}.label`, {
+          defaultValue: '',
+        }),
+        headline: t(`home.fallbackTrends.${key}.headline`, {
+          defaultValue: '',
+        }),
+        summary: t(`home.fallbackTrends.${key}.summary`, {
+          defaultValue: '',
+        }),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, i18n.language],
+  );
 
   // Resolve language + country for the personalized fashion-scout
   // call. Same pattern the Stylist FashionScoutPanel uses so both
@@ -289,11 +317,22 @@ export default function Home() {
                 // real API because the previous code read ``t.tag``/``t.body``
                 // which the API never sets — and ``t`` also shadowed the i18n
                 // translator, so even the chip class hung off the wrong value.
+                //
+                // For the chip we prefer the localised ``trends.bucket.<slug>``
+                // string (matches every locale JSON); the backend ``label`` is
+                // a hard fallback if a bucket slug has no translation yet.
                 const _prettyBucket = (b) =>
                   (b || '')
                     .replace(/[-_]+/g, ' ')
                     .replace(/\b\w/g, (c) => c.toUpperCase());
-                const chip = card.label || _prettyBucket(card.bucket) || card.tag;
+                const localisedBucket = card.bucket
+                  ? t(`trends.bucket.${card.bucket}`, { defaultValue: '' })
+                  : '';
+                const chip =
+                  localisedBucket
+                  || card.label
+                  || _prettyBucket(card.bucket)
+                  || card.tag;
                 const headline = card.headline || card.title;
                 const body = card.summary || card.body || card.blurb;
                 const sourceUrl = card.source_url;

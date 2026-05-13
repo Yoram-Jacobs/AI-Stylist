@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "לא ניתן היה לרענן טרנדים",
     "trendReadSource": "קרא מקור",
     "refreshTrends": "רענון טרנדים",
-    "trendsRefreshed": "הטרנדים רועננו"
+    "trendsRefreshed": "הטרנדים רועננו",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "מסלול SS26",
+        "headline": "צהוב חמאה שולט במילאנו",
+        "summary": "בלייזרים מחויטים בצהוב חמאה רך מחליפים את גוון השנהב כניטרלי האביבי."
+      },
+      "fb2": {
+        "label": "רחוב",
+        "headline": "המעבר ללוקסוס שקט",
+        "summary": "פחות לוגואים, יותר בדים: סריגי קשמיר מעל גולפים ממרינו משתלטים על סופי השבוע."
+      },
+      "fb3": {
+        "label": "קיימוּת",
+        "headline": "החליפו לפני שתקנו",
+        "summary": "חדרי חליפין קהילתיים גדלו פי שלושה משנה לשנה; הקמעונאים סוף-סוף מקשיבים."
+      }
+    }
   },
   "closet": {
     "title": "הארון שלך",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — הארון שלך, מוגבה",
-    "defaultDescription": "קטלג את המלתחה, התייעץ עם סטייליסט AI, והחלף או מכור בעמלה הוגנת של 7%."
+    "defaultDescription": "קטלג את המלתחה, התייעץ עם סטייליסט AI, והחלף או מכור בעמלה הוגנת של 7%.",
+    "routes": {
+      "login": {
+        "title": "התחברות",
+        "description": "התחבר/י ל-DressApp כדי לנהל את הארון, לעיין במרקטפלייס ולשוחח עם הסטייליסטית של ה-AI."
+      },
+      "register": {
+        "title": "יצירת חשבון",
+        "description": "הצטרפ/י ל-DressApp — הארון, המרקטפלייס הקהילתי וסטייליסטית ה-AI במקום אחד."
+      },
+      "home": {
+        "title": "היום",
+        "description": "התקציר היומי שלך ב-DressApp: טרנדים, סטטיסטיקות ארון ועדכוני סטייליסטית אחרונים."
+      },
+      "closet": {
+        "title": "הארון שלי",
+        "description": "כל פריט שיש לך — עם סיווג חכם, תגיות מקור ועריכה עם AI בלחיצה."
+      },
+      "closet_add": {
+        "title": "הוסף לארון",
+        "description": "הוסף פריט חדש לארון ה-DressApp שלך מתמונה או מקישור."
+      },
+      "stylist": {
+        "title": "סטייליסטית",
+        "description": "סטייליסטית AI מולטימודלית שמכירה את הארון, היומן ומזג האוויר שלך."
+      },
+      "market": {
+        "title": "מרקטפלייס",
+        "description": "קנייה, מכירה, החלפה או תרומה של פריטים מהקהילה עם שקיפות עמלות מלאה."
+      },
+      "market_create": {
+        "title": "פרסום פריט",
+        "description": "פרסם/י את אחד הפריטים מהארון שלך במרקטפלייס של DressApp."
+      },
+      "transactions": {
+        "title": "עסקאות",
+        "description": "הרכישות והמכירות שלך ב-DressApp, בשקיפות מלאה של עמלת 7%."
+      },
+      "admin": {
+        "title": "לוח ניהול",
+        "description": "קונסולת התפעול של DressApp: משתמשים, מרקטפלייס, ספקי AI וסוכן Trend-Scout."
+      },
+      "me": {
+        "title": "פרופיל והגדרות",
+        "description": "ניהול פרופיל DressApp, קול וחיבור ל-Google Calendar."
+      },
+      "closet_item": {
+        "title": "פריט מהארון",
+        "description": "פריט בארון ה-DressApp שלך."
+      },
+      "market_listing": {
+        "title": "פריט במרקטפלייס",
+        "description": "פריט שמוצע למכירה ב-DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "אין מה לסנכרן — לא הוגדרה כוונת מרקטפלייס לאף פריט בארון.",
       "remove_listing": "הסרת פרסום",
       "sync_from_closet": "סנכרון מהארון"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "מסלול SS26",
+      "street": "רחוב",
+      "sustainability": "קיימוּת",
+      "influencers": "משפיענים",
+      "second_hand": "יד שנייה",
+      "recycling": "מיחזור",
+      "news_flash": "מבזק חדשות"
     }
   }
 }

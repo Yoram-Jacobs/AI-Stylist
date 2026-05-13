@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "无法刷新趋势",
     "trendReadSource": "阅读原文",
     "refreshTrends": "刷新趋势",
-    "trendsRefreshed": "趋势已刷新"
+    "trendsRefreshed": "趋势已刷新",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "SS26 秀场",
+        "headline": "奶油黄席卷米兰",
+        "summary": "柔和奶油黄的修身西装外套取代米白色，成为今春的中性色。"
+      },
+      "fb2": {
+        "label": "街头",
+        "headline": "静奢风格的转向",
+        "summary": "Logo 退场，面料登场：羊绒圆领搭配美利奴高领，主宰整个周末造型。"
+      },
+      "fb3": {
+        "label": "可持续",
+        "headline": "先交换，再购买",
+        "summary": "社区交换空间同比增长三倍，零售商终于开始倾听。"
+      }
+    }
   },
   "closet": {
     "title": "您的衣橱",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — 您的衣橱，升级体验",
-    "defaultDescription": "编目您的衣柜，询问 AI 造型师，以公平的 7% 交换或出售。"
+    "defaultDescription": "编目您的衣柜，询问 AI 造型师，以公平的 7% 交换或出售。",
+    "routes": {
+      "login": {
+        "title": "登录",
+        "description": "登录 DressApp 即可管理衣橱、浏览市场，并与 AI 造型师对话。"
+      },
+      "register": {
+        "title": "注册账户",
+        "description": "加入 DressApp，将你的衣橱、社区市场和 AI 造型师集于一身。"
+      },
+      "home": {
+        "title": "今日",
+        "description": "你的每日 DressApp 简报：趋势、衣橱统计和最新的造型师文章。"
+      },
+      "closet": {
+        "title": "我的衣橱",
+        "description": "你拥有的每一件单品——智能分类、来源标签，并支持一键 AI 编辑。"
+      },
+      "closet_add": {
+        "title": "加入衣橱",
+        "description": "通过照片或网址向你的 DressApp 衣橱添加一件新单品。"
+      },
+      "stylist": {
+        "title": "造型师",
+        "description": "懂你衣橱、日历和天气的多模态 AI 造型师。"
+      },
+      "market": {
+        "title": "市场",
+        "description": "在社区市场购买、出售、交换或捐赠单品，费用完全透明。"
+      },
+      "market_create": {
+        "title": "发布单品",
+        "description": "将你衣橱中的单品发布到 DressApp 市场。"
+      },
+      "transactions": {
+        "title": "交易",
+        "description": "你的 DressApp 购买与售出记录，7% 平台费完全透明。"
+      },
+      "admin": {
+        "title": "管理后台",
+        "description": "DressApp 运营控制台，用于用户、市场、AI 供应商和 Trend-Scout 代理。"
+      },
+      "me": {
+        "title": "个人资料与设置",
+        "description": "管理你的 DressApp 资料、语音和 Google 日历连接。"
+      },
+      "closet_item": {
+        "title": "衣橱单品",
+        "description": "你 DressApp 衣橱中的一件单品。"
+      },
+      "market_listing": {
+        "title": "市场商品",
+        "description": "DressApp 上一件待售的单品。"
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "无可同步内容——衣橱商品均未设置市场发布意向。",
       "remove_listing": "移除发布",
       "sync_from_closet": "从衣橱同步"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "SS26 秀场",
+      "street": "街头",
+      "sustainability": "可持续",
+      "influencers": "意见领袖",
+      "second_hand": "二手",
+      "recycling": "回收",
+      "news_flash": "新闻速递"
     }
   }
 }

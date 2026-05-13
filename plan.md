@@ -117,6 +117,30 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 - ✅ ~~Live `_extract_json` in `garment_vision.py` only parses objects.~~ — **DONE**
 - ✅ ~~Output language fix.~~ — **DONE**
 
+### ✅ Phase L — Localization Wave 3 — Manual UI wiring patches — **SHIPPED**
+Closed the last 4 known gaps where translated strings already existed in every locale JSON but the React code was still rendering raw English. Documented originally in `/app/docs/code_fixes_needed.md`.
+
+- ✅ **ListingDetail.jsx (1a–1d)** — Listing chips now wire through existing taxonomy keys:
+  - `category` → `taxonomy.categories.<value>`
+  - `mode` (donate/swap) → `taxonomy.intent.<value>`
+  - `condition` → `addItem.condition` label + `taxonomy.condition.<value>` value
+  - `size` → `addItem.size` label (replacing the non-existent `market.sizeLabel` key)
+- ✅ **Home.jsx (2a–2b)** — Trend-Scout chip + fallback cards:
+  - Added `trends.bucket.<slug>` block to all 12 locales (7 buckets: `ss26-runway`, `street`, `sustainability`, `influencers`, `second_hand`, `recycling`, `news_flash`).
+  - Chip now prefers the localised bucket label and falls back to the raw backend `card.label`.
+  - `FALLBACK_TRENDS` constant moved inside the component as a `useMemo` keyed on `i18n.language`; cards read from `home.fallbackTrends.fb1/2/3.{label,headline,summary}` in every locale.
+- ✅ **SeoBase.jsx (3)** — `META` constant refactored to i18n keys:
+  - Added `seo.routes.<key>.{title,description}` block (13 routes) to all 12 locales.
+  - `<html lang>` now reflects the active `i18n.language` (was hard-coded `"en"`).
+  - Page title + meta description + OG/Twitter tags now switch language alongside the UI; verified via Playwright (zh: title `登录 | DressApp`, `html.lang="zh"`, and react-helmet emits the localised description).
+- ✅ **countries.js (4)** — Adopted `Intl.DisplayNames`:
+  - Added shared `localisedCountryName(code, lang, fallback)` helper.
+  - `CountryCombobox` refactored to consume the helper (no more inline `new Intl.DisplayNames(...)`).
+  - Bundled English `name` field retained as a safety fallback for browsers without region tables and for `resolveCountry()` free-text matching.
+
+**Known pre-existing gap (out of scope here, flagged for later):**
+- `public/index.html` ships a static `<meta name="description">` that react-helmet does not remove. The helmet still emits the correct localised tag, but the static one remains as `<meta>[0]`. Most crawlers respect the last tag, but a future pass should drop the static one (or move it behind a build-time template) for cleaner HTML.
+
 ### ✅ SPA zero-delay navigation (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
 **Objective achieved:** Main directory pages no longer re-fetch/flash spinners on SPA back/forward navigation.
 

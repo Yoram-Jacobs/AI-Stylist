@@ -102,7 +102,24 @@
     "trendsRefreshFailed": "Impossible de rafraîchir les tendances",
     "trendReadSource": "Lire la source",
     "refreshTrends": "Rafraîchir les tendances",
-    "trendsRefreshed": "Tendances rafraîchies"
+    "trendsRefreshed": "Tendances rafraîchies",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "Podium PE26",
+        "headline": "Le jaune beurre règne à Milan",
+        "summary": "Les blazers ajustés en jaune beurre tendre remplacent l'ivoire comme neutre du printemps."
+      },
+      "fb2": {
+        "label": "Street",
+        "headline": "Le virage quiet luxury",
+        "summary": "Logos dehors, matières dedans : pulls cachemire sur cols roulés mérinos dominent les week-ends."
+      },
+      "fb3": {
+        "label": "Durabilité",
+        "headline": "Échangez avant d'acheter",
+        "summary": "Les salles d'échange communautaires ont triplé d'une année sur l'autre ; les enseignes écoutent enfin."
+      }
+    }
   },
   "closet": {
     "title": "Votre dressing",
@@ -782,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — Votre dressing sublimé",
-    "defaultDescription": "Cataloguez votre garde-robe, consultez une styliste IA et échangez ou vendez pour seulement 7%."
+    "defaultDescription": "Cataloguez votre garde-robe, consultez une styliste IA et échangez ou vendez pour seulement 7%.",
+    "routes": {
+      "login": {
+        "title": "Se connecter",
+        "description": "Connectez-vous à DressApp pour gérer votre dressing, parcourir la marketplace et discuter avec la styliste IA."
+      },
+      "register": {
+        "title": "Créer un compte",
+        "description": "Rejoignez DressApp — votre dressing, marketplace communautaire et styliste IA en un seul endroit."
+      },
+      "home": {
+        "title": "Aujourd'hui",
+        "description": "Votre brief quotidien DressApp : tendances, statistiques du dressing et dernières lectures de la styliste."
+      },
+      "closet": {
+        "title": "Mon dressing",
+        "description": "Chaque pièce que vous possédez — avec segmentation intelligente, tags de source et édition par IA en un clic."
+      },
+      "closet_add": {
+        "title": "Ajouter au dressing",
+        "description": "Ajoutez une nouvelle pièce à votre dressing DressApp à partir d'une photo ou d'une URL."
+      },
+      "stylist": {
+        "title": "Styliste",
+        "description": "Styliste IA multimodale qui comprend votre dressing, votre calendrier et la météo."
+      },
+      "market": {
+        "title": "Marketplace",
+        "description": "Achetez, vendez, échangez ou donnez des pièces avec une transparence totale sur les frais."
+      },
+      "market_create": {
+        "title": "Mettre en vente",
+        "description": "Mettez en vente une pièce de votre dressing sur la marketplace DressApp."
+      },
+      "transactions": {
+        "title": "Transactions",
+        "description": "Vos achats et ventes DressApp, avec une transparence totale sur les frais de 7%."
+      },
+      "admin": {
+        "title": "Tableau de bord admin",
+        "description": "Console d'exploitation DressApp : utilisateurs, marketplace, fournisseurs IA et agent Trend-Scout."
+      },
+      "me": {
+        "title": "Profil et paramètres",
+        "description": "Gérez votre profil DressApp, votre voix et la connexion Google Agenda."
+      },
+      "closet_item": {
+        "title": "Pièce du dressing",
+        "description": "Une pièce dans votre dressing DressApp."
+      },
+      "market_listing": {
+        "title": "Annonce marketplace",
+        "description": "Une pièce en vente sur DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1320,6 +1391,17 @@
       "nothing_to_sync_no_closet": "Rien à synchroniser — aucun article n'a d'intention de mise en vente.",
       "remove_listing": "Retirer l'annonce",
       "sync_from_closet": "Synchroniser depuis le dressing"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "Podium PE26",
+      "street": "Street",
+      "sustainability": "Durabilité",
+      "influencers": "Influenceurs",
+      "second_hand": "Seconde main",
+      "recycling": "Recyclage",
+      "news_flash": "Flash info"
     }
   }
 }

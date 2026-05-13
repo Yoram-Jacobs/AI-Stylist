@@ -11,7 +11,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { COUNTRIES, flagEmoji, resolveCountry } from '@/lib/countries';
+import { COUNTRIES, flagEmoji, localisedCountryName, resolveCountry } from '@/lib/countries';
 import { cn } from '@/lib/utils';
 
 /**
@@ -55,28 +55,23 @@ export function CountryCombobox({
   // Optional localisation of country names via Intl.DisplayNames.
   // Falls back silently to the bundled English names when the
   // browser doesn't support the active locale's region table.
-  const displayNames = useMemo(() => {
-    try {
-      return new Intl.DisplayNames([i18n.language || 'en'], { type: 'region' });
-    } catch {
-      return null;
-    }
-  }, [i18n.language]);
-
+  // ``localisedCountryName`` is the shared helper exported from
+  // ``@/lib/countries`` so other callers (profile cards, listing
+  // pages, etc.) can render the same translation table without
+  // re-instantiating Intl.DisplayNames each time.
+  const lang = i18n.language || 'en';
   const localised = useMemo(
     () =>
       COUNTRIES.map((c) => ({
         ...c,
-        localName: displayNames ? displayNames.of(c.code) || c.name : c.name,
+        localName: localisedCountryName(c.code, lang, c.name),
       })),
-    [displayNames],
+    [lang],
   );
 
   const resolved = resolveCountry(value);
   const display = resolved
-    ? `${flagEmoji(resolved.code)}  ${
-        displayNames ? displayNames.of(resolved.code) || resolved.name : resolved.name
-      }`
+    ? `${flagEmoji(resolved.code)}  ${localisedCountryName(resolved.code, lang, resolved.name)}`
     : value || '';
 
   const select = (next) => {
