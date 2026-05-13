@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "שמור",
-    "saveAll": "שמור הכל",
+    "saveAll": "שמור",
     "saveChanges": "שמור שינויים",
     "cancel": "ביטול",
     "delete": "מחק",
@@ -161,7 +161,7 @@
       "thisItem": "פריט זה",
       "saveFailed": "לא ניתן לשמור את הפריט הכפול. בדקי ושתמשי בשמור הכל."
     },
-    "saveAll": "שמור הכל",
+    "saveAll": "שמור",
     "savedAll": "כל הפריטים נשמרו",
     "savedCount_one": "פריט {{count}} נשמר בארון שלך",
     "savedCount_other": "{{count}} פריטים נשמרו בארון שלך",

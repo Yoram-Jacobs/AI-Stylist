@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Save",
-    "saveAll": "Save all",
+    "saveAll": "Save",
     "saveChanges": "Save changes",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -178,7 +178,7 @@
       "allSkipped": "All selected photos were duplicates and were skipped.",
       "allDuplicatesSkippedBatch": "Skipped {{count}} photos already in your closet — nothing new to upload."
     },
-    "saveAll": "Save all",
+    "saveAll": "Save",
     "savedAll": "All items saved",
     "savedCount_one": "{{count}} item saved to your closet",
     "savedCount_other": "{{count}} items saved to your closet",

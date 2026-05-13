@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Guardar",
-    "saveAll": "Guardar todo",
+    "saveAll": "Guardar",
     "saveChanges": "Guardar cambios",
     "cancel": "Cancelar",
     "delete": "Eliminar",
@@ -147,7 +147,7 @@
     "scanning": "Escaneando",
     "scanningSub": "Leyendo telas, colores y corte…",
     "analyzeFailed": "Análisis fallido",
-    "saveAll": "Guardar todo",
+    "saveAll": "Guardar",
     "savedAll": "Prendas guardadas",
     "saveFailed": "Error al guardar",
     "itemName": "Nombre",

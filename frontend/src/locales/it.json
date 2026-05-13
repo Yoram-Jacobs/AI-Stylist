@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Salva",
-    "saveAll": "Salva tutto",
+    "saveAll": "Salva",
     "saveChanges": "Salva modifiche",
     "cancel": "Annulla",
     "delete": "Elimina",
@@ -147,7 +147,7 @@
     "scanning": "Scansione",
     "scanningSub": "Lettura tessuti, colori e tagli…",
     "analyzeFailed": "Analisi fallita",
-    "saveAll": "Salva tutto",
+    "saveAll": "Salva",
     "savedAll": "Tutti i capi salvati",
     "saveFailed": "Salvataggio fallito",
     "itemName": "Nome",

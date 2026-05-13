@@ -380,3 +380,71 @@ Estimated effort: ~2-3 hours total (mostly backend schema + migration).
 ---
 
 *End of Session 3.*
+
+---
+
+## Session 4 — Two follow-ups from QA
+
+### 1. Profile "Save changes" button no longer always-active
+
+**File:** `src/components/ProfileDetailsCard.jsx`
+
+The save button was wired `disabled={busy}` only — so it was clickable
+the moment the page loaded, even when the user hadn't touched anything.
+
+#### Fix
+
+* Capture a JSON-serialised baseline of `initial` in a `useRef` at mount.
+* Compute `isDirty = JSON.stringify(form) !== baselineRef.current` per
+  render (cheap — form is plain JSON, deterministic key order from the
+  `useMemo` above).
+* Re-baseline inside `save()` after the API call succeeds:
+  `baselineRef.current = JSON.stringify(form)`. Drops the button back
+  to its disabled state if the user stays on the page.
+* If `initial` ever recomputes externally (e.g. `updateUserLocal` from
+  another tab, avatar change elsewhere), keep the baseline in step via
+  a `lastSeenInitialRef` reference-identity check — external updates
+  aren't mistaken for dirt.
+* Button now `disabled={busy || !isDirty}`.
+
+Edge cases covered:
+
+| Scenario | Button state |
+|---|---|
+| Page load, no edits | Disabled |
+| User types in a field | Enabled |
+| User reverts the field to its loaded value | Disabled (deep-equality re-check) |
+| User clicks Save, succeeds | Disabled (baseline updated) |
+| Save fails (toast.error) | Still enabled (baseline NOT updated) |
+| User navigates away and back | Disabled (fresh mount, fresh baseline) |
+| Another tab updates user via context | Disabled (baseline tracks `initial`) |
+
+### 2. "Save all" → "Save" in the Add to Closet pipeline
+
+**Files touched:** 12 × `src/locales/<loc>.json`
+
+The internal i18n key was kept as `addItem.saveAll` and `common.saveAll`
+(both refer to the same button) so no JSX/source edits were needed —
+only the displayed value was rewritten per locale. Translations match
+the standard UI verb for "Save" in each language:
+
+| Locale | Old | New |
+|---|---|---|
+| en | Save all | Save |
+| de | Alle speichern | Speichern |
+| es | Guardar todo | Guardar |
+| fr | Tout enregistrer | Enregistrer |
+| it | Salva tutto | Salva |
+| pt | Salvar tudo | Salvar |
+| ru | Сохранить всё | Сохранить |
+| ar | حفظ الكل | حفظ |
+| he | שמור הכל | שמור |
+| hi | सभी सहेजें | सहेजें |
+| ja | すべて保存 | 保存 |
+| zh | 全部保存 | 保存 |
+
+Frontend builds clean (`esbuild` in 240 ms), no JS lint findings.
+
+---
+
+*End of Session 4.*

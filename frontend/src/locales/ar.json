@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "حفظ",
-    "saveAll": "حفظ الكل",
+    "saveAll": "حفظ",
     "saveChanges": "حفظ التغييرات",
     "cancel": "إلغاء",
     "delete": "حذف",
@@ -147,7 +147,7 @@
     "scanning": "يجري الفحص",
     "scanningSub": "يقرأ الأقمشة والألوان والتفاصيل…",
     "analyzeFailed": "فشل التحليل",
-    "saveAll": "حفظ الكل",
+    "saveAll": "حفظ",
     "savedAll": "تم حفظ كل العناصر",
     "saveFailed": "فشل الحفظ",
     "itemName": "الاسم",

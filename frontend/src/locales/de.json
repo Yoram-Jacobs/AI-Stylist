@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Speichern",
-    "saveAll": "Alles speichern",
+    "saveAll": "Speichern",
     "saveChanges": "Änderungen speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",
@@ -147,7 +147,7 @@
     "scanning": "Scannt",
     "scanningSub": "Stoffe, Farben und Schnitte werden gelesen…",
     "analyzeFailed": "Analyse fehlgeschlagen",
-    "saveAll": "Alles speichern",
+    "saveAll": "Speichern",
     "savedAll": "Alle Teile gespeichert",
     "saveFailed": "Speichern fehlgeschlagen",
     "itemName": "Name",

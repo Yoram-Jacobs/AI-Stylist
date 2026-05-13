@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Enregistrer",
-    "saveAll": "Tout enregistrer",
+    "saveAll": "Enregistrer",
     "saveChanges": "Enregistrer les modifications",
     "cancel": "Annuler",
     "delete": "Supprimer",
@@ -147,7 +147,7 @@
     "scanning": "Analyse en cours",
     "scanningSub": "Lecture des tissus, couleurs et coupes…",
     "analyzeFailed": "Échec de l’analyse",
-    "saveAll": "Tout enregistrer",
+    "saveAll": "Enregistrer",
     "savedAll": "Toutes les pièces enregistrées",
     "saveFailed": "Échec de l’enregistrement",
     "itemName": "Nom",

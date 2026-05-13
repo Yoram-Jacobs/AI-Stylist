@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "保存",
-    "saveAll": "全部保存",
+    "saveAll": "保存",
     "saveChanges": "保存更改",
     "cancel": "取消",
     "delete": "删除",
@@ -147,7 +147,7 @@
     "scanning": "扫描中",
     "scanningSub": "识别面料、颜色和剪裁…",
     "analyzeFailed": "分析失败",
-    "saveAll": "全部保存",
+    "saveAll": "保存",
     "savedAll": "所有单品已保存",
     "saveFailed": "保存失败",
     "itemName": "名称",

@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "सहेजें",
-    "saveAll": "सब सहेजें",
+    "saveAll": "सहेजें",
     "saveChanges": "बदलाव सहेजें",
     "cancel": "रद्द करें",
     "delete": "हटाएं",
@@ -147,7 +147,7 @@
     "scanning": "स्कैन हो रहा है",
     "scanningSub": "कपड़ा, रंग और कट पढ़ रही है…",
     "analyzeFailed": "विश्लेषण विफल",
-    "saveAll": "सब सहेजें",
+    "saveAll": "सहेजें",
     "savedAll": "सभी आइटम सहेजे गए",
     "saveFailed": "सहेजना विफल",
     "itemName": "नाम",

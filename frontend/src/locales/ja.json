@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "保存",
-    "saveAll": "すべて保存",
+    "saveAll": "保存",
     "saveChanges": "変更を保存",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -147,7 +147,7 @@
     "scanning": "スキャン中",
     "scanningSub": "生地、カラー、カットを読み取り中…",
     "analyzeFailed": "分析に失敗",
-    "saveAll": "すべて保存",
+    "saveAll": "保存",
     "savedAll": "すべてのアイテムを保存",
     "saveFailed": "保存に失敗",
     "itemName": "名前",
