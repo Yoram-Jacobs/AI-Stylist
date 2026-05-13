@@ -1,38 +1,30 @@
 [
   {
-    "content": "A1: Delete QWEN_EYES_MODEL setting from /app/backend/app/config.py",
+    "content": "Phase 1.1: Add EYES_ONE_PASS flag to app/config.py (default False)",
     "status": "completed"
   },
   {
-    "content": "A2: Change EYES_PROVIDER env default from 'qwen' to 'gemma' in /app/backend/app/config.py",
+    "content": "Phase 1.2: Extend _GARMENT_OBJECT_SCHEMA with region.bbox / confidence / is_full_frame block",
     "status": "completed"
   },
   {
-    "content": "A3: Delete dead _hf_chat_json function from /app/backend/app/services/garment_vision.py",
+    "content": "Phase 1.3: Extend SYSTEM_PROMPT with bbox-on-0..1000-grid instructions + one-shot example",
     "status": "completed"
   },
   {
-    "content": "A4: Sweep repo for any remaining QWEN_EYES_MODEL / _hf_chat_json / _hf_client / 'qwen' Eyes references",
+    "content": "Phase 1.4: Implement GarmentVisionService.analyze_outfit_one_pass(image_bytes, language, think)",
     "status": "completed"
   },
   {
-    "content": "A5: Fix preview /app/backend/.env (EYES_PROVIDER=gemini, comment stale Space URL, remove QWEN_EYES_MODEL line)",
+    "content": "Phase 1.5: Branch closet.py /analyze endpoint on settings.EYES_ONE_PASS",
     "status": "completed"
   },
   {
-    "content": "A6: Clear stale 'gemma' DB override in preview test_database",
+    "content": "Phase 1.6: Lint clean + restart backend + smoke test the new code path against a CCP test image",
     "status": "completed"
   },
   {
-    "content": "A7: Restart backend, verify a sample Gemini-direct call works in preview",
-    "status": "completed"
-  },
-  {
-    "content": "B: Write /app/docs/PREVIEW_VS_PROD.md",
-    "status": "completed"
-  },
-  {
-    "content": "C: Write /app/docs/EYES_ONE_PASS_PROPOSAL.md",
-    "status": "completed"
+    "content": "Phase 1 review checkpoint with user before Phase 2",
+    "status": "in_progress"
   }
 ]

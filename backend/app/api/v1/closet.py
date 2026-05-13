@@ -705,15 +705,40 @@ async def analyze_item_image(
     # Multi-item pipeline (default). Degrades gracefully to single.
     user_lang = (user or {}).get("preferred_language") or "en"
     if payload.multi:
-        try:
-            async with _ANALYZE_LOCK:
-                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %r", exc)
-            raise HTTPException(
-                503,
-                "Garment analyzer is temporarily unavailable. Please try again.",
-            ) from exc
+        # Phase O.6 — single-pass branch (gated by EYES_ONE_PASS).
+        # When enabled the pipeline does ONE Eyes call that returns
+        # both attributes and bboxes per garment, skipping SegFormer,
+        # rembg, and reconstruction re-validation on the hot path.
+        # rembg + reconstruction become deferred endpoints (Phase 2).
+        # When disabled (default), the legacy multi-call path runs
+        # bit-for-bit as before.
+        if settings.EYES_ONE_PASS:
+            try:
+                # The legacy ``_ANALYZE_LOCK`` semaphore was a memory-
+                # pressure guard for the SegFormer+rembg+per-crop-LLM
+                # stack. The one-pass path does ONE LLM call and a
+                # PIL crop \u2014 no SegFormer load, no rembg, no
+                # parallel LLM fan-out \u2014 so the lock is unnecessary
+                # here and would just serialise unrelated uploads.
+                detections = await garment_vision_service.analyze_outfit_one_pass(
+                    raw, language=user_lang,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("One-pass outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
+        else:
+            try:
+                async with _ANALYZE_LOCK:
+                    detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
@@ -739,6 +764,14 @@ async def analyze_item_image(
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
                     "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
+                    # Phase O.6 fields. Present (and useful) only when
+                    # the request was served by ``analyze_outfit_one_pass``.
+                    # The legacy pipeline omits both keys; absence is
+                    # treated as "no CTA" / "legacy path" by the frontend.
+                    "reconstruction_advised": det.get(
+                        "reconstruction_advised", False,
+                    ),
+                    "one_pass": det.get("one_pass", False),
                 }
             )
         if dropped_unidentifiable:

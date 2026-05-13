@@ -242,6 +242,79 @@ SYSTEM_PROMPT = (
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Phase O.6 — single-pass-only suffix
+# ─────────────────────────────────────────────────────────────────────
+# Appended to ``SYSTEM_PROMPT`` ONLY when the caller is the single-pass
+# pipeline (``EYES_ONE_PASS=true`` or the ``analyze_outfit_one_pass``
+# helper). Teaches Eyes to additionally emit a ``region`` object with
+# a tightly-fitted bbox on the 0..1000 normalised grid for every
+# garment. Crucially we keep this OUT of the legacy ``SYSTEM_PROMPT``
+# so:
+#   1. legacy multi-call path keeps validating against the existing
+#      schema (region is optional in the schema, never required there);
+#   2. legacy LoRA evaluation runs are unaffected (no prompt drift);
+#   3. the one-pass change can be A/B'd without a deploy.
+#
+# One-shot example included so Gemma-4 E2B can pattern-match the grid
+# convention without needing a fine-tune (Option α per the proposal).
+SYSTEM_PROMPT_ONE_PASS_SUFFIX = (
+    "\n\n"
+    "ADDITIONAL OUTPUT REQUIREMENT \u2014 spatial region.\n"
+    "For EACH garment object you return, include a `region` block:\n"
+    "  region: {\n"
+    "    bbox: [ymin, xmin, ymax, xmax],   // integers on a 0..1000 grid\n"
+    "    confidence: number 0..1 (optional),\n"
+    "    is_full_frame: boolean (optional)\n"
+    "  }\n"
+    "Rules for `bbox`:\n"
+    "  \u2022 Coordinates are normalised: 0 is the top/left edge, 1000 is "
+    "the bottom/right edge. Use integers; ignore the source pixel size.\n"
+    "  \u2022 Tightly enclose the visible garment, INCLUDING sleeves, "
+    "collars, hems. EXCLUDE the wearer's face and bare skin.\n"
+    "  \u2022 If the photo is a clean, single-garment shot (flat lay, "
+    "studio still, ghost mannequin) and there is no other garment in "
+    "frame, set `region.bbox = [0, 0, 1000, 1000]` and "
+    "`region.is_full_frame = true`. This is the common case.\n"
+    "  \u2022 If multiple garments overlap, each garment's bbox encloses "
+    "ONLY that garment (the bboxes may overlap each other).\n"
+    "  \u2022 If a garment is mostly occluded (less than ~20% visible), "
+    "omit it from the output entirely \u2014 do not return a near-empty "
+    "bbox.\n"
+    "\n"
+    "Worked example. Input: a full-length photo of a person wearing a "
+    "white t-shirt tucked into blue jeans, plus white sneakers. "
+    "Correct output (truncated for clarity):\n"
+    "  [\n"
+    "    { \"title\": \"White crew tee\", "
+    "\"category\": \"Top\", "
+    "\"region\": {\"bbox\": [180, 280, 520, 720], \"confidence\": 0.92, "
+    "\"is_full_frame\": false} },\n"
+    "    { \"title\": \"Blue straight jeans\", "
+    "\"category\": \"Bottom\", "
+    "\"region\": {\"bbox\": [520, 290, 880, 720], \"confidence\": 0.94, "
+    "\"is_full_frame\": false} },\n"
+    "    { \"title\": \"White low-top sneakers\", "
+    "\"category\": \"Footwear\", "
+    "\"region\": {\"bbox\": [880, 320, 985, 700], \"confidence\": 0.88, "
+    "\"is_full_frame\": false} }\n"
+    "  ]"
+)
+
+
+def _build_system_prompt(*, one_pass: bool) -> str:
+    """Return the full system prompt for an Eyes call.
+
+    ``one_pass=False`` returns the legacy prompt verbatim so existing
+    callers (per-crop analysis, reconstruction re-validate, the old
+    ``analyze_outfit``) keep working bit-for-bit. ``one_pass=True``
+    appends the bbox-emission rules + one-shot example.
+    """
+    if one_pass:
+        return SYSTEM_PROMPT + SYSTEM_PROMPT_ONE_PASS_SUFFIX
+    return SYSTEM_PROMPT
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Canonical JSON schema for Eyes responses. Sent to llama-server via
 # ``response_format={"type":"json_schema","json_schema":{...}}`` so the
 # decoder is grammar-constrained to a valid garment object (or array
@@ -336,6 +409,47 @@ _GARMENT_OBJECT_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "minItems": 0,
             "maxItems": 16,
+        },
+        # ── Phase O.6 — single-pass region info ───────────────────────
+        # Optional spatial metadata. Only populated when the caller is
+        # the single-pass pipeline (``EYES_ONE_PASS=true``). Legacy
+        # multi-call pipelines never request this field, so the schema
+        # leaves it out of ``required`` and the existing crops/Gemini
+        # paths continue to validate without changes.
+        #
+        # The bbox is on a normalised 0..1000 grid so the model can
+        # answer in pure integers regardless of the source image's
+        # resolution; the backend rescales to pixels using the
+        # ``size`` it sent in the user message.
+        "region": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["bbox"],
+            "properties": {
+                "bbox": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0, "maximum": 1000},
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": (
+                        "[ymin, xmin, ymax, xmax] on the 0..1000 normalised "
+                        "grid. Origin top-left; ymax > ymin; xmax > xmin."
+                    ),
+                },
+                "confidence": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Self-reported confidence in the bbox (optional).",
+                },
+                "is_full_frame": {
+                    "type": ["boolean", "null"],
+                    "description": (
+                        "True when the photo is already a clean, single-garment "
+                        "shot and the bbox is [0, 0, 1000, 1000]."
+                    ),
+                },
+            },
         },
     },
 }
@@ -1112,6 +1226,7 @@ class GarmentVisionService:
         provider: str | None = None,
         language: str | None = None,
         think: bool = False,
+        one_pass: bool = False,
     ) -> dict[str, Any]:
         """Run the 17-field analyser on a single image.
 
@@ -1136,12 +1251,23 @@ class GarmentVisionService:
         ``think`` — pass through to ``_call_gemma_space``. Defaults to
         False so the closet AddItem flow stays fast & non-reasoning.
         Brain experiments / stylist callers can flip it on.
+
+        ``one_pass`` — Phase O.6 single-pass mode. When True we append
+        ``SYSTEM_PROMPT_ONE_PASS_SUFFIX`` so Eyes additionally returns
+        a ``region.bbox`` per garment. The schema includes ``region``
+        as optional either way; this flag is what makes the model
+        actually populate it. Defaults to False so every legacy caller
+        (per-crop analysis, reconstruction re-validate, direct callers
+        in the closet endpoint) keeps the original prompt bit-for-bit.
         """
         from app.services import eyes_override
 
         shrunk = _shrink_for_vision(image_bytes)
         b64 = base64.b64encode(shrunk).decode("ascii")
-        system_prompt = SYSTEM_PROMPT + _language_directive(language)
+        system_prompt = (
+            _build_system_prompt(one_pass=one_pass)
+            + _language_directive(language)
+        )
         user_text = _user_prompt(language)
 
         # 1) Resolve the routing target.
@@ -1714,6 +1840,207 @@ class GarmentVisionService:
             [i["label"] for i in items][:8],
         )
         return items
+
+    # ──────────────────────────────────────────────────────────────────
+    # Phase O.6 — single-pass pipeline
+    # ──────────────────────────────────────────────────────────────────
+    async def analyze_outfit_one_pass(
+        self,
+        image_bytes: bytes,
+        *,
+        max_items: int | None = None,
+        language: str | None = None,
+        think: bool = False,
+    ) -> list[dict[str, Any]]:
+        """End-to-end multi-item pipeline in a SINGLE Eyes call.
+
+        Sends the original photo straight to ``analyze(one_pass=True)``,
+        which returns either a single garment object (already-cropped
+        product photo) or an array of garment objects (multi-item
+        outfit). Each garment carries a ``region.bbox`` on a 0..1000
+        normalised grid; we crop the original image to each bbox to
+        produce per-garment JPEGs that the frontend can render
+        immediately.
+
+        Replaces, on the hot path:
+          • the SegFormer / Gemini detection step,
+          • the rembg matte-as-precondition step,
+          • the Nano-Banana reconstruction + re-validation step.
+
+        rembg + reconstruction are deferred to user-initiated endpoints
+        downstream of ``/save`` — see ``EYES_ONE_PASS_PROPOSAL.md``.
+
+        Output shape matches :meth:`analyze_outfit` exactly so the
+        ``/closet/analyze`` endpoint can swap implementations without
+        any contract change visible to the frontend::
+
+            {
+              "label": "Oxford shirt",
+              "kind": "garment",
+              "bbox": [ymin, xmin, ymax, xmax],   # 0..1000 normalised
+              "crop_base64": "<base64 jpeg>",
+              "crop_mime": "image/jpeg",
+              "analysis": { ...GarmentAnalysis fields, region stripped... },
+              "reconstruction_advised": bool,     # NEW — frontend CTA hint
+              "one_pass": True,                   # NEW — debug breadcrumb
+            }
+        """
+        t0 = time.perf_counter()
+        try:
+            parsed = await self.analyze(
+                image_bytes,
+                language=language,
+                think=think,
+                one_pass=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "one_pass analyze() failed (%s) \u2014 falling back to legacy "
+                "analyze_outfit so the user still gets a result.",
+                repr(exc)[:200],
+            )
+            return await self.analyze_outfit(
+                image_bytes,
+                max_items=max_items,
+                language=language,
+                think=think,
+            )
+
+        # Eyes is allowed to return either a single object (already-cropped
+        # shot) or an array of objects (multi-item outfit). Normalise.
+        if isinstance(parsed, list):
+            garments = parsed
+        elif isinstance(parsed, dict):
+            garments = [parsed]
+        else:
+            logger.warning(
+                "one_pass got %s (expected dict or list) \u2014 falling back",
+                type(parsed).__name__,
+            )
+            return await self.analyze_outfit(
+                image_bytes,
+                max_items=max_items,
+                language=language,
+                think=think,
+            )
+
+        # Cap at ``max_items`` (matches legacy contract).
+        cap = max_items if max_items is not None else self.max_items
+        if cap and len(garments) > cap:
+            logger.info(
+                "one_pass: trimming %d garments down to max_items=%d",
+                len(garments), cap,
+            )
+            garments = garments[:cap]
+
+        items: list[dict[str, Any]] = []
+        for g in garments:
+            region = g.get("region") if isinstance(g, dict) else None
+            bbox: list[int]
+            is_full_frame = False
+            if isinstance(region, dict) and isinstance(region.get("bbox"), list):
+                bbox_in = region["bbox"]
+                # Defensive clamp: schema enforces 0..1000 but a fallback
+                # provider (Gemini direct) may emit slightly out-of-range.
+                try:
+                    ymin, xmin, ymax, xmax = [
+                        max(0, min(1000, int(v))) for v in bbox_in
+                    ]
+                    if ymax <= ymin:
+                        ymax = min(1000, ymin + 1)
+                    if xmax <= xmin:
+                        xmax = min(1000, xmin + 1)
+                    bbox = [ymin, xmin, ymax, xmax]
+                except Exception:
+                    bbox = [0, 0, 1000, 1000]
+                is_full_frame = bool(region.get("is_full_frame"))
+            else:
+                # Model omitted region — treat the whole frame as the bbox.
+                bbox = [0, 0, 1000, 1000]
+                is_full_frame = True
+
+            # Crop. Reuse the same helper the legacy pipeline uses so the
+            # padding/area-floor rules stay consistent across both paths.
+            crop_bytes: bytes
+            if is_full_frame or bbox == [0, 0, 1000, 1000]:
+                crop_bytes = image_bytes
+            else:
+                cropped = _crop_to_bbox(image_bytes, bbox)
+                # ``_crop_to_bbox`` returns None when the bbox is degenerate
+                # or below the min-area floor. In those cases we still want
+                # an item record \u2014 just fall back to the full frame so
+                # the user sees the original photo as the thumbnail.
+                crop_bytes = cropped[0] if cropped else image_bytes
+
+            # Strip ``region`` from the analysis dict so the persisted
+            # closet item card doesn't carry coordinates the rest of the
+            # app doesn't know about. Bbox lives on the item, not in
+            # ``analysis``.
+            analysis = {k: v for k, v in g.items() if k != "region"}
+
+            label = (
+                analysis.get("item_type")
+                or analysis.get("sub_category")
+                or analysis.get("title")
+                or "garment"
+            )
+
+            items.append({
+                "label": label,
+                "kind": "garment",
+                "bbox": bbox,
+                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+                "crop_mime": "image/jpeg",
+                "analysis": analysis,
+                # NEW \u2014 frontend reads this to decide whether to render
+                # the opt-in "Repair photo" CTA (Phase 2 wires the actual
+                # endpoint). Computed cheaply from existing analysis hints.
+                "reconstruction_advised": _should_advise_reconstruction(
+                    analysis, is_full_frame=is_full_frame,
+                ),
+                # Debug breadcrumb \u2014 dropped from prod responses by the
+                # API layer if we want it hidden, but useful for the
+                # diagnostic notebook and during the rollout.
+                "one_pass": True,
+            })
+
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "analyze_outfit_one_pass OK garments=%d full_frame=%s elapsed_ms=%d "
+            "labels=%s",
+            len(items),
+            any(i["bbox"] == [0, 0, 1000, 1000] for i in items),
+            dt_ms,
+            [i["label"] for i in items][:8],
+        )
+        return items
+
+
+def _should_advise_reconstruction(
+    analysis: dict[str, Any], *, is_full_frame: bool,
+) -> bool:
+    """Cheap heuristic for the opt-in "Repair photo" CTA.
+
+    Mirrors the existing ``should_reconstruct`` logic in
+    ``services/reconstruction.py`` but works off ONLY the data the
+    one-pass result carries (no SegFormer mask, no bbox-edge analysis),
+    so the answer is a hint to the user, not an authoritative
+    "this needs reconstruction" verdict.
+
+    Returns True when the analysed garment is reported as ``used`` and
+    the condition is below ``good``, OR when the photo wasn't already
+    a clean single-frame shot \u2014 i.e. exactly the cases where users
+    historically benefited from the Nano-Banana studio reshoot.
+    """
+    state = (analysis.get("state") or "").lower()
+    condition = (analysis.get("condition") or "").lower()
+    if state == "used" and condition in {"bad", "fair"}:
+        return True
+    # If we cropped out of a busy multi-item photo, the user might prefer
+    # a clean studio version for the closet thumbnail.
+    if not is_full_frame:
+        return True
+    return False
 
 
 def _build_vision_service() -> GarmentVisionService | None:
