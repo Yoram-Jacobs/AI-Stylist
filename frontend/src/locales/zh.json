@@ -1403,5 +1403,13 @@
       "recycling": "回收",
       "news_flash": "新闻速递"
     }
+  },
+  "item": {
+    "polishingPhoto": "正在优化照片…",
+    "repairPhoto": "修复照片",
+    "repairingPhoto": "修复中…",
+    "reshootSuccess": "照片已修复。",
+    "reshootRejected": "修复后的照片未通过验证 — 保留原图。",
+    "reshootError": "无法修复照片，请重试。"
   }
 }

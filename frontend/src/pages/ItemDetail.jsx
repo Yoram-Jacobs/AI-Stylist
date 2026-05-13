@@ -55,6 +55,7 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { DppPanel } from '@/components/DppPanel';
 import { api } from '@/lib/api';
+import { bestImageUrl } from '@/lib/itemImage';
 import {
   labelForCategory,
   labelForDressCode,
@@ -423,6 +424,13 @@ export default function ItemDetail() {
   // Repair state
   const [repairHint, setRepairHint] = useState('');
   const [repairing, setRepairing] = useState(false);
+  // Phase O.6 — "Repair photo" CTA state. SEPARATE from the legacy
+  // ``repairing`` flag above which gates the rembg "clean background"
+  // action (Phase V Fix 2). This one gates the Nano-Banana studio
+  // reshoot — same endpoint that powered the auto-reconstruct flow
+  // before O.6, just now user-initiated and only surfaced when the
+  // one-pass /analyze result asked us to advise it.
+  const [reshootingPhoto, setReshootingPhoto] = useState(false);
   // Clean-background progress %, simulated client-side because the
   // backend matting endpoint is a single non-streaming POST. We tick
   // the bar towards ~92% over ~14s (roughly the p95 duration of the
@@ -626,6 +634,44 @@ export default function ItemDetail() {
       }, 350);
     }
   };
+  // Phase O.6 — opt-in "Repair photo" action. Triggers Nano-Banana
+  // studio reshoot via the existing /closet/{id}/repair endpoint.
+  // Only surfaced when the one-pass /analyze result advised it
+  // (``item.reconstruction_advised === true``) AND the item doesn't
+  // already carry a reconstructed image. The repair runs synchronously
+  // — Nano Banana is fast (~5-10s) so we keep it as a foreground call
+  // with a spinner rather than another background-poll round-trip.
+  const onReshootPhoto = async () => {
+    if (reshootingPhoto) return;
+    setReshootingPhoto(true);
+    try {
+      const res = await api.repairItemImage(id);
+      if (res?.applied && res.item) {
+        setItem(res.item);
+        setForm(toFormState(res.item, user));
+        toast.success(
+          t('item.reshootSuccess', { defaultValue: 'Photo restored.' }),
+        );
+      } else {
+        toast.warning(
+          res?.detail
+            || t('item.reshootRejected', {
+                 defaultValue: 'Restored photo was rejected — keeping the original.',
+               }),
+        );
+      }
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.detail
+          || t('item.reshootError', {
+               defaultValue: 'Could not restore photo. Please try again.',
+             }),
+      );
+    } finally {
+      setReshootingPhoto(false);
+    }
+  };
+
   const startDictation = () => {
     if (!sttSupported.current) return;
     const rec = createRecognition({
@@ -695,10 +741,22 @@ export default function ItemDetail() {
   }
 
   const hasReconstruction = !!item.reconstructed_image_url;
-  const preferredImage =
-    (!showingOriginal && item.reconstructed_image_url) ||
-    item.segmented_image_url ||
-    item.original_image_url;
+  // Phase O.6 — image priority centralised via ``lib/itemImage``. When
+  // the user has toggled "Show original" we deliberately skip the
+  // reconstruction layer so they can compare the un-restyled photo;
+  // every other field (clean rembg PNG / segmented JPG / raw original)
+  // still falls back in the canonical order.
+  const preferredImage = bestImageUrl(item, {
+    skipReconstruction: showingOriginal,
+  });
+  // "Repair photo" CTA visibility:
+  //   • the one-pass /analyze response asked us to advise it
+  //     (``reconstruction_advised: true``), AND
+  //   • the user hasn't already accepted a reshoot for this item.
+  // Hidden once the item carries a ``reconstructed_image_url`` so we
+  // don't repeatedly nudge for a feature the user already used.
+  const showRepairPhotoCta =
+    !!item.reconstruction_advised && !item.reconstructed_image_url;
   const reconstructionReasons =
     (item.reconstruction_metadata && item.reconstruction_metadata.reasons) || [];
 
@@ -811,10 +869,31 @@ export default function ItemDetail() {
             </AspectRatio>
             {/* Replace photo controls (subtle pill row, shown only when an image exists).
                 Mirrors the no-image state's two-button choice so the user always has
-                "Take photo" (camera) and "Choose from library" (gallery) at hand. */}
+                "Take photo" (camera) and "Choose from library" (gallery) at hand.
+                Phase O.6 adds an optional third pill: "Repair photo" — only shown
+                when the one-pass /analyze response advised it (and the user hasn't
+                already accepted a reshoot for this item). */}
             {preferredImage && (
-              <div className="absolute bottom-3 end-3 inline-flex items-center gap-1.5">
-                <button
+              <div className="absolute bottom-3 end-3 inline-flex items-center gap-1.5 flex-wrap justify-end">
+                {showRepairPhotoCta && (
+                  <button
+                    type="button"
+                    onClick={onReshootPhoto}
+                    disabled={reshootingPhoto || uploadingPhoto}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--accent))]/95 text-[hsl(var(--accent-foreground))] backdrop-blur border border-[hsl(var(--accent))]/70 px-2.5 py-1 text-[11px] font-medium hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-60 shadow-editorial"
+                    data-testid="item-detail-repair-photo-btn"
+                    aria-label={t('item.repairPhoto', { defaultValue: 'Repair photo' })}
+                  >
+                    {reshootingPhoto ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {reshootingPhoto
+                      ? t('item.repairingPhoto', { defaultValue: 'Restoring…' })
+                      : t('item.repairPhoto', { defaultValue: 'Repair photo' })}
+                  </button>
+                )}                <button
                   type="button"
                   onClick={openCameraCapture}
                   disabled={uploadingPhoto}

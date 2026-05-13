@@ -1403,5 +1403,13 @@
       "recycling": "إعادة التدوير",
       "news_flash": "خبر عاجل"
     }
+  },
+  "item": {
+    "polishingPhoto": "جارٍ تلميع الصورة…",
+    "repairPhoto": "ترميم الصورة",
+    "repairingPhoto": "جارٍ الترميم…",
+    "reshootSuccess": "تمّت استعادة الصورة.",
+    "reshootRejected": "تمّ رفض الصورة المرمّمة — تم الإبقاء على الأصليّة.",
+    "reshootError": "تعذّرت استعادة الصورة. حاول مرّة أخرى."
   }
 }

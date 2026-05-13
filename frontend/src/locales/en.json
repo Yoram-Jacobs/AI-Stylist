@@ -1403,5 +1403,13 @@
       "recycling": "Recycling",
       "news_flash": "News Flash"
     }
+  },
+  "item": {
+    "polishingPhoto": "Polishing photo…",
+    "repairPhoto": "Repair photo",
+    "repairingPhoto": "Restoring…",
+    "reshootSuccess": "Photo restored.",
+    "reshootRejected": "Restored photo was rejected — keeping the original.",
+    "reshootError": "Could not restore photo. Please try again."
   }
 }

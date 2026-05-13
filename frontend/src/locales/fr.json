@@ -1403,5 +1403,13 @@
       "recycling": "Recyclage",
       "news_flash": "Flash info"
     }
+  },
+  "item": {
+    "polishingPhoto": "Retouche en cours…",
+    "repairPhoto": "Restaurer la photo",
+    "repairingPhoto": "Restauration…",
+    "reshootSuccess": "Photo restaurée.",
+    "reshootRejected": "La photo restaurée a été refusée — nous gardons l'originale.",
+    "reshootError": "Impossible de restaurer la photo. Réessayez."
   }
 }

@@ -23,6 +23,7 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { api } from '@/lib/api';
+import { bestImageUrl, isCleanImagePending } from '@/lib/itemImage';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useClosetStore } from '@/lib/useClosetStore';
 import { closetStore } from '@/lib/closetStore';
@@ -138,6 +139,66 @@ export default function Closet() {
   const fetchItems = useCallback(async () => {
     return store.incrementalSync();
   }, [store]);
+
+  // ──────────────────────────────────────────────────────────────────
+  // Phase O.6 — poll for background-rembg completion.
+  //
+  // After ``POST /closet`` with ``from_one_pass=true`` the server
+  // immediately returns the document with ``clean_image_status:
+  // "pending"`` and queues rembg as a fire-and-forget BackgroundTask.
+  // The closet grid initially renders the bbox-cropped JPEG; we poll
+  // ``GET /closet/{id}`` here on a gentle backoff so the moment the
+  // alpha-PNG cutout is ready we ``store.upsert(updated)`` and the
+  // thumbnail swaps in-place \u2014 no full grid refetch, no flash.
+  //
+  // We do NOT poll for every single ``pending`` item every cycle:
+  // ``polishingIds`` is recomputed against the LIVE store snapshot
+  // and only items whose status is still ``pending`` get a fresh GET.
+  // The cycle stops itself when none remain.
+  // ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const pendingIds = (store.items || [])
+      .filter((it) => it && it.clean_image_status === 'pending')
+      .map((it) => it.id);
+    if (pendingIds.length === 0) return undefined;
+    let cancelled = false;
+    let attempt = 0;
+    const POLL_STEPS_MS = [3000, 4000, 6000, 9000, 12000, 18000]; // ~52s total
+    const tick = async () => {
+      if (cancelled) return;
+      // Refetch each still-pending item in parallel; bail out as soon
+      // as any one of them flips to a terminal state so the grid
+      // updates on the first available result rather than waiting
+      // for the slowest. ``store.upsert`` is a no-op for unchanged
+      // docs so duplicate cycles cost nothing.
+      const live = store.items || [];
+      const stillPending = pendingIds.filter((id) =>
+        live.find((it) => it.id === id && it.clean_image_status === 'pending'),
+      );
+      if (stillPending.length === 0) return; // we're done
+      try {
+        const results = await Promise.all(
+          stillPending.map((id) => api.getItem(id).catch(() => null)),
+        );
+        if (cancelled) return;
+        results.forEach((it) => {
+          if (it && it.id) store.upsert(it);
+        });
+      } catch {
+        /* swallow \u2014 polling is best-effort */
+      }
+      attempt += 1;
+      const delay =
+        POLL_STEPS_MS[Math.min(attempt, POLL_STEPS_MS.length - 1)];
+      timer = setTimeout(tick, delay);
+    };
+    let timer = setTimeout(tick, POLL_STEPS_MS[0]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.items]);
 
   const fetchSemantic = useCallback(async (text) => {
     setSemanticLoading(true);
@@ -680,27 +741,58 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
       }`}
     >
       <AspectRatio ratio={3 / 4} className="bg-secondary relative">
-        {(item.thumbnail_data_url || item.reconstructed_image_url || item.segmented_image_url || item.original_image_url) ? (
-          <img
-            src={item.thumbnail_data_url || item.reconstructed_image_url || item.segmented_image_url || item.original_image_url}
-            alt={item.title}
-            loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
-          />
-        ) : item.dpp_data ? (
-          <div
-            className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-[hsl(var(--accent))]/10 to-muted text-muted-foreground"
-            data-testid="closet-item-dpp-placeholder"
-          >
-            <QrCode className="h-7 w-7 text-[hsl(var(--accent))]/70" />
-            <span className="caps-label text-[10px]">DPP</span>
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">
-            {t('market.noImage')}
-          </div>
-        )}
+        {(() => {
+          const thumbUrl = bestImageUrl(item);
+          const polishing = isCleanImagePending(item);
+          if (thumbUrl) {
+            return (
+              <>
+                <img
+                  src={thumbUrl}
+                  alt={item.title}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-full object-cover"
+                  data-testid="closet-item-thumb"
+                />
+                {polishing && (
+                  // Phase O.6 — subtle "polishing photo…" affordance
+                  // while the backend's background rembg matte is
+                  // running. The closet poll (Closet.jsx top-level)
+                  // will swap the image in-place when status flips
+                  // to "ready".
+                  <div
+                    className="absolute inset-0 flex items-end justify-start p-2 pointer-events-none"
+                    data-testid="closet-item-polishing"
+                  >
+                    <Badge
+                      variant="outline"
+                      className="bg-background/85 backdrop-blur text-[10px] border-[hsl(var(--accent))]/40 animate-pulse"
+                    >
+                      {t('item.polishingPhoto', { defaultValue: 'Polishing photo…' })}
+                    </Badge>
+                  </div>
+                )}
+              </>
+            );
+          }
+          if (item.dpp_data) {
+            return (
+              <div
+                className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-[hsl(var(--accent))]/10 to-muted text-muted-foreground"
+                data-testid="closet-item-dpp-placeholder"
+              >
+                <QrCode className="h-7 w-7 text-[hsl(var(--accent))]/70" />
+                <span className="caps-label text-[10px]">DPP</span>
+              </div>
+            );
+          }
+          return (
+            <div className="w-full h-full flex items-center justify-center text-muted-foreground caps-label">
+              {t('market.noImage')}
+            </div>
+          );
+        })()}
         {typeof score === 'number' && (
           <Badge
             variant="outline"

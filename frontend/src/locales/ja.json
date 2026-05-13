@@ -1403,5 +1403,13 @@
       "recycling": "リサイクル",
       "news_flash": "ニュース速報"
     }
+  },
+  "item": {
+    "polishingPhoto": "写真を仕上げ中…",
+    "repairPhoto": "写真を修復",
+    "repairingPhoto": "修復中…",
+    "reshootSuccess": "写真を修復しました。",
+    "reshootRejected": "修復された写真は不採用となり、オリジナルを維持します。",
+    "reshootError": "写真を修復できませんでした。もう一度お試しください。"
   }
 }

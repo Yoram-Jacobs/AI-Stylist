@@ -1403,5 +1403,13 @@
       "recycling": "מיחזור",
       "news_flash": "מבזק חדשות"
     }
+  },
+  "item": {
+    "polishingPhoto": "מלטשים את התמונה…",
+    "repairPhoto": "שחזור תמונה",
+    "repairingPhoto": "משחזר…",
+    "reshootSuccess": "התמונה שוחזרה.",
+    "reshootRejected": "התמונה המשוחזרת נדחתה — נשמרת התמונה המקורית.",
+    "reshootError": "לא הצליח לשחזר את התמונה. נסה שוב."
   }
 }

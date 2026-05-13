@@ -1,26 +1,34 @@
 [
   {
-    "content": "Phase 2.1: Map existing /closet/save flow, find current rembg + reconstruction call sites",
+    "content": "Phase 3.1: Map AddItemReview / closet grid / item card components",
     "status": "completed"
   },
   {
-    "content": "Phase 2.2: Add background rembg task at /save time for one-pass items (populates clean_image_url when done)",
+    "content": "Phase 3.2: AddItemReview wires the bbox-cropped JPEG from one-pass /analyze response",
     "status": "completed"
   },
   {
-    "content": "Phase 2.3: New endpoint POST /api/v1/closet/{id}/reconstruct — already exists as /closet/{id}/repair",
+    "content": "Phase 3.3: Item thumbnail renders clean_image_url when ready, falls back to original; tiny 'polishing photo…' overlay while pending",
     "status": "completed"
   },
   {
-    "content": "Phase 2.4: Surface clean_image_url + clean_image_status on GET /closet/{id} (auto via Pydantic model)",
+    "content": "Phase 3.4: Background poll on GET /closet/{id} to swap in clean cutout once status=ready (with backoff & cleanup)",
     "status": "completed"
   },
   {
-    "content": "Phase 2.5: Lint, restart, smoke test the new endpoints against CCP image",
+    "content": "Phase 3.5: 'Repair photo' CTA on items with reconstruction_advised=true, wires to existing POST /closet/{id}/repair",
     "status": "completed"
   },
   {
-    "content": "Phase 2 review checkpoint with user before Phase 3",
+    "content": "Phase 3.6: Add item.repairPhoto + item.polishingPhoto + reshootSuccess/Rejected/Error keys to all 12 locales",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3.7: Lint + esbuild + screenshot verification",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3 review checkpoint with user",
     "status": "in_progress"
   }
 ]
