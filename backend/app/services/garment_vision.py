@@ -305,16 +305,17 @@ SYSTEM_PROMPT = (
     "confident but never invent sensitive claims (e.g. do not guess a "
     "specific brand unless clearly visible; leave brand blank otherwise).\n\n"
     "Return ONLY a JSON value with one of two shapes:\n"
-    "  \u2022 a single JSON object (when exactly one garment is visible), or\n"
-    "  \u2022 a JSON array of such objects (when multiple garments are visible).\n"
-    "If no garment is present, return an empty array `[]`. Never wrap the "
-    "result in extra commentary or markdown.\n\n"
+    "  \u2022 a single JSON object when one garment is visible, or\n"
+    "  \u2022 a JSON array of such objects when multiple garments are visible.\n"
+    "Always return at least one garment object \u2014 the photograph is a "
+    "user-uploaded clothing photo, so a garment is present. Never wrap "
+    "the result in extra commentary or markdown.\n\n"
     "Each garment object has the following shape (all keys optional except "
     "`title`):\n"
     "{\n"
-    '  "name": string,                     // short friendly descriptor, 2\u20135 words, e.g. "Cream Linen Blazer"\n'
-    '  "title": string,                    // fallback short title (required)\n'
-    '  "caption": string,                  // friendly natural one-paragraph description (<= 240 chars). If state is Bad, include kind, actionable repair/enhancement advice.\n'
+    '  "name": string,                     // 2\u20135 words. Must be UNIQUE & distinguishing \u2014 weave in a defining detail (material, fit, vibe, pattern, era, hardware, neckline, wash) so the user never ends up with 12 generic "Black T-shirt" rows. The pattern is "<distinguishing detail> + <core garment>" \u2014 e.g. heavyweight boxy + tee, ribbed slim + crewneck, vintage pocket + tee. Render that pattern in the OUTPUT LANGUAGE specified by the user message; do NOT echo English examples verbatim.\n'
+    '  "title": string,                    // fallback short title (required). Same uniqueness rules as `name`. Same output language as `name`.\n'
+    '  "caption": string,                  // ONE confident, vivid sentence in the OUTPUT LANGUAGE describing what makes this piece tick \u2014 silhouette, surface detail, what it pairs with. Max 240 chars. NEVER hedge: forbid "seems", "appears", "probably", "looks like", "might be". State observations directly. If `state` is "used" and `condition` is "bad", end with one short repair/enhancement tip.\n'
     '  "category": string,                 // top bucket: "Top", "Bottom", "Outerwear", "Full Body", "Footwear", "Accessories", "Underwear"\n'
     '  "sub_category": string,             // e.g. "Shirt", "Pants", "Dress", "Coat", "Sneakers"\n'
     '  "item_type": string,                // specific type: "Oxford shirt", "Mini-dress", "Crew-neck sweater"\n'
@@ -334,9 +335,24 @@ SYSTEM_PROMPT = (
     '  "repair_advice": string|null,       // a short, warm, actionable tip if condition==\"bad\" (e.g. \"Minor pilling on the sleeves \u2014 a fabric shaver will restore the surface.\"); null otherwise\n'
     '  "tags": string[]                    // 3\u20138 searchable keywords\n'
     "}\n\n"
-    "Voice guidance for `name` and `caption`: friendly, professional, "
-    "natural \u2014 write like a thoughtful editor, never salesy, never "
-    "robotic. No emojis, no markdown, no hashtags."
+    "Style rules for the free-text fields (`name`, `title`, `caption`, "
+    "`tags`, `repair_advice`):\n"
+    "  1. LANGUAGE \u2014 honour the OUTPUT LANGUAGE specified at the "
+    "top of the user message. It applies equally to short label-like "
+    "fields (`name`, `title`) and long descriptive ones (`caption`). "
+    "JSON keys and the listed enum tokens always stay in English.\n"
+    "  2. CONFIDENCE \u2014 state observations directly. Never hedge "
+    "with \"seems\", \"appears\", \"probably\", \"looks like\", "
+    "\"might be\", \"possibly\", \"kind of\". You are the expert; "
+    "commit to the call. \"There's a cute cat print.\" not \"There "
+    "seems to be an animal print, probably a cat.\"\n"
+    "  3. UNIQUENESS \u2014 `name` and `title` must be distinguishing. "
+    "Imagine the user already owns ten black tees; pick a detail no "
+    "other shirt in a closet would share (texture, weight, neckline, "
+    "wash, hardware, vibe, era).\n"
+    "  4. VOICE \u2014 thoughtful editor, never salesy, never robotic. "
+    "No emojis, no markdown, no hashtags, no #tags inside text "
+    "fields."
 )
 
 
@@ -472,45 +488,48 @@ _LANG_NAMES = {
 
 
 def _language_directive(code: str | None) -> str:
-    code = (code or "en").lower()
-    name = _LANG_NAMES.get(code, "English")
-    if code == "en":
-        return ""
-    return (
-        "\n\nLANGUAGE DIRECTIVE: Write the free-text fields (`name`, "
-        f"`title`, `caption`, `repair_advice`, `tags`, `sub_category`, "
-        f"`item_type`, `colors[*].name`, `fabric_materials[*].name`) in "
-        f"natural, idiomatic {name} (code: {code}). Keep all JSON keys in "
-        f"English. Keep the enum-ish values (`category`, `gender`, "
-        f"`dress_code`, `season`, `pattern`, `state`, `condition`, "
-        f"`quality`) in English exactly as specified."
-    )
+    """No-op now — the language directive lives at the top of the
+    user message (see :func:`_user_prompt`), matching the proven
+    pattern used by ``stylist_brain``. Kept as a callable so the rest
+    of ``analyze()`` doesn't need to branch on language.
+    """
+    return ""
 
 
 def _user_prompt(code: str | None) -> str:
-    """Build the user-message prompt with an inline language reminder.
+    """Build the user-message prompt for ``analyze()``.
 
-    The system-prompt language directive is sometimes ignored by smaller
-    multimodal models (notably Gemma 4 E2B) because the user message is
-    the freshest English instruction the model sees before generating.
-    Reinforcing the language in the user text reliably anchors the
-    output language without altering the JSON schema.
+    For non-English locales we prepend the **proven** ``OUTPUT
+    LANGUAGE = Name (xx)`` preamble (same format used by
+    ``stylist_brain.py`` and ``gemini_stylist.py``) at the TOP of the
+    user message, where the model sees it last before generating.
+    Listing the free-text fields explicitly forces the model to apply
+    the language rule to short label-like values (``name`` / ``title``)
+    that it otherwise leaves in English.
+
+    JSON keys and the schema's closed-vocabulary enums (``category``,
+    ``gender``, ``dress_code``, ``season``, ``pattern``, ``state``,
+    ``condition``, ``quality``) deliberately stay in English so the
+    downstream sanitiser / DB / UI lookups don't have to know every
+    locale's translation.
     """
     base = (
         "Analyse this photograph. If one garment is visible return a single "
         "JSON object; if multiple garments are visible return a JSON array "
-        "of such objects; if none, return `[]`. No commentary."
+        "of such objects. No commentary."
     )
     code = (code or "en").lower()
     if code == "en":
         return base
-    name = _LANG_NAMES.get(code, "English")
-    # Put the language line FIRST so it is the most prominent
-    # instruction; restate that keys/enums stay English so we don't
-    # localise the schema by accident.
+    lang_name = _LANG_NAMES.get(code, code)
     return (
-        f"Reply in {name} ({code}). "
-        f"Keep JSON keys and enum values in English. "
+        f"**OUTPUT LANGUAGE = {lang_name} ({code}).** Every free-text "
+        f"field (`name`, `title`, `caption`, `tags`, `repair_advice`, "
+        f"`sub_category`, `item_type`, `colors[*].name`, "
+        f"`fabric_materials[*].name`) MUST be written in fluent, "
+        f"idiomatic {lang_name}. JSON keys and enum tokens "
+        f"(`category`, `gender`, `dress_code`, `season`, `pattern`, "
+        f"`state`, `condition`, `quality`) stay in English.\n\n"
         + base
     )
 

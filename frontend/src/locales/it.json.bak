@@ -8,7 +8,7 @@
     "me": "Io",
     "settings": "Impostazioni",
     "transactions": "Transazioni",
-    "admin": "Amministratore",
+    "admin": "Admin",
     "signOut": "Esci",
     "skipToContent": "Vai al contenuto principale",
     "openUserMenu": "Apri menu utente",
@@ -730,7 +730,7 @@
     }
   },
   "admin": {
-    "title": "Amministratore",
+    "title": "Admin",
     "subtitle": "Salute della piattaforma e moderazione.",
     "overview": "Panoramica",
     "users": "Utenti",
@@ -885,7 +885,7 @@
       "dress": "Abito",
       "jumpsuit": "Tuta",
       "romper": "Tutina",
-      "sneakers": "Scarpe da ginnastica",
+      "sneakers": "Sneakers",
       "boots": "Stivali",
       "sandals": "Sandali",
       "heels": "Tacchi",

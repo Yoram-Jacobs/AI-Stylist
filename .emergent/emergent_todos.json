@@ -1,26 +1,22 @@
 [
   {
-    "content": "Update SYSTEM_PROMPT for Option A — support single object OR array of objects",
+    "content": "Get EMERGENT_LLM_KEY",
     "status": "completed"
   },
   {
-    "content": "Define EYES_JSON_SCHEMA constant matching the 18-field shape",
+    "content": "Translate via LLM (achieved 6/12 then handed off to user)",
     "status": "completed"
   },
   {
-    "content": "Pass json_schema in _call_gemma_space payload",
+    "content": "Merge user-supplied translations + validate placeholders + brand",
     "status": "completed"
   },
   {
-    "content": "Add switchable `think` parameter through analyze/analyze_outfit/_handle_already_cropped/_analyse_crops/_analyse_one_crop",
+    "content": "Verify all 12 locales at 1004/1004 parity vs en.json",
     "status": "completed"
   },
   {
-    "content": "Lint, restart backend, schema sanity test",
+    "content": "Restart frontend",
     "status": "completed"
-  },
-  {
-    "content": "Update dressapp-eyes proxy main.py on VPS to forward json_schema + enable_thinking (USER ACTION REQUIRED)",
-    "status": "pending"
   }
 ]
