@@ -259,18 +259,14 @@ hand-labeled outfit photos, and only doing β if α misses by more than
 | Eyes calls per crop | 1-2 (with reconstruction revalidation) | 1 |
 | Reconstruction credits spent | every triggered crop, blocking | only when user opts in, background |
 
-## Open questions for the user
+## Decisions taken (locked in 2026-05-13)
 
-1. **Option α or β** for the bbox training? (Defaults to α.)
-2. **Reconstruction CTA placement** — on every item card, or only when
-   `should_reconstruct()` heuristic says it's worth offering?
-3. **rembg background timing** — kick off on `/analyze` (so the
-   cutout is ready before the user clicks save) or only on `/save`
-   (cheaper, but the cutout shows up a few seconds late)?
-4. **Can the user share 20-50 hand-cropped outfit photos with bbox
-   ground truth** so we have a benchmark set, or should I write a
-   small Colab notebook that uses SegFormer to auto-label some?
-5. **Acceptance criteria** — what bbox IoU threshold counts as "good
-   enough to ship"? I suggest 0.7 for 90% of photos.
+| # | Decision | Implication |
+|---|---|---|
+| **Q1** | **Option α — prompt-only, no LoRA re-training.** | Add the new schema + prompt, rely on llama-server's grammar decoder (`response_format=json_schema`) to reject malformed bboxes. Zero training cost. If accuracy fails we fall back to β. |
+| **Q2** | **Reconstruction CTA shows only on crops flagged by `should_reconstruct()`.** | Default workflow stays clean (one Eyes call, no Nano Banana, no re-validate). Heuristic-flagged crops get a single subtle "Repair photo" button on the item card. |
+| **Q3** | **rembg runs at `/save` time, not at `/analyze` time.** | AddItem review screen renders bbox-cropped JPEGs immediately. The clean-cutout PNG arrives a few seconds after Save and replaces the thumbnail in-place when ready. Saves the CPU spend on uploads the user cancels. |
+| **Q4** | **I write a small Colab notebook that bootstraps bbox labels from SegFormer.** | User verifies the auto-labels by eye in a small grid UI. Output: a JSON of `~30` `(image_id, [garment_bboxes])` pairs to evaluate Option α against. |
+| **Q5** | **Acceptance threshold: bbox IoU ≥ 0.7 on 90 % of photos.** | Pragmatic gate. If α hits this, flag flips to default `true` in `deploy/.env.example`. If α misses by more than 5 percentage points, do Option β; otherwise iterate on prompt only. |
 
-No code will be written until these are answered.
+Implementation begins after the user signs off on the phased plan below.
