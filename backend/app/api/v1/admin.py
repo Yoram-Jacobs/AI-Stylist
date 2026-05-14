@@ -244,8 +244,8 @@ async def provider_calls(
 
 # -------------------- eyes provider toggle --------------------
 # Phase O.3 — runtime override for the closet vision pipeline. Flips
-# the model server between the legacy DashScope Qwen-VL path and the
-# self-hosted Gemma-4 E2B endpoint without a backend restart. The
+# the model server between the self-hosted Gemma-4 E2B endpoint and the
+# Gemini-2.5-Flash safety-net path without a backend restart. The
 # override is persisted in ``config.{_id: 'eyes_provider'}`` and read
 # through a 5-second cache (see ``app.services.eyes_override``).
 @router.get("/eyes")

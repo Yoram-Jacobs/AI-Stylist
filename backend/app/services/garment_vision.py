@@ -20,10 +20,13 @@ Deprecated paths (removed in May 2026)
 --------------------------------------
 * Qwen-VL-Plus Eyes via HuggingFace Inference Providers
   (``_hf_chat_json`` + ``_hf_client`` + ``QWEN_EYES_MODEL`` setting).
-  Never enabled in production; the user explicitly asked for it to be
-  removed. The DB-backed override layer (``eyes_override``) already
-  rejects ``"qwen"`` at ``_VALID_PROVIDERS`` so any stale persisted
-  override falls through to env-default.
+  Never enabled in production; deleted along with the rest of the
+  DashScope / Qwen integration. The DB-backed override layer
+  (``eyes_override``) already rejects ``"qwen"`` at ``_VALID_PROVIDERS``
+  so any stale persisted override falls through to env-default.
+* DashScope Qwen-VL stylist brain (``QwenStylistBrain`` +
+  ``qwen_client``). Removed alongside the Eyes path — see
+  ``docs/WASTED_WORK_REPORT.md §2.2``.
 """
 from __future__ import annotations
 

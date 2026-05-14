@@ -59,9 +59,10 @@ async def get_styling_advice(
     if not (user_text or voice_audio):
         raise ValueError("user_text or voice_audio is required")
     # Resolve the brain LAZILY — the factory honors STYLIST_PROVIDER /
-    # STYLIST_FALLBACK and can pick between Qwen (DashScope) and the
-    # legacy Gemini adapter. If neither is configured, ``RuntimeError``
-    # bubbles up and the endpoint turns it into a 503.
+    # STYLIST_FALLBACK. Today both resolve to Gemini; the abstraction
+    # is preserved so a future Gemma4-E4B provider can land here
+    # without touching this call site. If neither resolves, the
+    # ``RuntimeError`` bubbles up and the endpoint turns it into a 503.
     try:
         brain = stylist_brain_service()
     except RuntimeError as exc:
@@ -163,7 +164,7 @@ async def get_styling_advice(
             f"{e.get('title')} [{e.get('formality_hint')}]" for e in calendar_events
         )
 
-    # --- 6. Stylist brain (Qwen-VL-Max-Latest by default; Gemini fallback)
+    # --- 6. Stylist brain (Gemini 2.5 Pro; future: Gemma4-E4B fallback)
     image_b64 = image_bytes_to_base64(image_bytes) if image_bytes else None
     t0 = time.perf_counter()
     advice = await brain.advise(

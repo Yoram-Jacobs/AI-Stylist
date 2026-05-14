@@ -93,33 +93,20 @@ class Settings:
     DEFAULT_STYLIST_MODEL: str = os.environ.get("DEFAULT_STYLIST_MODEL", "gemini-2.5-pro")
     DEFAULT_STYLIST_PROVIDER: str = os.environ.get("DEFAULT_STYLIST_PROVIDER", "gemini")
 
-    # --- Phase O: Stylist brain provider swap (Gemini → Qwen → Gemma) ---
+    # --- Phase O: Stylist brain provider ---
     # STYLIST_PROVIDER picks the primary LLM that backs /api/v1/stylist.
-    # One of: ``qwen`` (Alibaba DashScope), ``gemini`` (legacy), or
-    # ``gemma`` (future fine-tuned on-prem path; not yet wired).
-    # When the primary call errors out, ``STYLIST_FALLBACK`` (if set)
-    # points at a secondary provider that ``stylist_brain`` will try
-    # next. ``""`` / ``"none"`` disables fallback entirely.
+    # As of May 2026 the only supported value is ``gemini`` — earlier
+    # waves shipped a Qwen-VL (DashScope) path that was retired (see
+    # docs/WASTED_WORK_REPORT.md §2.2). The ``gemma`` slot is reserved
+    # for a future fine-tuned Gemma4-E4B on-prem path; it isn't wired
+    # yet. ``STYLIST_FALLBACK`` (if set) points at a secondary provider
+    # that ``stylist_brain`` will try when the primary errors. ``""`` /
+    # ``"none"`` disables fallback entirely.
     STYLIST_PROVIDER: str = (
-        os.environ.get("STYLIST_PROVIDER", "qwen").lower().strip()
+        os.environ.get("STYLIST_PROVIDER", "gemini").lower().strip()
     )
     STYLIST_FALLBACK: str = (
         os.environ.get("STYLIST_FALLBACK", "gemini").lower().strip()
-    )
-
-    # DashScope (Alibaba) credentials + model IDs. Keys starting with
-    # ``sk-`` from the Singapore / International console target the
-    # ``dashscope-intl.aliyuncs.com`` endpoint below.
-    DASHSCOPE_API_KEY: str | None = os.environ.get("DASHSCOPE_API_KEY") or None
-    DASHSCOPE_BASE_URL: str = os.environ.get(
-        "DASHSCOPE_BASE_URL",
-        "https://dashscope-intl.aliyuncs.com/api/v1",
-    ).rstrip("/")
-    # Brain tier — multimodal reasoning used for stylist chat + cutout
-    # classification. Defaults to Qwen-VL-Max-Latest, which handled the
-    # pre-flight JSON smoke test cleanly.
-    QWEN_BRAIN_MODEL: str = os.environ.get(
-        "QWEN_BRAIN_MODEL", "qwen-vl-max-latest"
     )
 
     @property
