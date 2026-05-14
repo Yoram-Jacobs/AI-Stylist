@@ -1,34 +1,14 @@
 [
   {
-    "content": "Phase 4.1: Build the Eyes_OnePass_Benchmark.ipynb cell structure",
+    "content": "Fix orphan repair*/onRepair refs in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Phase 4.2: Implement CCP bitmap-to-bbox conversion (Supervisely format → normalised 0..1000 grid)",
+    "content": "Register EYES_ONE_PASS=false in deploy/.env.example",
     "status": "completed"
   },
   {
-    "content": "Phase 4.3: ipywidgets accept/reject/edit UI for label verification",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4.4: HTTP client that hits /closet/analyze with EYES_ONE_PASS=true + per-photo IoU compute",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4.5: 90th-percentile IoU report + gate decision (flip flag if ≥0.7 on 90% of photos)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4.6: Companion runbook doc (one-shot procedure to flip EYES_ONE_PASS=true in deploy/.env.example)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4.7: Validate notebook JSON parses + smoke-run the non-LLM cells locally",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 4 review checkpoint",
+    "content": "Run testing agent (backend + frontend) to verify legacy hot path & renamed UI states",
     "status": "in_progress"
   }
 ]

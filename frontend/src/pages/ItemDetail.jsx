@@ -421,21 +421,40 @@ export default function ItemDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Repair state
-  const [repairHint, setRepairHint] = useState('');
-  const [repairing, setRepairing] = useState(false);
-  // Phase O.6 — "Repair photo" CTA state. SEPARATE from the legacy
-  // ``repairing`` flag above which gates the rembg "clean background"
-  // action (Phase V Fix 2). This one gates the Nano-Banana studio
-  // reshoot — same endpoint that powered the auto-reconstruct flow
-  // before O.6, just now user-initiated and only surfaced when the
-  // one-pass /analyze result asked us to advise it.
+  // ────────────────────────────────────────────────────────────────
+  // Legacy "Clean background" (rembg matte) state.
+  //
+  // Naming note (May 2026): historically this whole block was named
+  // ``repair*`` because rembg matting was originally pitched as a
+  // "photo repair" operation. With Phase O.6 we ALSO added a real
+  // Nano-Banana reconstruction CTA labelled "Repair photo" in the
+  // UI — so the two flows ended up sharing the word "repair" in
+  // their code but mapping to entirely different APIs:
+  //
+  //   • THIS block + ``onCleanBackground`` -> ``/closet/{id}/clean-background``
+  //     i.e. rembg, alpha-channel cutout. Confusingly still labelled
+  //     "Restore photo" in some legacy localisation strings; the
+  //     ``itemDetail.repair.*`` i18n keys belong to RECONSTRUCTION
+  //     and are NOT used by this block.
+  //
+  //   • ``onReshootPhoto`` below -> ``/closet/{id}/repair``
+  //     i.e. Nano Banana studio reshoot. This is the user-facing
+  //     "Repair photo" CTA from Phase O.6.
+  //
+  // Rename completed in May 2026 to make the two flows unambiguous
+  // when reading the file. Don't merge them \u2014 they're different
+  // backend endpoints with different cost/latency profiles.
+  const [cleanBackgroundHint, setCleanBackgroundHint] = useState('');
+  const [cleaningBackground, setCleaningBackground] = useState(false);
+  // Phase O.6 — "Repair photo" CTA state. SEPARATE from
+  // ``cleaningBackground`` above which gates the rembg flow.
+  // This one gates the Nano-Banana studio reshoot.
   const [reshootingPhoto, setReshootingPhoto] = useState(false);
   // Clean-background progress %, simulated client-side because the
   // backend matting endpoint is a single non-streaming POST. We tick
   // the bar towards ~92% over ~14s (roughly the p95 duration of the
   // SegFormer + rembg pipeline) and snap to 100% on completion.
-  const [repairProgress, setRepairProgress] = useState(0);
+  const [cleanBackgroundProgress, setCleanBackgroundProgress] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [dictationInterim, setDictationInterim] = useState('');
   const [showingOriginal, setShowingOriginal] = useState(false);
@@ -595,17 +614,17 @@ export default function ItemDetail() {
     }
   };
 
-  /* ------------------- Clean background (Phase V Fix 2) ------------------- */
-  const onRepair = async () => {
-    if (repairing) return;
-    setRepairing(true);
+  /* ------------------- Clean background (rembg matte; Phase V Fix 2) ----- */
+  const onCleanBackground = async () => {
+    if (cleaningBackground) return;
+    setCleaningBackground(true);
     setShowingOriginal(false);
-    setRepairProgress(4);
+    setCleanBackgroundProgress(4);
     // Asymptotic ramp: each tick closes ~7% of the remaining gap to 92%,
     // so the bar feels lively at the start and decelerates as it nears
     // the cap — never reaching 100% until the API actually returns.
     const ticker = setInterval(() => {
-      setRepairProgress((p) => {
+      setCleanBackgroundProgress((p) => {
         if (p >= 92) return 92;
         const next = p + Math.max(1, Math.round((92 - p) * 0.07));
         return Math.min(92, next);
@@ -617,7 +636,7 @@ export default function ItemDetail() {
         toast.success(t('itemDetail.cleanBackground.success'));
         setItem(res.item);
         setForm(toFormState(res.item, user));
-        setRepairHint('');
+        setCleanBackgroundHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));
       }
@@ -625,12 +644,12 @@ export default function ItemDetail() {
       toast.error(err?.response?.data?.detail || t('itemDetail.cleanBackground.error'));
     } finally {
       clearInterval(ticker);
-      setRepairProgress(100);
+      setCleanBackgroundProgress(100);
       // Brief delay so the user sees the bar hit 100% before it
       // collapses — feels more "complete" than yanking it instantly.
       setTimeout(() => {
-        setRepairing(false);
-        setRepairProgress(0);
+        setCleaningBackground(false);
+        setCleanBackgroundProgress(0);
       }, 350);
     }
   };
@@ -679,7 +698,7 @@ export default function ItemDetail() {
       onInterim: (txt) => setDictationInterim(txt || ''),
       onFinal: (finalText) => {
         if (finalText) {
-          setRepairHint((prev) =>
+          setCleanBackgroundHint((prev) =>
             prev ? `${prev} ${finalText}`.slice(0, 240) : finalText.slice(0, 240),
           );
         }
@@ -1011,21 +1030,21 @@ export default function ItemDetail() {
                 {t('itemDetail.cleanBackground.subtitle')}
               </p>
               <Button
-                onClick={onRepair}
-                disabled={repairing}
+                onClick={onCleanBackground}
+                disabled={cleaningBackground}
                 className="w-full rounded-xl"
                 data-testid="item-clean-bg-button"
               >
-                {repairing ? (
+                {cleaningBackground ? (
                   <><Loader2 className="h-4 w-4 me-2 animate-spin" />{t('itemDetail.cleanBackground.running')}</>
                 ) : (
                   <><Wand2 className="h-4 w-4 me-2" />{hasReconstruction ? t('itemDetail.cleanBackground.retryCta') : t('itemDetail.cleanBackground.cta')}</>
                 )}
               </Button>
-              {repairing && (
+              {cleaningBackground && (
                 <div className="space-y-2" data-testid="item-clean-bg-progress">
                   <Progress
-                    value={repairProgress}
+                    value={cleanBackgroundProgress}
                     className="h-2 w-full"
                     data-testid="item-clean-bg-progress-bar"
                   />
@@ -1037,7 +1056,7 @@ export default function ItemDetail() {
                       className="text-[11px] tabular-nums text-muted-foreground"
                       data-testid="item-clean-bg-progress-pct"
                     >
-                      {Math.round(repairProgress)}%
+                      {Math.round(cleanBackgroundProgress)}%
                     </span>
                   </div>
                 </div>
