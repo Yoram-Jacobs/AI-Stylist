@@ -847,40 +847,24 @@ async def analyze_item_image(
         or "en"
     )
     if payload.multi:
-        # Phase O.6 — single-pass branch (gated by EYES_ONE_PASS).
-        # When enabled the pipeline does ONE Eyes call that returns
-        # both attributes and bboxes per garment, skipping SegFormer,
-        # rembg, and reconstruction re-validation on the hot path.
-        # rembg + reconstruction become deferred endpoints (Phase 2).
-        # When disabled (default), the legacy multi-call path runs
-        # bit-for-bit as before.
-        if settings.EYES_ONE_PASS:
-            try:
-                # The legacy ``_ANALYZE_LOCK`` semaphore was a memory-
-                # pressure guard for the SegFormer+rembg+per-crop-LLM
-                # stack. The one-pass path does ONE LLM call and a
-                # PIL crop \u2014 no SegFormer load, no rembg, no
-                # parallel LLM fan-out \u2014 so the lock is unnecessary
-                # here and would just serialise unrelated uploads.
-                detections = await garment_vision_service.analyze_outfit_one_pass(
-                    raw, language=user_lang,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("One-pass outfit analysis failed: %r", exc)
-                raise HTTPException(
-                    503,
-                    "Garment analyzer is temporarily unavailable. Please try again.",
-                ) from exc
-        else:
-            try:
-                async with _ANALYZE_LOCK:
-                    detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Outfit analysis failed: %r", exc)
-                raise HTTPException(
-                    503,
-                    "Garment analyzer is temporarily unavailable. Please try again.",
-                ) from exc
+        # Production analyze pipeline: SegFormer crops the photo into
+        # per-garment regions, then N parallel Eyes calls analyse each
+        # crop. This is the only production path as of May 2026 --
+        # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
+        # benchmark showed it could not reliably emit multi-garment
+        # arrays (Gemini-2.5-Flash returned a single object for every
+        # image regardless of prompt phrasing). The single-pass
+        # function still exists for benchmark scripts; the production
+        # ``EYES_ONE_PASS`` flag was removed.
+        try:
+            async with _ANALYZE_LOCK:
+                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Outfit analysis failed: %r", exc)
+            raise HTTPException(
+                503,
+                "Garment analyzer is temporarily unavailable. Please try again.",
+            ) from exc
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
@@ -906,14 +890,19 @@ async def analyze_item_image(
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
                     "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
-                    # Phase O.6 fields. Present (and useful) only when
-                    # the request was served by ``analyze_outfit_one_pass``.
-                    # The legacy pipeline omits both keys; absence is
-                    # treated as "no CTA" / "legacy path" by the frontend.
+                    # Phase O.6 field. ``reconstruction_advised`` is
+                    # produced by the legacy pipeline as a heuristic
+                    # output of ``should_reconstruct`` per crop; absence
+                    # / False means "no CTA needed".
                     "reconstruction_advised": det.get(
                         "reconstruction_advised", False,
                     ),
-                    "one_pass": det.get("one_pass", False),
+                    # Patch 9a (May 2026) — the ``one_pass`` field used
+                    # to signal that the response came from the retired
+                    # single-call path. With one-pass retired this is
+                    # always False; kept in the response shape so older
+                    # frontend bundles that read it don't choke.
+                    "one_pass": False,
                     # Patch 8 (May 2026) — flag for the legacy multi-crop
                     # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
                     # The frontend echoes this back on /closet save and

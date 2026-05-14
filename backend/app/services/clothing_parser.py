@@ -64,7 +64,36 @@ _LABEL_MAP: dict[str, str | None] = {
     "Scarf": "accessory",
 }
 # Minimum mask area (as fraction of total image) to consider a detection.
-_MIN_AREA_FRAC = 0.005
+# Patch 10a (May 2026) — category-dependent. The flat ``_MIN_AREA_FRAC =
+# 0.005`` previously dropped any segment covering less than 0.5% of the
+# image; this is the right threshold for tops/bottoms/dresses (where a
+# 0.5%-of-frame mask is almost always noise) but it WAY over-filters
+# small accessories. In a full-body shot a pair of sunglasses or a
+# narrow belt typically occupies 0.05-0.3% of the frame, so they used
+# to vanish entirely. The CCP-Ninja benchmark exposed this as a 0%
+# recall on every accessory class. Lower the bar for the categories
+# that are intrinsically small.
+_MIN_AREA_FRAC_DEFAULT = 0.005       # tops, bottoms, dresses
+_MIN_AREA_FRAC_PER_CATEGORY: dict[str, float] = {
+    "accessory": 0.0005,             # sunglasses, belts, bags, scarves
+    "footwear":  0.0008,             # individual shoes/socks at full-body
+    "headwear":  0.0010,             # hats in wide shots
+}
+
+
+def _min_area_frac_for(category: str | None) -> float:
+    """Return the minimum-area fraction threshold for this internal category.
+
+    Anything not listed in ``_MIN_AREA_FRAC_PER_CATEGORY`` falls back to
+    ``_MIN_AREA_FRAC_DEFAULT``. Pass ``None`` for "unknown / unmapped"
+    labels — they get the default threshold and are typically filtered
+    out higher up anyway.
+    """
+    if category is None:
+        return _MIN_AREA_FRAC_DEFAULT
+    return _MIN_AREA_FRAC_PER_CATEGORY.get(category, _MIN_AREA_FRAC_DEFAULT)
+
+
 # Max edge of the input fed to the model — keeps CPU latency predictable.
 _MAX_INPUT_EDGE = 1024
 
@@ -324,7 +353,7 @@ async def _call_self_hosted(
         except Exception:  # noqa: BLE001
             continue
         area = int(mask.sum())
-        if area / total < _MIN_AREA_FRAC:
+        if area / total < _min_area_frac_for(category):
             continue
         bb = _mask_bbox(mask)
         if bb is None:
@@ -416,7 +445,11 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
     # 1) First pass: keep only sufficiently-large instances; index by label.
     by_label: dict[str, dict[str, Any]] = {}
     for label_name, mask in instances:
-        if int(mask.sum()) / total < _MIN_AREA_FRAC:
+        # Patch 10a: category-dependent area threshold. Accessories
+        # and footwear get a smaller minimum so we don't filter out
+        # sunglasses, belts, shoes, etc. in a full-body shot.
+        category = _LABEL_MAP.get(label_name)
+        if int(mask.sum()) / total < _min_area_frac_for(category):
             continue
         if label_name in by_label:
             # Merge disconnected components of the same label into one

@@ -1881,6 +1881,18 @@ class GarmentVisionService:
     ) -> list[dict[str, Any]]:
         """End-to-end multi-item pipeline in a SINGLE Eyes call.
 
+        **RETIRED (May 2026) — benchmark / experimentation use only.**
+        The CCP-Ninja benchmark (``/app/scripts/run_eyes_benchmark.py``)
+        showed Gemini-2.5-Flash will not emit multi-garment arrays
+        reliably: on all 30 test images it returned exactly one garment
+        per call, collapsing recall to ~10%. Three prompt rewrites did
+        not move the dial. The function is kept here so the benchmark
+        script and any future fine-tuned-Eyes experiments can still
+        invoke it, but production now always calls :meth:`analyze_outfit`
+        (SegFormer + per-crop Eyes), which scores ~0.71 mean IoU and
+        ~0.41 recall on the same dataset. The closet ``/analyze`` route
+        no longer reads ``EYES_ONE_PASS``.
+
         Sends the original photo straight to ``analyze(one_pass=True)``,
         which returns either a single garment object (already-cropped
         product photo) or an array of garment objects (multi-item
@@ -1888,14 +1900,6 @@ class GarmentVisionService:
         normalised grid; we crop the original image to each bbox to
         produce per-garment JPEGs that the frontend can render
         immediately.
-
-        Replaces, on the hot path:
-          • the SegFormer / Gemini detection step,
-          • the rembg matte-as-precondition step,
-          • the Nano-Banana reconstruction + re-validation step.
-
-        rembg + reconstruction are deferred to user-initiated endpoints
-        downstream of ``/save`` — see ``EYES_ONE_PASS_PROPOSAL.md``.
 
         Output shape matches :meth:`analyze_outfit` exactly so the
         ``/closet/analyze`` endpoint can swap implementations without

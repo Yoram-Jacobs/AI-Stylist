@@ -220,25 +220,18 @@ class Settings:
     EYES_GEMMA_TIMEOUT_S: float = float(
         os.environ.get("EYES_GEMMA_TIMEOUT_S", "60") or "60"
     )
-    # --- Phase O.6 — Single-pass Eyes (proposal) ---
-    # Master kill-switch for the experimental "one call per upload"
-    # AddItem pipeline. When ``True`` the closet ``/analyze`` route
-    # calls ``GarmentVisionService.analyze_outfit_one_pass()`` which
-    # asks Eyes (Gemma-4 E2B) for both garment attributes AND a
-    # ``region.bbox`` in a single JSON response — skipping SegFormer,
-    # the rembg pre-condition matte, and the reconstruction
-    # re-validation Eyes call. rembg + reconstruction become deferred
-    # / user-initiated jobs run from later endpoints.
-    #
-    # **Default ``False`` everywhere** — preview, prod, ``.env.example`` —
-    # until the benchmark gate at ``docs/EYES_ONE_PASS_PROPOSAL.md``
-    # (IoU >= 0.7 on 90% of CCP photos) is verified. Set to ``True``
-    # via env in any environment that wants the new path:
-    #     EYES_ONE_PASS=true
-    # See ``/app/docs/EYES_ONE_PASS_PROPOSAL.md`` for the migration plan.
-    EYES_ONE_PASS: bool = (
-        os.environ.get("EYES_ONE_PASS", "false") or "false"
-    ).strip().lower() in ("1", "true", "yes", "on")
+    # --- Phase O.6 — Single-pass Eyes (RETIRED May 2026) ---
+    # The experimental "one Eyes call per upload" path was retired
+    # after the CCP-Ninja benchmark (/app/scripts/run_eyes_benchmark.py)
+    # showed Gemini-2.5-Flash will not reliably emit multi-garment
+    # arrays regardless of prompt phrasing: on all 30 test images it
+    # returned exactly one garment, collapsing recall to ~10%. The
+    # legacy SegFormer+per-crop pipeline (``analyze_outfit``) hit mean
+    # IoU 0.71 / recall 0.41 on the same set and remains the only
+    # production analyzer. The ``analyze_outfit_one_pass`` function
+    # is kept for benchmark scripts only. The env var ``EYES_ONE_PASS``
+    # is intentionally not read anywhere — leaving it set in a .env
+    # file has no effect.
     # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
