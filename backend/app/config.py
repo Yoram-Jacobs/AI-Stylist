@@ -397,6 +397,27 @@ class Settings:
     BACKGROUND_MATTING_MAX_EDGE: int = int(
         os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1024")
     )
+
+    # Patch 8 (May 2026) — defer rembg matting to a FastAPI BackgroundTask
+    # on the **legacy** multi-crop /analyze path. The pre-Phase-O.6
+    # ``analyze_outfit`` flow used to serialise rembg on the hot path
+    # (each call holds the onnxruntime session, so parallel invocations
+    # OOM in 3GB pods). For a typical 2-5 garment outfit that adds
+    # 30-90s of wall time before the user sees any analysis result —
+    # far over the 30s UX budget. With this flag ``True`` (default),
+    # ``analyze_outfit`` returns raw JPEG bbox crops immediately and
+    # the rembg matte runs after the user saves, in the same
+    # ``_run_background_matte`` task that the Phase-O.6 single-pass
+    # path already uses. The closet thumbnail upgrades in place once
+    # the matte finishes (the frontend polling for ``clean_image_url``
+    # was already wired in Phase 3).
+    #
+    # Set to ``False`` to restore the old synchronous behavior — useful
+    # if a downstream consumer (e.g. a benchmark notebook) needs the
+    # matted crop in the /analyze response.
+    DEFER_REMBG_ON_ANALYZE: bool = (
+        os.environ.get("DEFER_REMBG_ON_ANALYZE", "true").lower() == "true"
+    )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which

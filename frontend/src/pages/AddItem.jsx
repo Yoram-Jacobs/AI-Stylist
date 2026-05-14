@@ -824,6 +824,12 @@ export default function AddItem() {
                   // Phase O.6 flags (absent on legacy responses → falsy)
                   fromOnePass: !!it.one_pass,
                   reconstructionAdvised: !!it.reconstruction_advised,
+                  // Patch 8 (May 2026) — analyzer skipped synchronous
+                  // rembg. The /closet save endpoint will queue the
+                  // matte as a BackgroundTask and the closet card
+                  // upgrades the thumbnail when ``clean_image_url``
+                  // is later populated.
+                  deferMatte: !!it.defer_matte,
                   // Keep the original card.base64 untouched only if the
                   // analyzer didn't return a usable crop (legacy fallback).
                   ...(cropDataUrl
@@ -893,6 +899,9 @@ export default function AddItem() {
           // Phase O.6 — single-pass flags (absent on legacy responses).
           fromOnePass: !!it.one_pass,
           reconstructionAdvised: !!it.reconstruction_advised,
+          // Patch 8 (May 2026) — deferred-matte flag from
+          // ``settings.DEFER_REMBG_ON_ANALYZE``.
+          deferMatte: !!it.defer_matte,
         };
       });
       if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
@@ -1965,6 +1974,11 @@ function buildCreatePayload(card) {
     // receive ``one_pass: true`` on the /analyze response simply omit
     // the field and keep the existing synchronous SegFormer path.
     from_one_pass: card.fromOnePass ? true : undefined,
+    // Patch 8 (May 2026) — same code path as ``from_one_pass`` but
+    // signals that we came through the *legacy* (multi-crop SegFormer)
+    // /analyze flow with rembg deferred. The backend queues
+    // ``_run_background_matte`` either way.
+    defer_matte: card.deferMatte ? true : undefined,
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

@@ -138,6 +138,15 @@ class CreateItemIn(BaseModel):
     # omit this field and the synchronous SegFormer path runs as
     # before.
     from_one_pass: bool = False
+    # Patch 8 (May 2026) — legacy ``/analyze`` (multi-crop SegFormer
+    # path) now also defers rembg by default (``settings.DEFER_REMBG_ON_ANALYZE=true``).
+    # Each item in the response carries ``defer_matte=true`` and the
+    # frontend echoes it back on save so we queue the same
+    # ``_run_background_matte`` task that the Phase-O.6 path uses.
+    # Functionally equivalent to ``from_one_pass=True`` for the save
+    # endpoint's purposes; kept as a separate field for clearer logs
+    # and so the two paths can be enabled / disabled independently.
+    defer_matte: bool = False
 
 
 class UpdateItemIn(BaseModel):
@@ -322,6 +331,22 @@ async def create_item(
     )
     doc = item.model_dump()
 
+    # Patch 7 (May 2026) — restore the closet thumbnail for legacy
+    # uploads. ``AddItem.buildCreatePayload`` sends the per-garment crop
+    # in ``image_base64`` (cheaper than re-encoding it twice into a
+    # data URL on the wire), and historically the HF-segmentation
+    # branch populated ``segmented_image_url`` as a side effect so the
+    # missing ``original_image_url`` went unnoticed. After Patch 4
+    # removed HF, every legacy (``from_one_pass=False``) save would
+    # land with NO image URL at all and the Closet card would render
+    # blank. Derive ``original_image_url`` from ``image_base64`` here
+    # whenever the client didn't ship one explicitly.
+    if raw_bytes and not doc.get("original_image_url") and payload.image_base64:
+        _mime = payload.image_mime or "image/jpeg"
+        doc["original_image_url"] = (
+            f"data:{_mime};base64,{payload.image_base64}"
+        )
+
     # Phase Z2.1 — if the client didn't compute a phash (older client,
     # camera capture, etc.) AND we have raw bytes here, compute one
     # server-side so this item is immediately searchable by /preflight
@@ -357,7 +382,14 @@ async def create_item(
     # ``clean_image_url`` a few seconds later. Legacy clients (no
     # ``from_one_pass`` flag) keep the existing synchronous SegFormer
     # path bit-for-bit.
-    if payload.from_one_pass and raw_bytes:
+    #
+    # Patch 8 (May 2026) — the legacy multi-crop ``/analyze`` path now
+    # *also* defers rembg (``settings.DEFER_REMBG_ON_ANALYZE``). The
+    # analyzer marks each item with ``defer_matte=true`` and the
+    # frontend echoes it here so we queue the same background task as
+    # the one-pass path. Either flag triggers the same code.
+    needs_bg_matte = (payload.from_one_pass or payload.defer_matte) and raw_bytes
+    if needs_bg_matte:
         doc["clean_image_status"] = "pending"
         # Snapshot what the background task needs: the item id and the
         # raw bytes. We do NOT capture ``doc`` directly because the
@@ -882,6 +914,12 @@ async def analyze_item_image(
                         "reconstruction_advised", False,
                     ),
                     "one_pass": det.get("one_pass", False),
+                    # Patch 8 (May 2026) — flag for the legacy multi-crop
+                    # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
+                    # The frontend echoes this back on /closet save and
+                    # the backend queues ``_run_background_matte`` per
+                    # item, identical to the one-pass path.
+                    "defer_matte": det.get("defer_matte", False),
                 }
             )
         if dropped_unidentifiable:

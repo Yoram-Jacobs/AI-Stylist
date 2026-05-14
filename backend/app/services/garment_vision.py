@@ -1815,11 +1815,28 @@ class GarmentVisionService:
             self._bbox_crop_useful, image_bytes, useful,
         )
 
-        # 5) Matte if enabled; otherwise keep raw JPEG crops.
-        if settings.AUTO_MATTE_CROPS and raw_crops:
+        # 5) Matte if enabled. Patch 8 (May 2026): when
+        # ``settings.DEFER_REMBG_ON_ANALYZE`` is True (default), we
+        # skip the synchronous serial rembg pass entirely and return
+        # raw JPEG bbox crops. The /closet save endpoint queues the
+        # matte as a BackgroundTask per item, identical to the
+        # Phase-O.6 single-pass path. This is the dominant win for
+        # the analyze latency budget (saves ~10-30s per crop, serial).
+        defer_matte = (
+            settings.DEFER_REMBG_ON_ANALYZE
+            and settings.AUTO_MATTE_CROPS
+            and bool(raw_crops)
+        )
+        if settings.AUTO_MATTE_CROPS and raw_crops and not defer_matte:
             crops = await self._matte_crops(raw_crops)
         else:
             crops = raw_crops
+            if defer_matte:
+                logger.info(
+                    "analyze_outfit: deferring rembg for %d crop(s) to "
+                    "post-save BackgroundTask (DEFER_REMBG_ON_ANALYZE=true)",
+                    len(raw_crops),
+                )
 
         if not crops:
             # Every crop was rejected (tiny / invalid bbox).
@@ -1835,6 +1852,14 @@ class GarmentVisionService:
         if not items:
             single = await self.analyze(image_bytes, think=think)
             return [self._build_fullframe_item(single, image_bytes)]
+
+        # Patch 8 marker: flag every item so the /closet save endpoint
+        # knows it must queue a rembg BackgroundTask for this crop
+        # (the matte was intentionally skipped here to keep the
+        # /analyze response under the 30s UX budget).
+        if defer_matte:
+            for it in items:
+                it["defer_matte"] = True
 
         logger.info(
             "analyze_outfit OK detected=%d analysed=%d labels=%s",
