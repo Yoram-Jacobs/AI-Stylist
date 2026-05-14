@@ -73,21 +73,25 @@ MD_TITLE = """\
 > the checkpoint past recovery. We start over here from the official
 > HF Hub release.
 >
-> **Authoritative loading recipe** (from the HF model card + dev.to
-> fine-tuning guide):
+> **Authoritative loading recipe** (from the HF model card):
 > ```python
-> from transformers import AutoProcessor, AutoModelForImageTextToText
+> from transformers import AutoProcessor, AutoModelForMultimodalLM
 > processor = AutoProcessor.from_pretrained("google/gemma-4-E2B-it")
-> model = AutoModelForImageTextToText.from_pretrained(
+> model = AutoModelForMultimodalLM.from_pretrained(
 >     "google/gemma-4-E2B-it", dtype="auto", device_map="auto")
 > ```
-> We pick `AutoModelForImageTextToText` (vision-language head) over
-> `AutoModelForMultimodalLM` (text+image+audio head) because Eyes is
-> vision-only — no audio. The dev.to QLoRA recipe uses the same
-> class. Either would work; this is the narrower correct choice.
+> We use `AutoModelForMultimodalLM` (full text+image+audio head)
+> rather than the narrower `AutoModelForImageTextToText` used in the
+> dev.to QLoRA blog post. Eyes is image-only **for this LoRA run**,
+> but the *next* training phase will exercise audio input (ASR /
+> speech-to-translated-text for in-app voice queries about an
+> outfit), so we load the full multimodal head now to avoid having
+> to re-export and re-quantize the model from a different base
+> checkpoint later. The audio tower is hard-frozen during this run;
+> the next-phase LoRA will simply unfreeze it.
 > No hand-rolled `Gemma4*ForConditionalGeneration` import — the Auto
 > classes dispatch to whatever the installed transformers release
-> ships as the vision-language head for Gemma-4. Requires
+> ships as the multimodal head for Gemma-4. Requires
 > `transformers >= 5.5.0`.
 >
 > **Target runtime.** Colab Pro+ A100 (40 GB). ≈ 14 k images × 2
@@ -237,8 +241,8 @@ print('accelerate  :', accelerate.__version__)
 print('bf16 ok?    :', torch.cuda.is_bf16_supported())
 
 # Sanity: transformers must be new enough to know about Gemma-4.
-from transformers import AutoModelForImageTextToText  # noqa: F401
-print('AutoModelForImageTextToText import : OK')
+from transformers import AutoModelForMultimodalLM  # noqa: F401
+print('AutoModelForMultimodalLM import : OK')
 
 # Hard-stop if transformers is too old.
 from packaging.version import Version
@@ -336,12 +340,14 @@ MD_LOAD = """\
 
 ## 4. Load `google/gemma-4-E2B-it` and aggressively freeze
 
-The dev.to QLoRA recipe for Gemma-4 fine-tuning uses
-`AutoModelForImageTextToText` — that's the vision-language head and
-the right Auto class for our use case (Eyes is image+text, no
-audio). Both Auto factories dispatch to the same concrete class for
-Gemma-4 in transformers 5.5+, but the narrower one is the dev-blog
-canonical recipe.
+We use `AutoModelForMultimodalLM` — the full text+image+audio head
+— rather than the narrower `AutoModelForImageTextToText` used in
+the dev.to QLoRA blog post. Eyes is image-only **for this LoRA
+run**, but the next training phase will exercise the audio tower
+(ASR / speech-to-translated-text for in-app voice queries about
+an outfit), so we load the full multimodal head now to keep the
+audio weights present and avoid having to re-export the merged
+checkpoint from a different base later.
 
 Right after loading we do a **two-step parameter freeze**:
 
@@ -354,18 +360,19 @@ Right after loading we do a **two-step parameter freeze**:
    live inside `language_model.*`. PEFT-LoRA will further freeze the
    `language_model.*` base weights too; this pass is the
    belt-and-braces guarantee that nothing outside the text decoder
-   ever sees a gradient.
+   ever sees a gradient. The audio tower stays frozen here; the
+   next-phase audio LoRA will explicitly unfreeze it then.
 """
 
 CODE_LOAD = """\
 import torch
 from collections import Counter
-from transformers import AutoProcessor, AutoModelForImageTextToText
+from transformers import AutoProcessor, AutoModelForMultimodalLM
 
 BASE_MODEL = 'google/gemma-4-E2B-it'
 
 processor = AutoProcessor.from_pretrained(BASE_MODEL)
-model = AutoModelForImageTextToText.from_pretrained(
+model = AutoModelForMultimodalLM.from_pretrained(
     BASE_MODEL,
     dtype=torch.bfloat16,                 # transformers 5.x: 'dtype' (was torch_dtype)
     device_map={'': 0},
