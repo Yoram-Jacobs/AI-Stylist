@@ -158,34 +158,59 @@ print('   run dir       :', OUT_RUN_DIR)
 MD_SECTION_DEPS = """\
 ---
 
-## 2. Install pinned dependencies
+## 2. Install dependencies
 
-We pin every library to a version we've actually tested together for
-Gemma-3 multimodal LoRA on A100. Don't upgrade in place — newer
-``transformers`` releases regularly break the Gemma-3 vision processor
-keys (`pixel_values` vs `image_features` vs `pixel_values_videos`,
-etc.). If anything fails downstream, the first debugging step is to
-print the installed versions and compare against the pin block below.
+Colab in mid-2026 runs Python 3.12 with numpy ≥ 2.x baked in. Pinning
+to 2024-era versions (transformers 4.50, numpy <2, etc.) causes
+``ModuleNotFoundError: No module named 'numpy.rec'`` from scipy as
+soon as transformers tries to import sklearn — the broken numpy
+downgrade cascades.
+
+So we install **latest stable** for everything and let pip resolve
+against the current environment. The Gemma-3 + LoRA APIs in
+``transformers`` / ``peft`` have been stable across the last several
+minor releases, so this is safe.
+
+If a future run breaks because some library shipped a breaking API
+change, pin THAT specific library, and **always do
+``Runtime → Restart session`` between trying different pin sets**
+so a stale broken import doesn't poison the new attempt.
 """
 
 CODE_DEPS = """\
-# Pinned versions known to work for Gemma-3 multimodal LoRA on A100
-# (Colab Pro+, CUDA 12.x, May 2026). Update with care.
+# As of mid-2026 Colab ships Python 3.12 with numpy >= 2.x baked in,
+# and downgrading numpy (or pinning to a 2024-era transformers
+# release) cascades into scipy/sklearn import failures. So we DO NOT
+# pin numpy here, and we let pip pick the latest stable transformers /
+# peft / accelerate combo — those libraries are stable enough for
+# Gemma-3 multimodal LoRA across the last several minor releases.
+#
+# If a future run breaks because of a transformers API drift, the
+# fix is to pin the breakage cell (e.g. `transformers==4.50.0`)
+# AFTER restarting the Colab runtime so the cached numpy import goes
+# away. ``Runtime -> Restart session`` then re-run.
 %pip install -q --upgrade pip
-%pip install -q \\
-    'transformers==4.50.0' \\
-    'peft==0.13.2' \\
-    'accelerate==1.0.1' \\
-    'bitsandbytes==0.44.1' \\
-    'datasets==3.1.0' \\
-    'trl==0.12.0' \\
-    'safetensors>=0.4.5' \\
-    'sentencepiece>=0.2.0' \\
-    'Pillow>=10.4.0' \\
-    'numpy<2'
+%pip install -q --upgrade \\
+    transformers \\
+    peft \\
+    accelerate \\
+    datasets \\
+    trl \\
+    safetensors \\
+    sentencepiece \\
+    Pillow
 
-# Sanity print
-import transformers, peft, accelerate, torch
+# bitsandbytes only needed if you fall back to 4-bit base on a
+# smaller GPU. On A100 + bf16 it's optional; left commented to
+# keep the install fast.
+# %pip install -q --upgrade bitsandbytes
+
+# Sanity print — the only versions that actually matter for what
+# follows. If `transformers` is older than 4.50 the Gemma-3 vision
+# class may be missing; in that case force-pin one version up.
+import transformers, peft, accelerate, torch, numpy
+print('python      :', __import__('sys').version.split()[0])
+print('numpy       :', numpy.__version__)
 print('torch       :', torch.__version__, 'cuda', torch.version.cuda)
 print('transformers:', transformers.__version__)
 print('peft        :', peft.__version__)
