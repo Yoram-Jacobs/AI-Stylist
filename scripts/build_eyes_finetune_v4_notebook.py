@@ -307,28 +307,100 @@ print(f'Kaggle creds in env for user: {os.environ[\"KAGGLE_USERNAME\"]}')
 """
 
 CODE_DF_DOWNLOAD = """\
-# Download + unzip DeepFashion-Multimodal.
-# Kaggle dataset URL: https://www.kaggle.com/datasets/silverstone1903/deep-fashion-multimodal
-import subprocess, pathlib
+# Marqo/deepfashion-multimodal (HF Hub) — replaces the broken Kaggle
+# silverstone1903/deep-fashion-multimodal source. 42,537 rows, single
+# 'data' split. NO bounding boxes — only rich multi-garment captions
+# and a coarse category2 label. We parse the captions into per-garment
+# mentions with whole-frame bboxes. CCP-DatasetNinja still provides
+# the precise bbox supervision; Marqo adds scale + multi-garment-
+# per-image count discipline.
+#
+# This cell populates df_records DIRECTLY, so Section 6 (the on-disk
+# annotation file scanner) is obsolete and should be skipped.
+%pip install -q -U 'datasets>=4.0.0'
 
-if not (DF_DIR / '_done').exists():
-    subprocess.run([
-        'kaggle', 'datasets', 'download',
-        '-d', 'silverstone1903/deep-fashion-multimodal',
-        '-p', str(DF_DIR.parent),
-        '--unzip',
-    ], check=True)
-    # Some Kaggle datasets unpack into a versioned subfolder; flatten if so.
-    nested = [p for p in DF_DIR.parent.iterdir() if p.is_dir() and p.name.startswith('deep')]
-    if nested and not (DF_DIR / 'images').exists():
-        DF_DIR.mkdir(exist_ok=True)
-        for p in nested[0].iterdir():
-            p.rename(DF_DIR / p.name)
-    (DF_DIR / '_done').touch()
+import re, json
+from datasets import load_dataset
 
-print('DeepFashion-Multimodal contents:')
-for p in sorted(DF_DIR.iterdir())[:20]:
-    print('  ', p.name, '(dir)' if p.is_dir() else f'({p.stat().st_size // 1024} KB)')
+# Auth was already done in Section 3 (HF_TOKEN from Colab Secrets).
+ds = load_dataset('Marqo/deepfashion-multimodal', split='data')
+print(f'Marqo/deepfashion-multimodal: {len(ds):,} rows')
+print('schema :', list(ds.features.keys()))
+
+IMG_DIR = DF_DIR / 'images'
+IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Caption parser — extracts per-garment mentions, maps each to a
+# DressApp category. Order matters (Full-body wins over shirt/pants
+# substrings). One item per category per image (deduped).
+GARMENT_PATTERNS = [
+    (r'\\b(dress|gown|romper|jumpsuit|onesie)\\b',                 'dress',     'Full-body'),
+    (r'\\bouter clothing\\b',                                       'outerwear', 'Outerwear'),
+    (r'\\b(jacket|coat|blazer|cardigan|cape|parka|trench)\\b',     None,        'Outerwear'),
+    (r'\\b(t[-\\s]?shirt|tee)\\b',                                  't-shirt',   'Top'),
+    (r'\\btank(?:\\s+(?:top|shirt))?\\b',                           'tank top',  'Top'),
+    (r'\\b(blouse|shirt|sweater|hoodie|sweatshirt|polo|vest|top)\\b', None,      'Top'),
+    (r'\\b(jeans|denim pants)\\b',                                  'jeans',     'Bottom'),
+    (r'\\b(trousers|pants|shorts|leggings|skirt)\\b',               None,        'Bottom'),
+    (r'\\b(hat|cap|beanie)\\b',                                     'hat',       'Accessory'),
+    (r'\\b(sunglasses|glasses)\\b',                                 None,        'Accessory'),
+    (r'\\b(bag|purse|wallet|backpack|handbag)\\b',                  'bag',       'Accessory'),
+    (r'\\bbelt\\b',                                                 'belt',      'Accessory'),
+    (r'\\b(scarf|tie|gloves|necklace|bracelet|ring|watch)\\b',      None,        'Accessory'),
+    (r'accessory on his wrist',                                    'watch',     'Accessory'),
+]
+WHOLE_FRAME = [0, 0, 1000, 1000]   # ymin, xmin, ymax, xmax on 0..1000 grid
+
+DF2_TO_CAT = {
+    'denim':'Bottom', 'pants':'Bottom', 'shorts':'Bottom',
+    'leggings':'Bottom', 'skirts':'Bottom',
+    'tees_tanks':'Top', 'shirts_polos':'Top', 'sweaters':'Top',
+    'blouses_shirts':'Top', 'cardigans':'Top', 'sweatshirts_hoodies':'Top',
+    'jackets':'Outerwear', 'jackets_vests':'Outerwear', 'jackets_coats':'Outerwear',
+    'dresses':'Full-body', 'rompers_jumpsuits':'Full-body', 'jumpsuits_rompers':'Full-body',
+}
+
+def parse_caption(text, category2):
+    text_l = (text or '').lower()
+    items, seen = [], set()
+    for pat, default_label, cat in GARMENT_PATTERNS:
+        m = re.search(pat, text_l)
+        if not m or cat in seen:
+            continue
+        seen.add(cat)
+        items.append({
+            'label': default_label or m.group(0).strip(),
+            'category': cat,
+            'region': {'bbox': WHOLE_FRAME[:]},
+        })
+    if not items:
+        cat = DF2_TO_CAT.get((category2 or '').lower(), 'Top')
+        items.append({
+            'label': category2 or 'garment',
+            'category': cat,
+            'region': {'bbox': WHOLE_FRAME[:]},
+        })
+    return items
+
+
+df_records = []
+for i, row in enumerate(ds):
+    img_path = IMG_DIR / f'{row[\"item_ID\"]}.jpg'
+    if not img_path.exists():
+        row['image'].convert('RGB').save(img_path, 'JPEG', quality=92)
+    items = parse_caption(row['text'], row.get('category2'))
+    target = json.dumps(items, ensure_ascii=False, separators=(',', ':'))
+    df_records.append((str(img_path), target, 'deepfashion'))
+    if i and i % 5000 == 0:
+        print(f'  materialized {i:>6,}/{len(ds):,}  df_records={len(df_records):,}')
+
+(DF_DIR / '_done').touch()
+print(f'\\nfinal df_records: {len(df_records):,}')
+print('sample target :', df_records[0][1][:400])
+
+from collections import Counter
+n_per_img = Counter(len(json.loads(r[1])) for r in df_records)
+print('items-per-image histogram:', dict(sorted(n_per_img.items())))
 """
 
 
@@ -1392,7 +1464,8 @@ CELLS = [
     md(MD_AUTH),   code(CODE_HF_AUTH), code(CODE_KAGGLE_AUTH), code(CODE_DF_DOWNLOAD),
     md(MD_LOAD),   code(CODE_LOAD),
     md(MD_CCP),    code(CODE_CCP_LOADER),
-    md(MD_DF),     code(CODE_DF_INSPECT), code(CODE_DF_LOADER),
+    # Section 6 (DF inspect + on-disk loader) removed -- df_records is now
+    # populated directly by the Marqo loader cell in Section 3.
     md(MD_SPLIT),  code(CODE_SPLIT),
     md(MD_CONV),   code(CODE_PROMPT), code(CODE_BUILD_EXAMPLE),
                    code(CODE_COLLATOR), code(CODE_DATASET_CLASS),
