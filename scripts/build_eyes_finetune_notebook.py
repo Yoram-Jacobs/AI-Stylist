@@ -158,59 +158,64 @@ print('   run dir       :', OUT_RUN_DIR)
 MD_SECTION_DEPS = """\
 ---
 
-## 2. Install dependencies
+## 2. Install dependencies — minimal upgrade
 
-Colab in mid-2026 runs Python 3.12 with numpy ≥ 2.x baked in. Pinning
-to 2024-era versions (transformers 4.50, numpy <2, etc.) causes
-``ModuleNotFoundError: No module named 'numpy.rec'`` from scipy as
-soon as transformers tries to import sklearn — the broken numpy
-downgrade cascades.
+Colab in mid-2026 runs Python 3.12 with a carefully-balanced
+preinstalled stack: numpy 2.x, Pillow, torchvision, scipy, sklearn,
+gradio, etc. all have tight pairwise constraints. **Sweeping
+``--upgrade`` over many packages at once breaks at least one of
+them**:
 
-So we install **latest stable** for everything and let pip resolve
-against the current environment. The Gemma-3 + LoRA APIs in
-``transformers`` / ``peft`` have been stable across the last several
-minor releases, so this is safe.
+| Sweep | Symptom |
+| --- | --- |
+| `pip install --upgrade ... numpy<2 ...` | `scipy → sklearn → transformers` crash: `No module named 'numpy.rec'` |
+| `pip install --upgrade ... Pillow ...` (picks up 12.2.0) | `torchvision → PIL → ImportError: cannot import name '_Ink' from 'PIL._typing'` |
+| `pip install --upgrade datasets trl` | Often fine, but transitively pulls fsspec / multiprocess versions that break Drive mount |
 
-If a future run breaks because some library shipped a breaking API
-change, pin THAT specific library, and **always do
-``Runtime → Restart session`` between trying different pin sets**
-so a stale broken import doesn't poison the new attempt.
+So our policy is: **upgrade only the three libraries that actually
+need newer-than-Colab-default versions (`transformers`, `peft`,
+`accelerate`)**, pin Pillow back to gradio's compatible range to
+undo any accidental sweep, and leave the rest alone.
+
+**If you hit a Pillow / numpy / torchvision import error above this
+cell**, the Python process is already poisoned with broken
+half-imports — see the note inside the code cell for the fix
+(spoiler: `Runtime → Restart session`).
 """
 
 CODE_DEPS = """\
-# As of mid-2026 Colab ships Python 3.12 with numpy >= 2.x baked in,
-# and downgrading numpy (or pinning to a 2024-era transformers
-# release) cascades into scipy/sklearn import failures. So we DO NOT
-# pin numpy here, and we let pip pick the latest stable transformers /
-# peft / accelerate combo — those libraries are stable enough for
-# Gemma-3 multimodal LoRA across the last several minor releases.
+# Minimal-upgrade install. Colab's preinstalled environment is a
+# carefully-balanced set — torchvision, gradio, scipy, sklearn, etc.
+# all have tight Pillow / numpy constraints. ``--upgrade`` against
+# 'everything' sweeps Pillow up to 12.2.0, which ships a BROKEN
+# internal import (``PIL._typing._Ink`` missing) that crashes the
+# torchvision module before transformers can even load.
 #
-# If a future run breaks because of a transformers API drift, the
-# fix is to pin the breakage cell (e.g. `transformers==4.50.0`)
-# AFTER restarting the Colab runtime so the cached numpy import goes
-# away. ``Runtime -> Restart session`` then re-run.
+# So we ONLY upgrade what we actually need (the three HF libraries
+# whose recent releases ship Gemma-3 support + Trainer integration),
+# pin Pillow back to the gradio-compatible range to undo any
+# accidental sweep, and leave everything else at the Colab default.
 %pip install -q --upgrade pip
-%pip install -q --upgrade \\
-    transformers \\
-    peft \\
-    accelerate \\
-    datasets \\
-    trl \\
-    safetensors \\
-    sentencepiece \\
-    Pillow
+%pip install -q --upgrade transformers peft accelerate
+%pip install -q 'Pillow<12.0'
 
-# bitsandbytes only needed if you fall back to 4-bit base on a
-# smaller GPU. On A100 + bf16 it's optional; left commented to
-# keep the install fast.
-# %pip install -q --upgrade bitsandbytes
+# *** IMPORTANT *** ── If you just hit a Pillow / numpy / torchvision
+# import error in this cell or above, the Python process is already
+# poisoned with broken half-imports. The pip install above WILL NOT
+# fix that on its own. You must:
+#
+#   1) Runtime  ->  Restart session   (NOT 'Restart and run all')
+#   2) Re-run cell 1 (mount Drive)
+#   3) Re-run THIS cell again — the sanity print should now succeed.
+#
+# This is a Colab/pip property, not a notebook bug — once an import
+# fails halfway through, the partially-loaded module sticks around
+# in ``sys.modules`` and re-importing returns the broken stub.
 
-# Sanity print — the only versions that actually matter for what
-# follows. If `transformers` is older than 4.50 the Gemma-3 vision
-# class may be missing; in that case force-pin one version up.
-import transformers, peft, accelerate, torch, numpy
+import transformers, peft, accelerate, torch, numpy, PIL
 print('python      :', __import__('sys').version.split()[0])
 print('numpy       :', numpy.__version__)
+print('Pillow      :', PIL.__version__)
 print('torch       :', torch.__version__, 'cuda', torch.version.cuda)
 print('transformers:', transformers.__version__)
 print('peft        :', peft.__version__)
