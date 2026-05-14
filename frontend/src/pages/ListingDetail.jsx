@@ -133,7 +133,7 @@ export default function ListingDetail() {
                     + {fmt(listing.shipping_fee_cents, fm.currency)} shipping
                   </span>
                   <span className="text-[hsl(var(--accent))] text-xs">
-                    · Or meet locally to skip the fee 🌱
+                    {t('pages.listingDetail.or_meet_locally_to_skip')}
                   </span>
                 </div>
               ) : (
@@ -141,7 +141,7 @@ export default function ListingDetail() {
                   className="mt-2 text-xs text-[hsl(var(--accent))]"
                   data-testid="listing-detail-shipping-free"
                 >
-                  🌱 Local pickup preferred — no shipping fee
+                  {t('pages.listingDetail.local_pickup_preferred_no_shipping')}
                 </div>
               )}
 
@@ -154,25 +154,32 @@ export default function ListingDetail() {
               >
                 {listing.size && (
                   <Badge variant="outline" data-testid="listing-detail-size">
-                    {t('market.sizeLabel', { defaultValue: 'Size' })}: {listing.size}
+                    {t('addItem.size')}: {listing.size}
                   </Badge>
                 )}
                 {listing.condition && (
                   <Badge variant="outline" data-testid="listing-detail-condition">
-                    {t('market.conditionLabel', { defaultValue: 'Condition' })}:{' '}
-                    {String(listing.condition).replace('_', ' ')}
+                    {t('addItem.condition')}:{' '}
+                    {t(`taxonomy.condition.${listing.condition}`, {
+                      defaultValue: String(listing.condition).replace('_', ' '),
+                    })}
                   </Badge>
                 )}
                 {listing.category && (
-                  <Badge variant="secondary">{listing.category}</Badge>
+                  <Badge variant="secondary" data-testid="listing-detail-category">
+                    {t(`taxonomy.categories.${listing.category}`, {
+                      defaultValue: listing.category,
+                    })}
+                  </Badge>
                 )}
                 {listing.mode && listing.mode !== 'sell' && (
                   <Badge
-                    className="capitalize"
                     variant="outline"
                     data-testid="listing-detail-mode"
                   >
-                    {listing.mode}
+                    {t(`taxonomy.intent.${listing.mode}`, {
+                      defaultValue: listing.mode,
+                    })}
                   </Badge>
                 )}
               </div>
@@ -312,11 +319,10 @@ export default function ListingDetail() {
                     data-testid="listing-swap-button"
                   >
                     <Repeat className="h-4 w-4 mr-2" />
-                    Propose a swap
+                    {t('pages.listingDetail.propose_a_swap')}
                   </Button>
                   <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
-                    We'll email the lister a secure accept / decline link. No
-                    charges — items ship directly between you.
+                    {t('pages.listingDetail.well_email_the_lister_a')}
                   </div>
                 </>
               ) : listing.mode === 'donate' ? (
@@ -358,8 +364,7 @@ export default function ListingDetail() {
                         testId="listing-donate-button"
                       />
                       <div className="text-[11px] text-muted-foreground text-center mt-2 leading-relaxed">
-                        Donations are free — you're only reimbursing shipping.
-                        Or message the donor to arrange local pickup.
+                        {t('pages.listingDetail.donations_are_free_youre_only')}
                       </div>
                     </div>
                   ) : (
@@ -390,18 +395,17 @@ export default function ListingDetail() {
                         {donateSubmitting ? (
                           <>
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            Sending…
+                            {t('components.swapPickerModal.sending')}
                           </>
                         ) : (
                           <>
                             <HeartHandshake className="h-4 w-4 mr-2" />
-                            Claim this donation
+                            {t('pages.listingDetail.claim_this_donation')}
                           </>
                         )}
                       </Button>
                       <div className="text-[11px] text-muted-foreground text-center leading-relaxed">
-                        This donation is free. Coordinate with the donor to
-                        meet locally or arrange shipping directly.
+                        {t('pages.listingDetail.this_donation_is_free_coordinate')}
                       </div>
                     </>
                   )}

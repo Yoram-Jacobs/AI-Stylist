@@ -114,13 +114,13 @@ function OverviewSection() {
   const r = data.revenue_cents || {};
   const cards = [
     { label: 'Users', value: fmtNum(data.users.total), sub: `+${fmtNum(data.users.new_24h)} new in 24h`, icon: UsersIcon, testid: 'admin-stat-users' },
-    { label: 'Closet items', value: fmtNum(data.closet_items.total), sub: 'across all users', icon: Sparkles, testid: 'admin-stat-closet' },
+    { label: t('pages.admin.closet_items'), value: fmtNum(data.closet_items.total), sub: 'across all users', icon: Sparkles, testid: 'admin-stat-closet' },
     { label: 'Active listings', value: fmtNum(data.listings.active), sub: `${fmtNum(data.listings.total)} total`, icon: ShoppingBag, testid: 'admin-stat-listings' },
     { label: 'Transactions', value: fmtNum(data.transactions.total), sub: `${fmtNum(data.transactions.paid)} paid`, icon: Receipt, testid: 'admin-stat-transactions' },
-    { label: 'Gross volume', value: fmtCents(r.gross), sub: 'lifetime, paid only', icon: Receipt, testid: 'admin-stat-gross' },
-    { label: 'Platform fees', value: fmtCents(r.platform_fee), sub: '7% revenue', icon: Receipt, testid: 'admin-stat-platform-fee' },
-    { label: 'Stylist 24h', value: fmtNum(data.stylist.messages_24h), sub: `${fmtNum(data.stylist.messages_7d)} this week`, icon: Activity, testid: 'admin-stat-stylist' },
-    { label: 'Trend cards live', value: fmtNum(data.trend_scout.count), sub: 'today\u2019s edition', icon: Sparkles, testid: 'admin-stat-trend' },
+    { label: t('pages.admin.gross_volume'), value: fmtCents(r.gross), sub: 'lifetime, paid only', icon: Receipt, testid: 'admin-stat-gross' },
+    { label: t('pages.admin.platform_fees'), value: fmtCents(r.platform_fee), sub: '7% revenue', icon: Receipt, testid: 'admin-stat-platform-fee' },
+    { label: t('pages.admin.stylist_24h'), value: fmtNum(data.stylist.messages_24h), sub: `${fmtNum(data.stylist.messages_7d)} this week`, icon: Activity, testid: 'admin-stat-stylist' },
+    { label: t('pages.admin.trend_cards_live'), value: fmtNum(data.trend_scout.count), sub: 'today\u2019s edition', icon: Sparkles, testid: 'admin-stat-trend' },
   ];
 
   return (
@@ -154,7 +154,7 @@ function ProvidersInline({ summary }) {
     return (
       <Card className="rounded-[calc(var(--radius)+6px)]">
         <CardContent className="p-6 text-sm text-muted-foreground">
-          No provider activity yet. Trigger a stylist call or trend run to populate.
+          {t('pages.admin.no_provider_activity_yet_trigger')}
         </CardContent>
       </Card>
     );
@@ -175,13 +175,13 @@ function ProviderTable({ rows }) {
       <Table data-testid="admin-providers-table">
         <TableHeader>
           <TableRow>
-            <TableHead>Provider</TableHead>
-            <TableHead className="text-right">Calls</TableHead>
-            <TableHead className="text-right">Errors</TableHead>
-            <TableHead className="text-right">Error rate</TableHead>
+            <TableHead>{t('pages.admin.provider')}</TableHead>
+            <TableHead className="text-right">{t('pages.admin.calls')}</TableHead>
+            <TableHead className="text-right">{t('pages.admin.errors')}</TableHead>
+            <TableHead className="text-right">{t('pages.admin.error_rate')}</TableHead>
             <TableHead className="text-right">avg ms</TableHead>
             <TableHead className="text-right">p95 ms</TableHead>
-            <TableHead>Last</TableHead>
+            <TableHead>{t('pages.admin.last')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -227,7 +227,7 @@ function ProvidersSection() {
       setSummary(p?.summary || []);
       setUsage(u);
     } catch (err) {
-      toast.error('Failed to load provider data');
+      toast.error(t('pages.admin.failed_to_load_provider_data'));
     }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,11 +242,11 @@ function ProvidersSection() {
       </div>
       <Card className="rounded-[calc(var(--radius)+6px)] shadow-editorial">
         <CardContent className="p-5">
-          <h3 className="font-display text-xl mb-3">All providers</h3>
+          <h3 className="font-display text-xl mb-3">{t('pages.admin.all_providers')}</h3>
           {summary === null ? (
             <Skeleton className="h-32 w-full" />
           ) : summary.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No calls recorded yet.</p>
+            <p className="text-sm text-muted-foreground">{t('pages.admin.no_calls_recorded_yet')}</p>
           ) : (
             <ProviderTable rows={summary} />
           )}
@@ -260,8 +260,8 @@ function ProvidersSection() {
               <KeyRound className="h-5 w-5" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="caps-label text-muted-foreground">Emergent LLM Key</div>
-              <h3 className="font-display text-xl mt-1">Universal key usage</h3>
+              <div className="caps-label text-muted-foreground">{t('pages.admin.emergent_llm_key')}</div>
+              <h3 className="font-display text-xl mt-1">{t('pages.admin.universal_key_usage')}</h3>
               {usage === null ? (
                 <Skeleton className="h-5 w-64 mt-2" />
               ) : usage.available ? (
@@ -273,7 +273,7 @@ function ProvidersSection() {
                   {usage.reason || 'Live usage not available.'}{' '}
                   {usage.manage_url && (
                     <a className="underline" href={usage.manage_url} target="_blank" rel="noreferrer">
-                      Manage in Emergent profile
+                      {t('pages.admin.manage_in_emergent_profile')}
                     </a>
                   )}
                 </p>
@@ -294,7 +294,7 @@ function TrendScoutSection() {
     try {
       const res = await api.adminTrendScout(30);
       setItems(res.items || []);
-    } catch { toast.error('Failed to load trend reports'); }
+    } catch { toast.error(t('pages.admin.failed_to_load_trend_reports')); }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refresh(); }, []);
@@ -325,7 +325,7 @@ function TrendScoutSection() {
       ) : items.length === 0 ? (
         <Card className="rounded-[calc(var(--radius)+6px)]">
           <CardContent className="p-6 text-sm text-muted-foreground">
-            No trend reports yet. Hit "Force run now" to seed.
+            {t('pages.admin.no_trend_reports_yet_hit')}
           </CardContent>
         </Card>
       ) : (
@@ -360,7 +360,7 @@ function UsersSection() {
       const res = await api.adminUsers({ q: search || undefined, limit: 50 });
       setItems(res.items || []);
       setTotal(res.total || 0);
-    } catch { toast.error('Failed to load users'); }
+    } catch { toast.error(t('pages.admin.failed_to_load_users')); }
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refresh(''); }, []);
@@ -383,7 +383,7 @@ function UsersSection() {
         <div className="relative flex-1 max-w-md">
           <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search by email or display name"
+            placeholder={t('pages.admin.search_by_email_or_display')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && refresh()}
@@ -404,11 +404,11 @@ function UsersSection() {
                 <TableRow>
                   <TableHead>Email</TableHead>
                   <TableHead>Display name</TableHead>
-                  <TableHead>Roles</TableHead>
+                  <TableHead>{t('pages.admin.roles')}</TableHead>
                   <TableHead className="text-right">Closet</TableHead>
                   <TableHead className="text-right">Listings</TableHead>
-                  <TableHead>Calendar</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>{t('pages.admin.calendar')}</TableHead>
+                  <TableHead>{t('pages.admin.created')}</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -416,7 +416,7 @@ function UsersSection() {
                 {items === null ? (
                   <TableRow><TableCell colSpan={8}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 ) : items.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-6">No users match.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-6">{t('pages.admin.no_users_match')}</TableCell></TableRow>
                 ) : items.map((u) => {
                   const isAdmin = (u.roles || []).includes('admin');
                   return (
@@ -472,7 +472,7 @@ function ListingsSection() {
     try {
       const res = await api.adminListings({ status: status || undefined, limit: 100 });
       setItems(res.items || []);
-    } catch { toast.error('Failed to load listings'); }
+    } catch { toast.error(t('pages.admin.failed_to_load_listings')); }
   };
   useEffect(() => { refresh(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -508,12 +508,12 @@ function ListingsSection() {
             <Table data-testid="admin-listings-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Listing</TableHead>
+                  <TableHead>{t('pages.admin.listing')}</TableHead>
                   <TableHead>Seller</TableHead>
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Source tag</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>{t('pages.admin.source_tag')}</TableHead>
+                  <TableHead>{t('pages.admin.created')}</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
@@ -521,7 +521,7 @@ function ListingsSection() {
                 {items === null ? (
                   <TableRow><TableCell colSpan={7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 ) : items.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">No listings.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">{t('pages.admin.no_listings')}</TableCell></TableRow>
                 ) : items.map((l) => (
                   <TableRow key={l.id} data-testid="admin-listings-row">
                     <TableCell className="text-xs font-mono">{(l.id || '').slice(0, 8)}…</TableCell>
@@ -608,8 +608,8 @@ function TransactionsSection() {
         {[
           { label: 'Gross (paid)', value: fmtCents(aggregate.gross), id: 'agg-gross' },
           { label: 'Platform 7%', value: fmtCents(aggregate.platform), id: 'agg-platform' },
-          { label: 'Stripe fees', value: fmtCents(aggregate.stripe), id: 'agg-stripe' },
-          { label: 'Seller net', value: fmtCents(aggregate.net), id: 'agg-net' },
+          { label: t('pages.admin.stripe_fees'), value: fmtCents(aggregate.stripe), id: 'agg-stripe' },
+          { label: t('pages.admin.seller_net'), value: fmtCents(aggregate.net), id: 'agg-net' },
         ].map((c) => (
           <Card key={c.id} className="rounded-[calc(var(--radius)+6px)]" data-testid={`admin-tx-${c.id}`}>
             <CardContent className="p-4">
@@ -625,20 +625,20 @@ function TransactionsSection() {
             <Table data-testid="admin-transactions-table">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tx</TableHead>
+                  <TableHead>{t('pages.admin.tx')}</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Gross</TableHead>
-                  <TableHead className="text-right">Platform</TableHead>
-                  <TableHead className="text-right">Stripe</TableHead>
-                  <TableHead className="text-right">Seller net</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">{t('pages.admin.platform')}</TableHead>
+                  <TableHead className="text-right">{t('pages.admin.stripe')}</TableHead>
+                  <TableHead className="text-right">{t('pages.admin.seller_net')}</TableHead>
+                  <TableHead>{t('pages.admin.created')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items === null ? (
                   <TableRow><TableCell colSpan={7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 ) : items.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">No transactions.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">{t('pages.admin.no_transactions')}</TableCell></TableRow>
                 ) : items.map((t) => {
                   const f = t.financial || {};
                   return (
@@ -668,7 +668,7 @@ function TransactionsSection() {
 function SystemSection() {
   const [data, setData] = useState(null);
   useEffect(() => {
-    api.adminSystem().then(setData).catch(() => toast.error('Failed to load system info'));
+    api.adminSystem().then(setData).catch(() => toast.error(t('pages.admin.failed_to_load_system_info')));
   }, []);
   if (!data) return <Skeleton className="h-40 w-full rounded-[calc(var(--radius)+6px)]" />;
   return (
@@ -715,9 +715,9 @@ function SystemSection() {
             <Activity className="h-4 w-4" /> Trend-Scout
           </h3>
           <div className="text-sm flex flex-wrap gap-x-8 gap-y-2">
-            <div>Enabled: <Badge variant="outline" className="ml-1 text-[11px]">{String(data.trend_scout?.enabled)}</Badge></div>
-            <div>Daily UTC: <span className="font-mono">{data.trend_scout?.schedule_utc}</span></div>
-            <div>Dev bypass: <Badge variant="outline" className="ml-1 text-[11px]">{String(data.dev?.allow_dev_bypass)}</Badge></div>
+            <div>{t('pages.admin.enabled')} <Badge variant="outline" className="ml-1 text-[11px]">{String(data.trend_scout?.enabled)}</Badge></div>
+            <div>{t('pages.admin.daily_utc')} <span className="font-mono">{data.trend_scout?.schedule_utc}</span></div>
+            <div>{t('pages.admin.dev_bypass')} <Badge variant="outline" className="ml-1 text-[11px]">{String(data.dev?.allow_dev_bypass)}</Badge></div>
           </div>
         </CardContent>
       </Card>

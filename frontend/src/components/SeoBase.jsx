@@ -1,42 +1,62 @@
 import { Helmet } from 'react-helmet-async';
 import { useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 const SITE_URL = 'https://ai-stylist-api.preview.emergentagent.com';
 const BRAND = 'DressApp';
-const DEFAULT_DESCRIPTION =
-  'DressApp is your closet, marketplace, and AI stylist in one — manage what you own, sell or swap pieces with a 7% community fee, and get outfit advice grounded in your real schedule and weather.';
 
-const ROUTE_META = {
-  '/login': { title: 'Sign in', description: 'Sign in to DressApp to manage your closet, browse the marketplace, and chat with the AI stylist.' },
-  '/register': { title: 'Create account', description: 'Join DressApp — your closet, community marketplace, and AI stylist in one place.' },
-  '/home': { title: 'Today', description: 'Your daily DressApp brief: trends, closet stats, and the latest stylist reads.' },
-  '/closet': { title: 'My closet', description: 'Every piece you own — with smart segmentation, source tags, and one-tap edit-with-AI.' },
-  '/closet/add': { title: 'Add to closet', description: 'Add a new item to your DressApp closet from a photo or URL.' },
-  '/stylist': { title: 'Stylist', description: 'Multimodal AI stylist that understands your closet, calendar, and the weather.' },
-  '/market': { title: 'Marketplace', description: 'Buy, sell, swap, or donate community pieces with full fee transparency.' },
-  '/market/create': { title: 'List a piece', description: 'List one of your closet items on the DressApp marketplace.' },
-  '/transactions': { title: 'Transactions', description: 'Your DressApp purchases and sales, with full 7% fee transparency.' },
-  '/admin': { title: 'Admin dashboard', description: 'DressApp operations console for users, marketplace, AI providers, and the Trend-Scout agent.' },
-  '/me': { title: 'Profile & settings', description: 'Manage your DressApp profile, voice, and Google Calendar connection.' },
+// Static path → i18n route key. Dynamic /closet/<id> and /market/<id> paths
+// are handled by the ``startsWith`` checks below. Keys live under
+// ``seo.routes.<key>.{title,description}`` in every locale JSON.
+const ROUTE_KEYS = {
+  '/login':           'login',
+  '/register':        'register',
+  '/home':            'home',
+  '/closet':          'closet',
+  '/closet/add':      'closet_add',
+  '/stylist':         'stylist',
+  '/market':          'market',
+  '/market/create':   'market_create',
+  '/transactions':    'transactions',
+  '/admin':           'admin',
+  '/me':              'me',
 };
 
-function metaFor(pathname) {
-  if (ROUTE_META[pathname]) return ROUTE_META[pathname];
-  // Dynamic routes
-  if (pathname.startsWith('/closet/')) return { title: 'Closet item', description: 'A piece in your DressApp closet.' };
-  if (pathname.startsWith('/market/')) return { title: 'Marketplace listing', description: 'A piece for sale on DressApp.' };
-  return { title: BRAND, description: DEFAULT_DESCRIPTION };
+function routeKeyFor(pathname) {
+  if (ROUTE_KEYS[pathname]) return ROUTE_KEYS[pathname];
+  if (pathname.startsWith('/closet/')) return 'closet_item';
+  if (pathname.startsWith('/market/')) return 'market_listing';
+  return null;
 }
 
 /** Per-route Helmet that updates <title>, description, OG, Twitter, canonical. */
 export const SeoBase = () => {
   const { pathname } = useLocation();
-  const { title, description } = metaFor(pathname);
+  const { t, i18n } = useTranslation();
+  const key = routeKeyFor(pathname);
+
+  // Resolve title + description from the active locale; fall back to
+  // brand + global default-description when no route key applies (e.g.
+  // unknown internal route).
+  const title = key
+    ? t(`seo.routes.${key}.title`, { defaultValue: BRAND })
+    : t('seo.defaultTitle', { defaultValue: BRAND });
+  const description = key
+    ? t(`seo.routes.${key}.description`, {
+        defaultValue: t('seo.defaultDescription'),
+      })
+    : t('seo.defaultDescription');
+
   const fullTitle = pathname === '/home' ? `${BRAND} — ${title}` : `${title} | ${BRAND}`;
   const canonical = `${SITE_URL}${pathname}`;
+  // ``i18n.language`` looks like ``en`` / ``en-US`` / ``zh-CN`` —
+  // strip any region suffix to hand the browser a valid two-letter
+  // BCP-47 tag for the `<html lang>` attribute.
+  const lang = (i18n.language || 'en').split('-')[0].toLowerCase();
+
   return (
     <Helmet defaultTitle={BRAND} prioritizeSeoTags>
-      <html lang="en" />
+      <html lang={lang} />
       <title>{fullTitle}</title>
       <meta name="description" content={description} />
       <meta name="theme-color" content="#1F6F6B" />
@@ -54,7 +74,14 @@ export const SeoBase = () => {
       <meta name="twitter:description" content={description} />
       <meta name="twitter:image" content={`${SITE_URL}/og-cover.png`} />
       {/* Robots: keep admin pages out of indexes */}
-      <meta name="robots" content={pathname.startsWith('/admin') || pathname.startsWith('/me') ? 'noindex,nofollow' : 'index,follow'} />
+      <meta
+        name="robots"
+        content={
+          pathname.startsWith('/admin') || pathname.startsWith('/me')
+            ? 'noindex,nofollow'
+            : 'index,follow'
+        }
+      />
     </Helmet>
   );
 };

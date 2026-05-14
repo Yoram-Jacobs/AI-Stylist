@@ -250,6 +250,22 @@ export function ProfileDetailsCard() {
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
 
+  // Baseline snapshot used to determine if the form is "dirty". We seed
+  // it to `initial` on mount, and re-baseline it after every successful
+  // save so the Save button drops back to its disabled state. JSON
+  // stringification gives us a deep-equality check without pulling in
+  // lodash; the form is plain JSON data with stable key order from the
+  // `initial` useMemo above, so the round-trip is deterministic.
+  const baselineRef = useRef(JSON.stringify(initial));
+  // If `initial` recomputes (e.g. user object changed externally), keep
+  // the baseline in step so external updates aren't treated as dirt.
+  const lastSeenInitialRef = useRef(initial);
+  if (lastSeenInitialRef.current !== initial) {
+    lastSeenInitialRef.current = initial;
+    baselineRef.current = JSON.stringify(initial);
+  }
+  const isDirty = JSON.stringify(form) !== baselineRef.current;
+
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const setNested = (parent, k, v) =>
     setForm((f) => ({ ...f, [parent]: { ...f[parent], [k]: v } }));
@@ -297,6 +313,10 @@ export function ProfileDetailsCard() {
       };
       const updated = await api.patchMe(payload);
       updateUserLocal?.(updated);
+      // Re-baseline so the Save button correctly disables itself after
+      // a successful save — even if the user stays on this page (the
+      // nav('/home') below is a UX choice, not a guarantee).
+      baselineRef.current = JSON.stringify(form);
       toast.success(t('profile.savedProfile'));
       // Per UX spec: after saving Settings/Profile details, take the
       // user back to Home. The auth context has already been updated
@@ -877,7 +897,7 @@ export function ProfileDetailsCard() {
                       <Field label={t('profile.professional.businessWebsite')}>
                         <Input
                           type="url"
-                          placeholder="https://"
+                          placeholder={t('components.profileDetailsCard.https')}
                           value={form.professional.business.website}
                           onChange={(e) =>
                             setField('professional', {
@@ -948,7 +968,7 @@ export function ProfileDetailsCard() {
                     onChange={(e) =>
                       setField('paypal_receiver_email', e.target.value)
                     }
-                    placeholder="name@example.com"
+                    placeholder={t('components.profileDetailsCard.nameexamplecom')}
                     className="rounded-xl"
                     data-testid="profile-paypal-email"
                   />
@@ -961,7 +981,7 @@ export function ProfileDetailsCard() {
         <div className="flex justify-end">
           <Button
             onClick={save}
-            disabled={busy}
+            disabled={busy || !isDirty}
             className="rounded-xl"
             data-testid="profile-details-save-btn"
           >

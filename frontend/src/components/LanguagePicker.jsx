@@ -41,18 +41,39 @@ export const LanguagePicker = ({
 
   const change = async (code) => {
     if (!code || code === current) return;
-    // 1) Switch UI language synchronously so feedback is instant.
-    try { await i18n.changeLanguage(code); } catch { /* ignore */ }
-    // 2) Persist locally for the next page load (works for guests too).
-    try { localStorage.setItem('dressapp.lang', code); } catch { /* ignore */ }
-    // 3) Mirror to the user's profile if signed in. We fire-and-forget
-    //    here — the picker is meant to feel like a quick toggle, not a
-    //    "save profile" action. Errors are silent.
-    if (user) {
+    const target = SUPPORTED_LANGUAGES.find((l) => l.code === code);
+    const nativeName = target?.nativeName || code;
+    // 0) Announce to the global overlay so the user gets a visible
+    //    "Switching to …" floater for the ~20 s wait. The overlay closes
+    //    itself on the matching `…-done` event, or after 30 s as a safety
+    //    net if anything below throws.
+    try {
+      window.dispatchEvent(
+        new CustomEvent('dressapp:lang-switch-start', {
+          detail: { code, nativeName },
+        }),
+      );
+    } catch { /* ignore */ }
+    try {
+      // 1) Switch UI language synchronously so feedback is instant.
+      try { await i18n.changeLanguage(code); } catch { /* ignore */ }
+      // 2) Persist locally for the next page load (works for guests too).
+      try { localStorage.setItem('dressapp.lang', code); } catch { /* ignore */ }
+      // 3) Mirror to the user's profile if signed in. We fire-and-forget
+      //    here — the picker is meant to feel like a quick toggle, not a
+      //    "save profile" action. Errors are silent.
+      if (user) {
+        try {
+          const updated = await api.patchMe({ preferred_language: code });
+          updateUserLocal(updated);
+        } catch { /* ignore — we'll just resync next session */ }
+      }
+    } finally {
       try {
-        const updated = await api.patchMe({ preferred_language: code });
-        updateUserLocal(updated);
-      } catch { /* ignore — we'll just resync next session */ }
+        window.dispatchEvent(
+          new CustomEvent('dressapp:lang-switch-done', { detail: { code } }),
+        );
+      } catch { /* ignore */ }
     }
   };
 

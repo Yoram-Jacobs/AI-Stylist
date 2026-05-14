@@ -323,7 +323,7 @@ export default function CreateListing() {
                     Shipping fee (optional)
                   </Label>
                   <span className="text-[11px] text-[hsl(var(--accent))]">
-                    🌱 Prefer local pickup
+                    {t('pages.createListing.prefer_local_pickup')}
                   </span>
                 </div>
                 <Input
@@ -347,10 +347,7 @@ export default function CreateListing() {
                   data-testid="listing-shipping-input"
                 />
                 <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
-                  Leave at <strong>0</strong> to encourage neighbours to meet
-                  you — zero packaging, zero emissions, plus you might make a
-                  friend with great style. Add a fee only if shipping is
-                  unavoidable.
+                  {t('pages.createListing.leave_at')} <strong>0</strong> {t('pages.createListing.to_encourage_neighbours_to_meet')}
                 </p>
               </div>
               <Button type="submit" disabled={busy || !form.title} className="w-full rounded-xl" data-testid="listing-publish-button">

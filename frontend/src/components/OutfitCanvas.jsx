@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
+import { useTranslation } from 'react-i18next';
 const SLOT_LABELS = {
   top: 'Top',
   bottom: 'Bottom',
@@ -52,6 +53,8 @@ function formatPrice(cents, currency) {
 }
 
 function CandidateImage({ src, alt, className }) {
+  const { t } = useTranslation();
+
   if (!src) {
     return (
       <div
@@ -68,6 +71,8 @@ function CandidateImage({ src, alt, className }) {
 }
 
 function SlotCard({ slot, candidate, onOpen }) {
+  const { t } = useTranslation();
+
   const label = SLOT_LABELS[slot.role] || slot.role;
   const empty = slot.is_gap || !candidate;
   return (
@@ -110,6 +115,8 @@ function SlotCard({ slot, candidate, onOpen }) {
 }
 
 function RejectedRow({ reject, candidate }) {
+  const { t } = useTranslation();
+
   if (!candidate) return null;
   return (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-card/60 p-2" data-testid="outfit-rejected-row">
@@ -126,6 +133,8 @@ function RejectedRow({ reject, candidate }) {
 }
 
 function MarketplaceCard({ s }) {
+  const { t } = useTranslation();
+
   return (
     <Link
       to={`/marketplace/${s.listing_id}`}
@@ -147,6 +156,8 @@ function MarketplaceCard({ s }) {
 }
 
 function ProfessionalCard({ pro }) {
+  const { t } = useTranslation();
+
   return (
     <div
       className="rounded-xl border border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/5 p-3 flex gap-3"
@@ -169,7 +180,7 @@ function ProfessionalCard({ pro }) {
           to={`/experts/${pro.professional_id}`}
           className="text-xs font-medium text-[hsl(var(--accent))] hover:underline mt-1 inline-block"
         >
-          View profile →
+          {t('components.outfitCanvas.view_profile')}
         </Link>
       </div>
     </div>
@@ -178,6 +189,8 @@ function ProfessionalCard({ pro }) {
 
 /** Compact in-chat preview. Tap to open the full canvas modal. */
 export function OutfitCanvasPreview({ canvas, onExpand }) {
+  const { t } = useTranslation();
+
   const candidatesById = useMemo(() => {
     const map = {};
     (canvas.candidates || []).forEach((c) => { map[c.candidate_id] = c; });
@@ -220,6 +233,8 @@ export function OutfitCanvasPreview({ canvas, onExpand }) {
 
 /** Full canvas — used inside a modal or on /stylist/compose. */
 export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
+  const { t } = useTranslation();
+
   const candidatesById = useMemo(() => {
     const map = {};
     (canvas.candidates || []).forEach((c) => { map[c.candidate_id] = c; });
@@ -244,11 +259,11 @@ export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[hsl(var(--accent))]">
             <Sparkles className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wide">Outfit canvas</span>
+            <span className="text-xs font-semibold uppercase tracking-wide">{t('components.outfitCanvas.outfit_canvas')}</span>
           </div>
           <h2 className="text-lg font-semibold mt-1 leading-snug">{canvas.summary || 'Your outfit'}</h2>
           {canvas.brief && (
-            <p className="text-xs text-muted-foreground mt-1">Brief: <span className="italic">{canvas.brief}</span></p>
+            <p className="text-xs text-muted-foreground mt-1">{t('components.outfitCanvas.brief')} <span className="italic">{canvas.brief}</span></p>
           )}
         </div>
         {onClose && (
@@ -264,7 +279,7 @@ export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
 
       {/* Selected slots */}
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">The look</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{t('components.outfitCanvas.the_look')}</div>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
           {slots.map((slot, i) => (
             <SlotCard
@@ -318,6 +333,8 @@ export function OutfitCanvasFull({ canvas, onClose, embedded = false }) {
 
 /** Convenience wrapper: button + modal, all in one. */
 export function OutfitCanvasMessage({ canvas }) {
+  const { t } = useTranslation();
+
   const [open, setOpen] = useState(false);
   return (
     <>

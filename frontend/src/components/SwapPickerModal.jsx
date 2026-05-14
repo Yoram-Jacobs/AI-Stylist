@@ -29,6 +29,7 @@ import { CheckCircle2, Loader2, ShirtIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 
+import { useTranslation } from 'react-i18next';
 export function SwapPickerModal({
   open,
   onOpenChange,
@@ -36,6 +37,8 @@ export function SwapPickerModal({
   listingTitle,
   onSwapCreated,
 }) {
+  const { t } = useTranslation();
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -54,7 +57,7 @@ export function SwapPickerModal({
         // a visible image + title — filter out unfinished drafts.
         setItems(list.filter((it) => it.title));
       })
-      .catch(() => toast.error('Could not load your closet.'))
+      .catch(() => toast.error(t('components.swapPickerModal.could_not_load_your_closet')))
       .finally(() => setLoading(false));
   }, [open]);
 
@@ -70,7 +73,7 @@ export function SwapPickerModal({
     setSubmitting(true);
     try {
       const tx = await api.proposeSwap(listingId, selected);
-      toast.success('Swap proposal sent. The lister will get an email with accept / decline links.');
+      toast.success(t('components.swapPickerModal.swap_proposal_sent_the_lister'));
       onOpenChange(false);
       onSwapCreated?.(tx);
     } catch (err) {
@@ -88,14 +91,14 @@ export function SwapPickerModal({
       >
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">
-            Offer an item in exchange
+            {t('components.swapPickerModal.offer_an_item_in_exchange')}
           </DialogTitle>
           <DialogDescription>
             Pick one item from your closet to swap for{' '}
             <span className="font-medium text-foreground">
               {listingTitle || 'this listing'}
             </span>
-            . The lister will be emailed to accept or decline.
+            {t('components.swapPickerModal.the_lister_will_be_emailed')}
           </DialogDescription>
         </DialogHeader>
 
@@ -117,7 +120,7 @@ export function SwapPickerModal({
               <ShirtIcon className="h-10 w-10 opacity-40" />
               <div>You don&apos;t have any items to offer yet.</div>
               <div className="text-xs">
-                Add items to your closet first, then try again.
+                {t('components.swapPickerModal.add_items_to_your_closet')}
               </div>
             </div>
           ) : (
@@ -201,7 +204,7 @@ export function SwapPickerModal({
             {submitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Sending…
+                {t('components.swapPickerModal.sending')}
               </>
             ) : (
               'Propose swap'

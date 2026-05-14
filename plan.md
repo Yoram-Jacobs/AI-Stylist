@@ -117,6 +117,57 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 - ✅ ~~Live `_extract_json` in `garment_vision.py` only parses objects.~~ — **DONE**
 - ✅ ~~Output language fix.~~ — **DONE**
 
+### ✅ Phase O.6 — Eyes Single-Pass architecture (SegFormer/rembg removed from hot path) — **SHIPPED BEHIND FLAG + VERIFIED SAFE**
+**Primary objective achieved:** Single-pass Eyes flow is implemented and gated behind feature flag `EYES_ONE_PASS` to ensure **zero behavioral change** when `false`.
+
+**What shipped (behind `EYES_ONE_PASS=false`):**
+- ✅ Backend: `garment_vision.py` schema extended to include `region.bbox` bounding boxes.
+- ✅ Backend: `analyze_outfit_one_pass` implemented; `/closet/analyze` branches on `settings.EYES_ONE_PASS`.
+- ✅ Backend: `closet.py` defers `rembg` to a FastAPI `BackgroundTask` when `from_one_pass=True`.
+- ✅ DB: `ClosetItem.clean_image_status` added (supports polling status: pending → done/failed).
+- ✅ Frontend: `bestImageUrl` fallback resolver implemented (`thumbnail_data_url → reconstructed_image_url → clean_image_url → segmented_image_url → original_image_url`).
+- ✅ Frontend: polling UI for `clean_image_status === 'pending'` with “Polishing photo…” badge.
+- ✅ Frontend: new “Repair photo” CTA wired (Nano Banana reshoot endpoint `/closet/{id}/repair`).
+- ✅ Deleted dead legacy Qwen-Eyes integration code to avoid confusion.
+- ✅ Benchmark tooling: generated `/app/docs/notebooks/Eyes_OnePass_Benchmark.ipynb` + rollout runbook `docs/EYES_ONE_PASS_RUNBOOK.md`.
+
+**Pre-deployment safety checklist (COMPLETE):**
+- ✅ Renamed confusing legacy variables in `frontend/src/pages/ItemDetail.jsx`:
+  - old: `repairing`/`repairProgress`/`onRepair` (actually background removal)
+  - new: `cleaningBackground`/`cleanBackgroundProgress`/`onCleanBackground`
+  - kept separate from Phase O.6 “Repair photo” state: `reshootingPhoto`/`onReshootPhoto`.
+- ✅ Updated `deploy/.env.example` with documented block:
+  - `EYES_ONE_PASS=false` (explicit default) + rollout gating notes.
+- ✅ Automated testing agent run: **100% backend (9/9)** + **100% frontend (8/8)** with `deployment_readiness.ready_for_production=true`.
+  - Only warning: pre-existing React hydration warning in Closet grid (nested `<a>`), unrelated to Phase O.6.
+
+**Remaining gate (user-driven):**
+- ⏳ Run Colab/Jupyter benchmark notebook to confirm bbox IoU accuracy before enabling the flag.
+
+### ✅ Phase L — Localization Wave 3 — Manual UI wiring patches — **SHIPPED**
+Closed the last 4 known gaps where translated strings already existed in every locale JSON but the React code was still rendering raw English. Documented originally in `/app/docs/code_fixes_needed.md`.
+
+- ✅ **ListingDetail.jsx (1a–1d)** — Listing chips now wire through existing taxonomy keys:
+  - `category` → `taxonomy.categories.<value>`
+  - `mode` (donate/swap) → `taxonomy.intent.<value>`
+  - `condition` → `addItem.condition` label + `taxonomy.condition.<value>` value
+  - `size` → `addItem.size` label (replacing the non-existent `market.sizeLabel` key)
+- ✅ **Home.jsx (2a–2b)** — Trend-Scout chip + fallback cards:
+  - Added `trends.bucket.<slug>` block to all 12 locales (7 buckets: `ss26-runway`, `street`, `sustainability`, `influencers`, `second_hand`, `recycling`, `news_flash`).
+  - Chip now prefers the localised bucket label and falls back to the raw backend `card.label`.
+  - `FALLBACK_TRENDS` constant moved inside the component as a `useMemo` keyed on `i18n.language`; cards read from `home.fallbackTrends.fb1/2/3.{label,headline,summary}` in every locale.
+- ✅ **SeoBase.jsx (3)** — `META` constant refactored to i18n keys:
+  - Added `seo.routes.<key>.{title,description}` block (13 routes) to all 12 locales.
+  - `<html lang>` now reflects the active `i18n.language` (was hard-coded `"en"`).
+  - Page title + meta description + OG/Twitter tags now switch language alongside the UI; verified via Playwright.
+- ✅ **countries.js (4)** — Adopted `Intl.DisplayNames`:
+  - Added shared `localisedCountryName(code, lang, fallback)` helper.
+  - `CountryCombobox` refactored to consume the helper (no more inline `new Intl.DisplayNames(...)`).
+  - Bundled English `name` field retained as a safety fallback.
+
+**Known pre-existing gap (out of scope here, flagged for later):**
+- `public/index.html` ships a static `<meta name="description">` that react-helmet does not remove.
+
 ### ✅ SPA zero-delay navigation (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
 **Objective achieved:** Main directory pages no longer re-fetch/flash spinners on SPA back/forward navigation.
 
@@ -301,30 +352,57 @@ Delivered previously; unchanged.
 #### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
 Delivered previously; unchanged.
 
-#### Wave O.2 — Migrate AddItem garment_vision “Eyes” + “Brain” to Qwen-VL — **NEXT (P0/P1)**
-**Goal:** Fully migrate the AddItem multimodal pipeline off Gemini.
+#### Wave O.2 — Migrate AddItem garment_vision Eyes + Brain to Qwen-VL — **❌ CANCELLED (May 2026)**
+**Status:** User explicitly cancelled. Qwen-VL was only ever intended as
+a *contingency* if Eyes (Gemma 4 E2B) and Brain (Gemma 4 E4B) failed to
+deliver — never as the primary path. Wave O.3 (self-hosted Gemma 4 E2B
+Eyes) proved Eyes works, so Qwen-Eyes is no longer needed.
 
-**Where to resume**
-- `app/backend/app/services/garment_vision.py`
+**Cleanup performed (commit May 2026):**
+- Deleted ``_hf_chat_json`` + ``_hf_client`` from ``garment_vision.py``.
+- Removed ``QWEN_EYES_MODEL`` from ``app/config.py`` and ``.env.example``.
+- Flipped ``EYES_PROVIDER`` default from ``"qwen"`` to ``"gemma"`` so the
+  config no longer suggests Qwen-Eyes is a valid path.
+- ``eyes_override._VALID_PROVIDERS`` already excluded ``"qwen"``; left
+  as-is for defense-in-depth (any stale persisted override falls
+  through to env-default).
 
-**Implementation outline**
-1. Replace Gemini multimodal calls with DashScope Qwen-VL:
-   - Eyes tier: `qwen-vl-plus`
-   - Brain tier: `qwen-vl-max-latest`
-2. Maintain JSON output contract compatibility with:
-   - segmentation/background-removal pipeline
-   - closet item card parsing
-   - duplicate detection pre-flight pipeline
-3. Add careful validation:
-   - golden image fixtures
-   - prompt hardening + schema validation
-   - regression tests via curl/scripts
-
-**Testing**
-- Backend-only validation + targeted integration tests.
+**Still in place (intentional):** ``QWEN_BRAIN_MODEL=qwen-vl-max-latest``
++ ``STYLIST_PROVIDER=qwen`` for the Stylist chat pipeline (per Wave O.1).
+The Stylist Brain stays on Qwen until Wave O.4 ships a 24/7-hosted Gemma
+4 E4B endpoint.
 
 #### Wave O.3 — Eyes v3 (Gemma 4 E2B) self-host cutover — **SHIPPED & LIVE**
 See Objectives section above.
+
+#### Wave O.6 — Eyes Single-Pass (feature-flagged rollout) — **SHIPPED BEHIND FLAG + READY TO DEPLOY**
+
+##### O.6.1 — Backend foundation (schema + one-pass analysis)
+- ✅ Add `EYES_ONE_PASS` feature flag (default false).
+- ✅ Extend garment schema with `region.bbox`.
+- ✅ Implement `analyze_outfit_one_pass` and branch in `/closet/analyze`.
+
+##### O.6.2 — Deferred rembg + DB status
+- ✅ Defer rembg to `BackgroundTask` when `from_one_pass=True`.
+- ✅ Add `clean_image_status` to DB schema.
+
+##### O.6.3 — Frontend polling + UI affordances
+- ✅ Add polling for `clean_image_status === 'pending'`.
+- ✅ Add “Polishing photo…” badge.
+- ✅ Add “Repair photo” CTA for reconstruction.
+
+##### O.6.4 — Benchmark tooling (Colab)
+- ✅ Add notebook: `/app/docs/notebooks/Eyes_OnePass_Benchmark.ipynb`.
+- ✅ Add runbook: `/app/docs/EYES_ONE_PASS_RUNBOOK.md`.
+
+##### O.6.5 — Pre-deployment safety nets
+- ✅ Rename confusing legacy ItemDetail variables (clean background vs repair photo).
+- ✅ Update `/app/deploy/.env.example` with `EYES_ONE_PASS=false` and rollout notes.
+- ✅ Run testing agent: **100% backend + 100% frontend**, ready for production.
+
+##### O.6.6 — User gate: accuracy benchmark + enablement
+- ⏳ Run the notebook on CCP (or equivalent dataset) and confirm bbox IoU meets your threshold.
+- ⏳ Only then: set production `EYES_ONE_PASS=true` for limited internal rollout.
 
 #### Wave O.4 — Add Gemma4-E4B fine-tune into provider chain — **LATER (blocked on hosting)**
 - Host the fine-tuned Gemma4-E4B on a 24/7 inference platform (HF Inference Endpoints / Modal / Runpod).
@@ -363,36 +441,44 @@ Delivered previously; unchanged.
 ## 3) Next Actions (immediate)
 
 ### P0 — Next wave candidates
-1. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
-2. **Wave O.2:** migrate `garment_vision` Eyes + Brain from Gemini to Qwen-VL (high risk; AddItem pipeline).
+1. **Deploy Phase O.6 safely (flag remains OFF):**
+   - Push to Hetzner production with `EYES_ONE_PASS=false`.
+   - Confirm the legacy hot path remains stable under real traffic.
+2. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
 3. Swap reservation semantics hardening:
    - reserved vs removed policy on accept
    - timeout/release logic for stale accepted swaps
 
 ### P1
-4. Extension quality improvements (post-E2E):
+4. **Run Eyes One-Pass benchmark (user gate):**
+   - Execute `/app/docs/notebooks/Eyes_OnePass_Benchmark.ipynb` in Colab/Jupyter.
+   - Validate bbox IoU accuracy on CCP.
+   - If passing, do a limited internal rollout by setting `EYES_ONE_PASS=true`.
+5. Phase O.6 soak plan:
+   - 2-week production soak with metrics/logging.
+   - Only after soak: plan Phase O.6 Phase 5 cleanup (retire SegFormer/rembg hot path).
+6. Extension quality improvements (post-E2E):
    - add optional “Select chart area” interaction if needed for very custom charts
    - adapter selector tuning for store DOM changes
    - tighten origin allow-lists for production (extension id allow-list + externally_connectable)
-5. Transactions page quality-of-life:
+7. Transactions page quality-of-life:
    - search by listing title
    - per-kind empty states and summaries
 
 ### P2
-6. Object storage migration (Mongo base64 bloat → R2/S3).
-7. ✅ ~~Wave O.3: add fine-tuned Gemma4-E4B once 24/7 hosting is ready.~~ — **SHIPPED** as self-hosted Gemma 4 E2B in `dressapp-eyes` container.
-8. Chrome Web Store publishing (deferred until Phase X.6 manual E2E passes).
-9. **Eyes v3 post-cutover cleanup:**
+8. Object storage migration (Mongo base64 bloat → R2/S3).
+9. Eyes v3 post-cutover cleanup:
    - ⏳ rotate exposed secrets (`EYES_HF_TOKEN`, `EYES_API_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`)
-   - ✅ ~~remove dead `eyes_local_gemma4.py` + dormant `EYES_GEMMA_BACKEND=local` branch from `garment_vision.py`~~ — **DONE** (also stripped admin diagnostics block; backend restarted clean)
    - ⏳ delete deprecated GGUFs from VPS volume after 24 h stable traffic
    - (optional) add a short `deploy/README.md` note: service name is `eyes`, container is `dressapp-eyes`, and both `EYES_MODEL_FILE` + `EYES_MMPROJ_FILE` must be plumbed
 10. Profile "Save changes" button always-active fix (`ProfileDetailsCard.jsx`) — track form dirtiness against loaded snapshot.
 
 ### P3
 11. Refactor `AddItem.jsx` into modules.
-12. ✅ ~~Live `_extract_json` is object-only.~~ — **DONE** Extended to handle arrays; `_coerce_single_garment()` collapses to first item for single-dict contract.
-13. (orphan) `_hf_chat_json` in `garment_vision.py` is defined but never called — safe to delete in a future cleanup pass.
+12. Refactor Experts → Profession dropdown (`ExpertsDirectory.jsx`) to use a backend taxonomy enum.
+13. Remove deprecated `/api/v1/closet/preflight` backend endpoint.
+14. Reconcile sizing for 'smartass' size charts.
+15. Deploy DressApp Assistant to mobile devices via Capacitor.
 
 ---
 
@@ -434,11 +520,23 @@ Delivered previously; unchanged.
   - `/api/v1/stylist` uses Qwen-VL-Max-Latest by default.
   - Gemini remains available as fallback.
   - Provider selection controlled by env vars.
-- ⏳ Wave O.2:
-  - AddItem pipeline (`garment_vision`) produces the same closet item cards using Qwen.
+- ❌ Wave O.2: CANCELLED (Qwen-Eyes was never the intended primary; Wave O.3 proved Eyes works on Gemma 4 E2B). See the Wave O.2 section above for the cleanup that was performed.
 - ✅ Wave O.3:
   - Self-hosted Gemma 4 E2B (custom LoRA, mixed-precision GGUF) live in `dressapp-eyes` container on Hetzner VPS.
   - 18-field JSON schema validated in Colab; live container boot + healthcheck green.
+
+### Phase O.6 — Eyes Single-Pass
+- ✅ Feature-flag safety:
+  - With `EYES_ONE_PASS=false`, the legacy multi-pass hot path behaves identically (no regressions).
+  - Automated tests confirm legacy analyze + save flows remain intact.
+- ✅ UI clarity:
+  - Clean-background (rembg) flow is no longer mislabeled as “repair” in code.
+  - “Repair photo” CTA is a distinct flow mapped to reconstruction.
+- ⏳ Accuracy gate:
+  - Bbox IoU benchmark run on CCP (or similar) meets threshold.
+- ⏳ Rollout:
+  - After passing accuracy gate, enable `EYES_ONE_PASS=true` for limited rollout.
+  - After 2-week soak, safely retire SegFormer + synchronous rembg from hot path.
 
 ### Phase X — Chrome Extension (Shopping Assistant)
 - ✅ Build artifacts exist and backend endpoint verified by tests.

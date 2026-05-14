@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
@@ -39,8 +39,7 @@ from app.services.auth import get_current_user
 from app.services.fees import compute_fees
 from app.services.garment_vision import garment_vision_service
 from app.services.fashion_clip import fashion_clip_service
-from app.services.hf_image_service import hf_image_service
-from app.services.hf_segmentation import hf_segmentation_service
+from app.services.gemini_image_service import gemini_image_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
@@ -131,6 +130,14 @@ class CreateItemIn(BaseModel):
     # flagged as already in their closet. Closet card renders a red ⭐
     # and the Stylist Brain skips it during outfit composition.
     is_duplicate: bool = False
+    # Phase O.6 — when True, this item was created from a single-pass
+    # ``/analyze`` response (``EYES_ONE_PASS=true``) so the photo is
+    # already bbox-cropped to a single garment. Triggers the
+    # backgrounded rembg matte instead of the synchronous SegFormer
+    # cutout — saves ~10-17s of hot-path time at /save. Legacy clients
+    # omit this field and the synchronous SegFormer path runs as
+    # before.
+    from_one_pass: bool = False
 
 
 class UpdateItemIn(BaseModel):
@@ -180,9 +187,81 @@ class UpdateItemIn(BaseModel):
     clear_reconstruction: bool = False
 
 
+async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
+    """Phase O.6 — Background rembg matte runner.
+
+    Fired by :func:`create_item` for items that arrived through the
+    single-pass ``/analyze`` pipeline (``from_one_pass=True``). Runs
+    rembg here in the BackgroundTask so it doesn't block the HTTP
+    response that triggered it, and writes the alpha-channelled PNG
+    back to the item as a data URL under ``clean_image_url`` once it
+    finishes. The user's next ``GET /closet/{id}`` sees
+    ``clean_image_status="ready"`` and the populated URL — the
+    closet thumbnail then swaps from the JPEG bbox-crop to the clean
+    cutout in place.
+
+    Failure is intentionally soft: rembg occasionally returns ``None``
+    on tricky inputs (very dark photos, JPEG noise). In that case we
+    set ``clean_image_status="failed"`` so the UI can stop polling
+    without surfacing an error to the user.
+    """
+    from app.services import background_matting
+
+    db = get_db()
+    try:
+        result = await background_matting.matte_crop(raw_bytes)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Background rembg matte FAILED for item %s: %s", item_id, exc,
+        )
+        await db.closet_items.update_one(
+            {"id": item_id},
+            {"$set": {
+                "clean_image_status": "failed",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return
+
+    if not result:
+        logger.info(
+            "Background rembg matte returned None for item %s "
+            "(clean cutout skipped)",
+            item_id,
+        )
+        await db.closet_items.update_one(
+            {"id": item_id},
+            {"$set": {
+                "clean_image_status": "failed",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return
+
+    data_url = (
+        "data:image/png;base64,"
+        + base64.b64encode(result).decode("ascii")
+    )
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {"$set": {
+            "clean_image_url": data_url,
+            "clean_image_status": "ready",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    logger.info(
+        "Background rembg matte READY for item %s (%d bytes png)",
+        item_id, len(result),
+    )
+
+
+
 @router.post("", status_code=201)
 async def create_item(
-    payload: CreateItemIn, user: dict = Depends(get_current_user)
+    payload: CreateItemIn,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     db = get_db()
     raw_bytes: bytes | None = None
@@ -271,17 +350,30 @@ async def create_item(
         )
 
     # Best-effort segmentation (non-blocking for POC latency): try once, soft-fail.
-    if raw_bytes and hf_segmentation_service is not None:
-        try:
-            seg = await hf_segmentation_service.segment_garment(raw_bytes)
-            if seg.get("image_b64"):
-                doc["segmented_image_url"] = (
-                    f"data:{seg.get('mime_type', 'image/png')};base64,"
-                    f"{seg['image_b64']}"
-                )
-                doc["segmentation_model"] = seg.get("model_used")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Segmentation skipped for item %s: %s", item.id, exc)
+    # Phase O.6 — when the item came from the single-pass /analyze path,
+    # the photo is already bbox-cropped to a single garment. Skip the
+    # synchronous SegFormer call (~2-4s on the hot path) and instead
+    # queue rembg as a fire-and-forget BackgroundTask that populates
+    # ``clean_image_url`` a few seconds later. Legacy clients (no
+    # ``from_one_pass`` flag) keep the existing synchronous SegFormer
+    # path bit-for-bit.
+    if payload.from_one_pass and raw_bytes:
+        doc["clean_image_status"] = "pending"
+        # Snapshot what the background task needs: the item id and the
+        # raw bytes. We do NOT capture ``doc`` directly because the
+        # callback may run after the response goes out and the local
+        # dict is mutated downstream.
+        item_id_for_bg = doc["id"]
+        raw_for_bg = raw_bytes
+        background_tasks.add_task(
+            _run_background_matte, item_id_for_bg, raw_for_bg,
+        )
+    elif raw_bytes:
+        # Legacy HF Inference API segmentation fallback was removed in May
+        # 2026 — the in-pod SegFormer path (``clothing_parser``) above and
+        # the deferred rembg matte task cover this case, so a missing
+        # ``segmented_image_url`` here is expected when neither was wired.
+        pass
 
     # Best-effort FashionCLIP embedding: persist a 512-d L2-normalised
     # vector so the closet can later be searched by similarity
@@ -705,15 +797,40 @@ async def analyze_item_image(
     # Multi-item pipeline (default). Degrades gracefully to single.
     user_lang = (user or {}).get("preferred_language") or "en"
     if payload.multi:
-        try:
-            async with _ANALYZE_LOCK:
-                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %r", exc)
-            raise HTTPException(
-                503,
-                "Garment analyzer is temporarily unavailable. Please try again.",
-            ) from exc
+        # Phase O.6 — single-pass branch (gated by EYES_ONE_PASS).
+        # When enabled the pipeline does ONE Eyes call that returns
+        # both attributes and bboxes per garment, skipping SegFormer,
+        # rembg, and reconstruction re-validation on the hot path.
+        # rembg + reconstruction become deferred endpoints (Phase 2).
+        # When disabled (default), the legacy multi-call path runs
+        # bit-for-bit as before.
+        if settings.EYES_ONE_PASS:
+            try:
+                # The legacy ``_ANALYZE_LOCK`` semaphore was a memory-
+                # pressure guard for the SegFormer+rembg+per-crop-LLM
+                # stack. The one-pass path does ONE LLM call and a
+                # PIL crop \u2014 no SegFormer load, no rembg, no
+                # parallel LLM fan-out \u2014 so the lock is unnecessary
+                # here and would just serialise unrelated uploads.
+                detections = await garment_vision_service.analyze_outfit_one_pass(
+                    raw, language=user_lang,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("One-pass outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
+        else:
+            try:
+                async with _ANALYZE_LOCK:
+                    detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
@@ -739,6 +856,14 @@ async def analyze_item_image(
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
                     "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
+                    # Phase O.6 fields. Present (and useful) only when
+                    # the request was served by ``analyze_outfit_one_pass``.
+                    # The legacy pipeline omits both keys; absence is
+                    # treated as "no CTA" / "legacy path" by the frontend.
+                    "reconstruction_advised": det.get(
+                        "reconstruction_advised", False,
+                    ),
+                    "one_pass": det.get("one_pass", False),
                 }
             )
         if dropped_unidentifiable:
@@ -2228,10 +2353,11 @@ async def repair_item_image(
     """Rebuild a clean product-grade image for an existing closet item.
 
     Uses the item's stored analysis fields (title, category, color,
-    material, pattern, brand, ...) to drive HF FLUX. An optional
-    ``user_hint`` is woven into the prompt so users who noticed a
-    missing detail (e.g., "three-quarter sleeves") can steer the
-    generation. Falls back cleanly when HF is unavailable.
+    material, pattern, brand, ...) to drive Nano Banana
+    (``gemini-2.5-flash-image``). An optional ``user_hint`` is woven into
+    the prompt so users who noticed a missing detail (e.g., "three-quarter
+    sleeves") can steer the generation. Returns 503 cleanly when Nano
+    Banana is unavailable.
     """
     from app.services.reconstruction import reconstruct
 
@@ -2862,10 +2988,14 @@ async def edit_item_image(
     source_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not source_url:
         raise HTTPException(400, "No source image on this item")
-    if hf_image_service is None:
+    if gemini_image_service is None:
+        # Nano Banana (gemini-2.5-flash-image) requires a direct
+        # GEMINI_API_KEY. The legacy HF FLUX fallback was retired in May
+        # 2026, so when the direct key is absent we surface a clean 503
+        # instead of silently degrading.
         raise HTTPException(503, "Image generation service not configured")
     try:
-        edit = await hf_image_service.edit(
+        edit = await gemini_image_service.edit(
             source_url,
             prompt,
             garment_metadata={
@@ -2878,7 +3008,7 @@ async def edit_item_image(
             },
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("HF image edit failed for item %s: %s", item_id, exc)
+        logger.warning("Nano Banana image edit failed for item %s: %s", item_id, exc)
         raise HTTPException(
             503,
             "Image generation is temporarily unavailable. Please try again shortly.",

@@ -93,38 +93,21 @@ class Settings:
     DEFAULT_STYLIST_MODEL: str = os.environ.get("DEFAULT_STYLIST_MODEL", "gemini-2.5-pro")
     DEFAULT_STYLIST_PROVIDER: str = os.environ.get("DEFAULT_STYLIST_PROVIDER", "gemini")
 
-    # --- Phase O: Stylist brain provider swap (Gemini → Qwen → Gemma) ---
+    # --- Phase O: Stylist brain provider ---
     # STYLIST_PROVIDER picks the primary LLM that backs /api/v1/stylist.
-    # One of: ``qwen`` (Alibaba DashScope), ``gemini`` (legacy), or
-    # ``gemma`` (future fine-tuned on-prem path; not yet wired).
-    # When the primary call errors out, ``STYLIST_FALLBACK`` (if set)
-    # points at a secondary provider that ``stylist_brain`` will try
-    # next. ``""`` / ``"none"`` disables fallback entirely.
+    # As of May 2026 the only supported value is ``gemini`` — earlier
+    # waves shipped a Qwen-VL (DashScope) path that was retired (see
+    # docs/WASTED_WORK_REPORT.md §2.2). The ``gemma`` slot is reserved
+    # for a future fine-tuned Gemma4-E4B on-prem path; it isn't wired
+    # yet. ``STYLIST_FALLBACK`` (if set) points at a secondary provider
+    # that ``stylist_brain`` will try when the primary errors. ``""`` /
+    # ``"none"`` disables fallback entirely.
     STYLIST_PROVIDER: str = (
-        os.environ.get("STYLIST_PROVIDER", "qwen").lower().strip()
+        os.environ.get("STYLIST_PROVIDER", "gemini").lower().strip()
     )
     STYLIST_FALLBACK: str = (
         os.environ.get("STYLIST_FALLBACK", "gemini").lower().strip()
     )
-
-    # DashScope (Alibaba) credentials + model IDs. Keys starting with
-    # ``sk-`` from the Singapore / International console target the
-    # ``dashscope-intl.aliyuncs.com`` endpoint below.
-    DASHSCOPE_API_KEY: str | None = os.environ.get("DASHSCOPE_API_KEY") or None
-    DASHSCOPE_BASE_URL: str = os.environ.get(
-        "DASHSCOPE_BASE_URL",
-        "https://dashscope-intl.aliyuncs.com/api/v1",
-    ).rstrip("/")
-    # Brain tier — multimodal reasoning used for stylist chat + cutout
-    # classification. Defaults to Qwen-VL-Max-Latest, which handled the
-    # pre-flight JSON smoke test cleanly.
-    QWEN_BRAIN_MODEL: str = os.environ.get(
-        "QWEN_BRAIN_MODEL", "qwen-vl-max-latest"
-    )
-    # Eyes tier — cheaper/faster multimodal model used for the
-    # on-the-wire detection pass. Not wired in Wave O.1 (stylist chat
-    # only); kept here so O.2 can pick it up without a config churn.
-    QWEN_EYES_MODEL: str = os.environ.get("QWEN_EYES_MODEL", "qwen-vl-plus")
 
     @property
     def gemini_chat_key(self) -> str | None:
@@ -150,10 +133,11 @@ class Settings:
     )
 
     # --- Gemini Nano Banana (image generation + edit) -----------------
-    # Native Google model id. Requires ``GEMINI_API_KEY`` — the Emergent
-    # proxy does not route image-generation traffic, which is why we
-    # historically fell back to HF FLUX. In production with a direct
-    # key, this is preferred over FLUX (sharper, no category drift).
+    # Native Google model id used by the reconstruction pipeline and the
+    # /closet/{id}/edit-image endpoint. Requires a direct ``GEMINI_API_KEY``
+    # because the Emergent proxy does not route image-generation traffic.
+    # The earlier HF FLUX fallback was retired in May 2026 — when the
+    # direct key is absent we now return 503 instead of degrading.
     GEMINI_IMAGE_MODEL: str = os.environ.get(
         "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"
     )
@@ -192,13 +176,20 @@ class Settings:
     )
 
     # --- Phase O Wave O.3 — Self-hosted Gemma-4 E2B Eyes ---
-    # Feature flag for the new self-hosted Gemma-4 E2B GGUF served from a
-    # HF Space. Values: ``"qwen"`` (default — keep existing pipeline) or
-    # ``"gemma"`` (route through the HF Space's ``/predict``). Gemma
-    # failures auto-fall-back to the existing path so a flaky Space
-    # never breaks AddItem.
+    # Toggle for the AddItem garment-vision pipeline. Values:
+    #   "gemma"  — route through the self-hosted dressapp-eyes
+    #              container (production Hetzner deploy reaches it at
+    #              ``http://eyes:7860``). Failures auto-fall-back to
+    #              Gemini so a flaky container never breaks AddItem.
+    #   "gemini" — direct Gemini 2.5 Flash via Emergent/Google chat
+    #              key. Used in the Emergent preview pod, which has
+    #              no Eyes container on its network.
+    # The legacy ``"qwen"`` value is **deprecated** — the Qwen Eyes
+    # path was never enabled in production and was physically removed
+    # in May 2026. Any persisted ``"qwen"`` override falls through to
+    # the env default via ``eyes_override._VALID_PROVIDERS``.
     EYES_PROVIDER: str = (
-        os.environ.get("EYES_PROVIDER", "qwen") or "qwen"
+        os.environ.get("EYES_PROVIDER", "gemma") or "gemma"
     ).strip().lower()
     # Public HF Space URL exposing FastAPI ``/predict``.
     EYES_GEMMA_SPACE_URL: str | None = (
@@ -225,10 +216,29 @@ class Settings:
     )
     # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
     # vision is added). Match the timeout to the worst case and let the
-    # circuit breaker fall back to Qwen instead of stalling AddItem.
+    # circuit breaker fall back to Gemini instead of stalling AddItem.
     EYES_GEMMA_TIMEOUT_S: float = float(
         os.environ.get("EYES_GEMMA_TIMEOUT_S", "60") or "60"
     )
+    # --- Phase O.6 — Single-pass Eyes (proposal) ---
+    # Master kill-switch for the experimental "one call per upload"
+    # AddItem pipeline. When ``True`` the closet ``/analyze`` route
+    # calls ``GarmentVisionService.analyze_outfit_one_pass()`` which
+    # asks Eyes (Gemma-4 E2B) for both garment attributes AND a
+    # ``region.bbox`` in a single JSON response — skipping SegFormer,
+    # the rembg pre-condition matte, and the reconstruction
+    # re-validation Eyes call. rembg + reconstruction become deferred
+    # / user-initiated jobs run from later endpoints.
+    #
+    # **Default ``False`` everywhere** — preview, prod, ``.env.example`` —
+    # until the benchmark gate at ``docs/EYES_ONE_PASS_PROPOSAL.md``
+    # (IoU >= 0.7 on 90% of CCP photos) is verified. Set to ``True``
+    # via env in any environment that wants the new path:
+    #     EYES_ONE_PASS=true
+    # See ``/app/docs/EYES_ONE_PASS_PROPOSAL.md`` for the migration plan.
+    EYES_ONE_PASS: bool = (
+        os.environ.get("EYES_ONE_PASS", "false") or "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
     # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
@@ -251,12 +261,6 @@ class Settings:
     )
     # Set to "0" to disable the local load (useful for tests / CI).
     FASHION_CLIP_ENABLED: bool = os.environ.get("FASHION_CLIP_ENABLED", "1") == "1"
-
-    # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
-    HF_IMAGE_MODEL: str = os.environ.get(
-        "HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"
-    )
-    HF_IMAGE_PROVIDER: str = os.environ.get("HF_IMAGE_PROVIDER", "hf-inference")
 
     # --- Groq (Whisper-v3) ---
     GROQ_API_KEY: str | None = os.environ.get("GROQ_API_KEY")

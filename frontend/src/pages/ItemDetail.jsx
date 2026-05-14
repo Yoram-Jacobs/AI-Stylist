@@ -55,6 +55,7 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { DppPanel } from '@/components/DppPanel';
 import { api } from '@/lib/api';
+import { bestImageUrl } from '@/lib/itemImage';
 import {
   labelForCategory,
   labelForDressCode,
@@ -420,14 +421,40 @@ export default function ItemDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Repair state
-  const [repairHint, setRepairHint] = useState('');
-  const [repairing, setRepairing] = useState(false);
+  // ────────────────────────────────────────────────────────────────
+  // Legacy "Clean background" (rembg matte) state.
+  //
+  // Naming note (May 2026): historically this whole block was named
+  // ``repair*`` because rembg matting was originally pitched as a
+  // "photo repair" operation. With Phase O.6 we ALSO added a real
+  // Nano-Banana reconstruction CTA labelled "Repair photo" in the
+  // UI — so the two flows ended up sharing the word "repair" in
+  // their code but mapping to entirely different APIs:
+  //
+  //   • THIS block + ``onCleanBackground`` -> ``/closet/{id}/clean-background``
+  //     i.e. rembg, alpha-channel cutout. Confusingly still labelled
+  //     "Restore photo" in some legacy localisation strings; the
+  //     ``itemDetail.repair.*`` i18n keys belong to RECONSTRUCTION
+  //     and are NOT used by this block.
+  //
+  //   • ``onReshootPhoto`` below -> ``/closet/{id}/repair``
+  //     i.e. Nano Banana studio reshoot. This is the user-facing
+  //     "Repair photo" CTA from Phase O.6.
+  //
+  // Rename completed in May 2026 to make the two flows unambiguous
+  // when reading the file. Don't merge them \u2014 they're different
+  // backend endpoints with different cost/latency profiles.
+  const [cleanBackgroundHint, setCleanBackgroundHint] = useState('');
+  const [cleaningBackground, setCleaningBackground] = useState(false);
+  // Phase O.6 — "Repair photo" CTA state. SEPARATE from
+  // ``cleaningBackground`` above which gates the rembg flow.
+  // This one gates the Nano-Banana studio reshoot.
+  const [reshootingPhoto, setReshootingPhoto] = useState(false);
   // Clean-background progress %, simulated client-side because the
   // backend matting endpoint is a single non-streaming POST. We tick
   // the bar towards ~92% over ~14s (roughly the p95 duration of the
   // SegFormer + rembg pipeline) and snap to 100% on completion.
-  const [repairProgress, setRepairProgress] = useState(0);
+  const [cleanBackgroundProgress, setCleanBackgroundProgress] = useState(0);
   const [dictating, setDictating] = useState(false);
   const [dictationInterim, setDictationInterim] = useState('');
   const [showingOriginal, setShowingOriginal] = useState(false);
@@ -587,17 +614,17 @@ export default function ItemDetail() {
     }
   };
 
-  /* ------------------- Clean background (Phase V Fix 2) ------------------- */
-  const onRepair = async () => {
-    if (repairing) return;
-    setRepairing(true);
+  /* ------------------- Clean background (rembg matte; Phase V Fix 2) ----- */
+  const onCleanBackground = async () => {
+    if (cleaningBackground) return;
+    setCleaningBackground(true);
     setShowingOriginal(false);
-    setRepairProgress(4);
+    setCleanBackgroundProgress(4);
     // Asymptotic ramp: each tick closes ~7% of the remaining gap to 92%,
     // so the bar feels lively at the start and decelerates as it nears
     // the cap — never reaching 100% until the API actually returns.
     const ticker = setInterval(() => {
-      setRepairProgress((p) => {
+      setCleanBackgroundProgress((p) => {
         if (p >= 92) return 92;
         const next = p + Math.max(1, Math.round((92 - p) * 0.07));
         return Math.min(92, next);
@@ -609,7 +636,7 @@ export default function ItemDetail() {
         toast.success(t('itemDetail.cleanBackground.success'));
         setItem(res.item);
         setForm(toFormState(res.item, user));
-        setRepairHint('');
+        setCleanBackgroundHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));
       }
@@ -617,15 +644,53 @@ export default function ItemDetail() {
       toast.error(err?.response?.data?.detail || t('itemDetail.cleanBackground.error'));
     } finally {
       clearInterval(ticker);
-      setRepairProgress(100);
+      setCleanBackgroundProgress(100);
       // Brief delay so the user sees the bar hit 100% before it
       // collapses — feels more "complete" than yanking it instantly.
       setTimeout(() => {
-        setRepairing(false);
-        setRepairProgress(0);
+        setCleaningBackground(false);
+        setCleanBackgroundProgress(0);
       }, 350);
     }
   };
+  // Phase O.6 — opt-in "Repair photo" action. Triggers Nano-Banana
+  // studio reshoot via the existing /closet/{id}/repair endpoint.
+  // Only surfaced when the one-pass /analyze result advised it
+  // (``item.reconstruction_advised === true``) AND the item doesn't
+  // already carry a reconstructed image. The repair runs synchronously
+  // — Nano Banana is fast (~5-10s) so we keep it as a foreground call
+  // with a spinner rather than another background-poll round-trip.
+  const onReshootPhoto = async () => {
+    if (reshootingPhoto) return;
+    setReshootingPhoto(true);
+    try {
+      const res = await api.repairItemImage(id);
+      if (res?.applied && res.item) {
+        setItem(res.item);
+        setForm(toFormState(res.item, user));
+        toast.success(
+          t('item.reshootSuccess', { defaultValue: 'Photo restored.' }),
+        );
+      } else {
+        toast.warning(
+          res?.detail
+            || t('item.reshootRejected', {
+                 defaultValue: 'Restored photo was rejected — keeping the original.',
+               }),
+        );
+      }
+    } catch (err) {
+      toast.error(
+        err?.response?.data?.detail
+          || t('item.reshootError', {
+               defaultValue: 'Could not restore photo. Please try again.',
+             }),
+      );
+    } finally {
+      setReshootingPhoto(false);
+    }
+  };
+
   const startDictation = () => {
     if (!sttSupported.current) return;
     const rec = createRecognition({
@@ -633,7 +698,7 @@ export default function ItemDetail() {
       onInterim: (txt) => setDictationInterim(txt || ''),
       onFinal: (finalText) => {
         if (finalText) {
-          setRepairHint((prev) =>
+          setCleanBackgroundHint((prev) =>
             prev ? `${prev} ${finalText}`.slice(0, 240) : finalText.slice(0, 240),
           );
         }
@@ -695,10 +760,22 @@ export default function ItemDetail() {
   }
 
   const hasReconstruction = !!item.reconstructed_image_url;
-  const preferredImage =
-    (!showingOriginal && item.reconstructed_image_url) ||
-    item.segmented_image_url ||
-    item.original_image_url;
+  // Phase O.6 — image priority centralised via ``lib/itemImage``. When
+  // the user has toggled "Show original" we deliberately skip the
+  // reconstruction layer so they can compare the un-restyled photo;
+  // every other field (clean rembg PNG / segmented JPG / raw original)
+  // still falls back in the canonical order.
+  const preferredImage = bestImageUrl(item, {
+    skipReconstruction: showingOriginal,
+  });
+  // "Repair photo" CTA visibility:
+  //   • the one-pass /analyze response asked us to advise it
+  //     (``reconstruction_advised: true``), AND
+  //   • the user hasn't already accepted a reshoot for this item.
+  // Hidden once the item carries a ``reconstructed_image_url`` so we
+  // don't repeatedly nudge for a feature the user already used.
+  const showRepairPhotoCta =
+    !!item.reconstruction_advised && !item.reconstructed_image_url;
   const reconstructionReasons =
     (item.reconstruction_metadata && item.reconstruction_metadata.reasons) || [];
 
@@ -811,10 +888,31 @@ export default function ItemDetail() {
             </AspectRatio>
             {/* Replace photo controls (subtle pill row, shown only when an image exists).
                 Mirrors the no-image state's two-button choice so the user always has
-                "Take photo" (camera) and "Choose from library" (gallery) at hand. */}
+                "Take photo" (camera) and "Choose from library" (gallery) at hand.
+                Phase O.6 adds an optional third pill: "Repair photo" — only shown
+                when the one-pass /analyze response advised it (and the user hasn't
+                already accepted a reshoot for this item). */}
             {preferredImage && (
-              <div className="absolute bottom-3 end-3 inline-flex items-center gap-1.5">
-                <button
+              <div className="absolute bottom-3 end-3 inline-flex items-center gap-1.5 flex-wrap justify-end">
+                {showRepairPhotoCta && (
+                  <button
+                    type="button"
+                    onClick={onReshootPhoto}
+                    disabled={reshootingPhoto || uploadingPhoto}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[hsl(var(--accent))]/95 text-[hsl(var(--accent-foreground))] backdrop-blur border border-[hsl(var(--accent))]/70 px-2.5 py-1 text-[11px] font-medium hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-60 shadow-editorial"
+                    data-testid="item-detail-repair-photo-btn"
+                    aria-label={t('item.repairPhoto', { defaultValue: 'Repair photo' })}
+                  >
+                    {reshootingPhoto ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {reshootingPhoto
+                      ? t('item.repairingPhoto', { defaultValue: 'Restoring…' })
+                      : t('item.repairPhoto', { defaultValue: 'Repair photo' })}
+                  </button>
+                )}                <button
                   type="button"
                   onClick={openCameraCapture}
                   disabled={uploadingPhoto}
@@ -932,21 +1030,21 @@ export default function ItemDetail() {
                 {t('itemDetail.cleanBackground.subtitle')}
               </p>
               <Button
-                onClick={onRepair}
-                disabled={repairing}
+                onClick={onCleanBackground}
+                disabled={cleaningBackground}
                 className="w-full rounded-xl"
                 data-testid="item-clean-bg-button"
               >
-                {repairing ? (
+                {cleaningBackground ? (
                   <><Loader2 className="h-4 w-4 me-2 animate-spin" />{t('itemDetail.cleanBackground.running')}</>
                 ) : (
                   <><Wand2 className="h-4 w-4 me-2" />{hasReconstruction ? t('itemDetail.cleanBackground.retryCta') : t('itemDetail.cleanBackground.cta')}</>
                 )}
               </Button>
-              {repairing && (
+              {cleaningBackground && (
                 <div className="space-y-2" data-testid="item-clean-bg-progress">
                   <Progress
-                    value={repairProgress}
+                    value={cleanBackgroundProgress}
                     className="h-2 w-full"
                     data-testid="item-clean-bg-progress-bar"
                   />
@@ -958,7 +1056,7 @@ export default function ItemDetail() {
                       className="text-[11px] tabular-nums text-muted-foreground"
                       data-testid="item-clean-bg-progress-pct"
                     >
-                      {Math.round(repairProgress)}%
+                      {Math.round(cleanBackgroundProgress)}%
                     </span>
                   </div>
                 </div>

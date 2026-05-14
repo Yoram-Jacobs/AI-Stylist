@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "Enregistrer",
-    "saveAll": "Tout enregistrer",
+    "saveAll": "Enregistrer",
     "saveChanges": "Enregistrer les modifications",
     "cancel": "Annuler",
     "delete": "Supprimer",
@@ -43,7 +43,7 @@
     "to": "à",
     "all": "Tout",
     "apply": "Appliquer",
-    "clear": "Effacer",
+    "clear": "Effacer la recherche",
     "more": "Plus",
     "today": "Aujourd’hui",
     "error": "Erreur",
@@ -98,7 +98,28 @@
     "platformFeeSub": "après frais de paiement",
     "trendScout": "Trend-Scout",
     "dailyEdit": "Édition du jour",
-    "dailyEditOn": "Édition du jour · {{date}}"
+    "dailyEditOn": "Édition du jour · {{date}}",
+    "trendsRefreshFailed": "Impossible de rafraîchir les tendances",
+    "trendReadSource": "Lire la source",
+    "refreshTrends": "Rafraîchir les tendances",
+    "trendsRefreshed": "Tendances rafraîchies",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "Podium PE26",
+        "headline": "Le jaune beurre règne à Milan",
+        "summary": "Les blazers ajustés en jaune beurre tendre remplacent l'ivoire comme neutre du printemps."
+      },
+      "fb2": {
+        "label": "Street",
+        "headline": "Le virage quiet luxury",
+        "summary": "Logos dehors, matières dedans : pulls cachemire sur cols roulés mérinos dominent les week-ends."
+      },
+      "fb3": {
+        "label": "Durabilité",
+        "headline": "Échangez avant d'acheter",
+        "summary": "Les salles d'échange communautaires ont triplé d'une année sur l'autre ; les enseignes écoutent enfin."
+      }
+    }
   },
   "closet": {
     "title": "Votre dressing",
@@ -130,7 +151,9 @@
     "saveFailuresTitle_one": "1 photo n'a pas pu être enregistrée",
     "saveFailuresTitle_other": "{{count}} photos n'ont pas pu être enregistrées",
     "saveFailuresBody": "Ces articles n'ont pas pu être enregistrés dans votre garde-robe. Veuillez réessayer de les télécharger.",
-    "saveFailuresUnnamed": "Article sans titre"
+    "saveFailuresUnnamed": "Article sans titre",
+    "completeListingCta": "Compléter l'annonce",
+    "clearSearch": "Effacer la recherche"
   },
   "addItem": {
     "title": "Ajouter des pièces",
@@ -141,7 +164,7 @@
     "scanning": "Analyse en cours",
     "scanningSub": "Lecture des tissus, couleurs et coupes…",
     "analyzeFailed": "Échec de l’analyse",
-    "saveAll": "Tout enregistrer",
+    "saveAll": "Enregistrer",
     "savedAll": "Toutes les pièces enregistrées",
     "saveFailed": "Échec de l’enregistrement",
     "itemName": "Nom",
@@ -524,7 +547,13 @@
     "netShort": "net {{amount}}",
     "sourceFilter": "Source",
     "categoryFilter": "Catégorie",
-    "noImage": "Aucune image"
+    "noImage": "Aucune image",
+    "removeFailed": "Impossible de retirer l'annonce",
+    "syncFailed": "Impossible de synchroniser le marché",
+    "removeListing": "Retirer du marché",
+    "listingRemoved": "Retiré du marché",
+    "removing": "Retrait…",
+    "syncing": "Synchronisation…"
   },
   "createListing": {
     "title": "Créer une annonce",
@@ -727,7 +756,8 @@
       "description": "Lorsqu'une de vos annonces est vendue, nous enverrons votre montant net à cette adresse e-mail PayPal via PayPal Payouts. Laissez vide pour désactiver les paiements automatiques.",
       "paypalEmail": "E-mail PayPal pour les paiements",
       "linked": "Associé"
-    }
+    },
+    "occupation": "Profession"
   },
   "admin": {
     "title": "Admin",
@@ -769,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — Votre dressing sublimé",
-    "defaultDescription": "Cataloguez votre garde-robe, consultez une styliste IA et échangez ou vendez pour seulement 7%."
+    "defaultDescription": "Cataloguez votre garde-robe, consultez une styliste IA et échangez ou vendez pour seulement 7%.",
+    "routes": {
+      "login": {
+        "title": "Se connecter",
+        "description": "Connectez-vous à DressApp pour gérer votre dressing, parcourir la marketplace et discuter avec la styliste IA."
+      },
+      "register": {
+        "title": "Créer un compte",
+        "description": "Rejoignez DressApp — votre dressing, marketplace communautaire et styliste IA en un seul endroit."
+      },
+      "home": {
+        "title": "Aujourd'hui",
+        "description": "Votre brief quotidien DressApp : tendances, statistiques du dressing et dernières lectures de la styliste."
+      },
+      "closet": {
+        "title": "Mon dressing",
+        "description": "Chaque pièce que vous possédez — avec segmentation intelligente, tags de source et édition par IA en un clic."
+      },
+      "closet_add": {
+        "title": "Ajouter au dressing",
+        "description": "Ajoutez une nouvelle pièce à votre dressing DressApp à partir d'une photo ou d'une URL."
+      },
+      "stylist": {
+        "title": "Styliste",
+        "description": "Styliste IA multimodale qui comprend votre dressing, votre calendrier et la météo."
+      },
+      "market": {
+        "title": "Marketplace",
+        "description": "Achetez, vendez, échangez ou donnez des pièces avec une transparence totale sur les frais."
+      },
+      "market_create": {
+        "title": "Mettre en vente",
+        "description": "Mettez en vente une pièce de votre dressing sur la marketplace DressApp."
+      },
+      "transactions": {
+        "title": "Transactions",
+        "description": "Vos achats et ventes DressApp, avec une transparence totale sur les frais de 7%."
+      },
+      "admin": {
+        "title": "Tableau de bord admin",
+        "description": "Console d'exploitation DressApp : utilisateurs, marketplace, fournisseurs IA et agent Trend-Scout."
+      },
+      "me": {
+        "title": "Profil et paramètres",
+        "description": "Gérez votre profil DressApp, votre voix et la connexion Google Agenda."
+      },
+      "closet_item": {
+        "title": "Pièce du dressing",
+        "description": "Une pièce dans votre dressing DressApp."
+      },
+      "market_listing": {
+        "title": "Annonce marketplace",
+        "description": "Une pièce en vente sur DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -981,7 +1065,10 @@
   },
   "language": {
     "change": "Changer de langue",
-    "label": "Langue"
+    "label": "Langue",
+    "switching": "Changement de langue…",
+    "switchingTo": "Passage à {{language}}…",
+    "switchingHint": "Cela prend généralement quelques secondes."
   },
   "experts": {
     "title": "Consultez un professionnel",
@@ -1128,5 +1215,201 @@
       "repairInstructions": "Réparation",
       "certifications": "Certifications"
     }
+  },
+  "components": {
+    "swapPickerModal": {
+      "the_lister_will_be_emailed": ". Le vendeur recevra un e-mail pour accepter ou refuser.",
+      "add_items_to_your_closet": "Ajoutez d'abord des articles à votre dressing, puis réessayez.",
+      "could_not_load_your_closet": "Impossible de charger votre dressing.",
+      "offer_an_item_in_exchange": "Proposer un article en échange",
+      "sending": "Envoi…",
+      "swap_proposal_sent_the_lister": "Proposition d'échange envoyée. Le vendeur recevra un e-mail avec des liens d'acceptation / refus."
+    },
+    "seoBase": {
+      "a_piece_for_sale_on": "Une pièce en vente sur DressApp.",
+      "a_piece_in_your_dressapp": "Une pièce dans votre dressing DressApp.",
+      "add_a_new_item_to": "Ajoutez un nouvel article à votre dressing DressApp depuis une photo ou une URL.",
+      "admin_dashboard": "Tableau de bord admin",
+      "buy_sell_swap_or_donate": "Achetez, vendez, échangez ou donnez des pièces de la communauté avec une transparence totale sur les frais.",
+      "closet_item": "Article du dressing",
+      "dressapp_operations_console_for_users": "Console DressApp pour les utilisateurs, le marché, les fournisseurs AI et l'agent Trend-Scout.",
+      "every_piece_you_own_with": "Chaque pièce que vous possédez — avec segmentation intelligente, tags et édition AI en un clic.",
+      "join_dressapp_your_closet_community": "Rejoignez DressApp — votre dressing, votre marché et votre styliste AI au même endroit.",
+      "list_a_piece": "Mettre une pièce en vente",
+      "list_one_of_your_closet": "Mettez en vente un article de votre dressing sur le marché DressApp.",
+      "manage_your_dressapp_profile_voice": "Gérez votre profil DressApp, votre voix et votre connexion Google Calendar.",
+      "marketplace_listing": "Annonce du marché",
+      "multimodal_ai_stylist_that_understands": "Styliste AI multimodal qui comprend votre dressing, votre calendrier et la météo.",
+      "my_closet": "Mon dressing",
+      "sign_in_to_dressapp_to": "Connectez-vous à DressApp pour gérer votre dressing, parcourir le marché et discuter avec le styliste AI.",
+      "your_dressapp_purchases_and_sales": "Vos achats et ventes DressApp, avec une transparence totale sur les frais de 7 %.",
+      "your_daily_dressapp_brief_trends": "Votre brief quotidien DressApp : tendances, stats et dernières actus mode."
+    },
+    "developerPanel": {
+      "active": "Actif :",
+      "clear_override": "Effacer l'exception",
+      "developer_internal": "Développeur / Interne",
+      "eyes_vision_provider": "Fournisseur de vision Eyes",
+      "gemini": "Gemini",
+      "gemma": "Gemma",
+      "last_analyze_call": "Dernier appel d'analyse",
+      "override_set_by": "Exception définie par",
+      "refresh_status": "Actualiser le statut",
+      "routes_the_closet_analyzer_between": "Dirige l'analyseur entre Google Gemini 2.5 Flash et le point de terminaison Gemma-4 E2B. L'exception est stockée dans le Mongo de ce pod. Si Gemma est injoignable, Gemini prend le relais.",
+      "toggle_eyes_provider": "Basculer le fournisseur Eyes"
+    },
+    "outfitCanvas": {
+      "brief": "Brief :",
+      "outfit_canvas": "Canevas de tenue",
+      "the_look": "Le look",
+      "view_profile": "Voir le profil ←"
+    },
+    "profileDetailsCard": {
+      "eg_marketing_manager_student_barista": "ex. responsable marketing, étudiant·e, barista",
+      "https": "https://",
+      "nameexamplecom": "nom@exemple.com"
+    }
+  },
+  "pages": {
+    "transactionLanding": {
+      "accepted": "Accepté",
+      "browse_marketplace": "Parcourir le marché",
+      "declined": "Refusé",
+      "link_expired_or_already_used": "Lien expiré ou déjà utilisé",
+      "my_transactions": "Mes transactions",
+      "pending": "En attente",
+      "transaction_status": "Statut de la transaction"
+    },
+    "admin": {
+      "all_providers": "Tous les fournisseurs",
+      "calendar": "Calendrier",
+      "calls": "Appels",
+      "closet_items": "Articles du dressing",
+      "created": "Créé",
+      "daily_utc": "Quotidien UTC :",
+      "dev_bypass": "Contournement dév :",
+      "emergent_llm_key": "Clé LLM émergente",
+      "enabled": "Activé :",
+      "error_rate": "Taux d'erreur",
+      "errors": "Erreurs",
+      "failed_to_load_listings": "Échec du chargement des annonces",
+      "failed_to_load_provider_data": "Échec du chargement des données fournisseur",
+      "failed_to_load_system_info": "Échec du chargement des infos système",
+      "failed_to_load_trend_reports": "Échec du chargement des rapports de tendances",
+      "failed_to_load_users": "Échec du chargement des utilisateurs",
+      "gross_volume": "Volume brut",
+      "last": "Dernier",
+      "listing": "Annonce",
+      "manage_in_emergent_profile": "Gérer dans le profil Emergent",
+      "no_calls_recorded_yet": "Aucun appel enregistré pour le moment.",
+      "no_listings": "Aucune annonce.",
+      "no_provider_activity_yet_trigger": "Aucune activité fournisseur. Lancez un appel styliste ou une analyse de tendances.",
+      "no_transactions": "Aucune transaction.",
+      "no_trend_reports_yet_hit": "Aucun rapport de tendances. Cliquez sur « Forcer l'exécution ».",
+      "no_users_match": "Aucun utilisateur correspondant.",
+      "platform": "Plateforme",
+      "platform_fees": "Frais de plateforme",
+      "provider": "Fournisseur",
+      "roles": "Rôles",
+      "search_by_email_or_display": "Recherche par e-mail ou nom d'affichage",
+      "seller_net": "Net vendeur",
+      "source_tag": "Tag de source",
+      "stripe": "Stripe",
+      "stripe_fees": "Frais Stripe",
+      "stylist_24h": "Styliste 24h",
+      "trend_cards_live": "Cartes de tendances en direct",
+      "tx": "Tx",
+      "universal_key_usage": "Utilisation de la clé universelle"
+    },
+    "closet": {
+      "back_to_full_closet": "Retour au dressing complet",
+      "could_not_delete_the_selected": "Impossible de supprimer les articles sélectionnés",
+      "flat_lay_empty_state": "État vide à plat",
+      "no_meaningful_matches_found_u2014": "Aucun résultat trouvé — essayez d'autres mots.",
+      "selection_actions": "Actions de sélection",
+      "showing": "Affichage de",
+      "indexed_items": "articles indexés."
+    },
+    "home": {
+      "butter_yellow_rules_milan": "Le jaune beurre règne sur Milan",
+      "logos_out_fabric_in_cashmere": "Exit les logos, place aux matières : les cols ronds en cachemire dominent le week-end.",
+      "ss26_runway": "Défilé PE26",
+      "sustainability": "Écoresponsabilité",
+      "swap_before_you_shop": "Échangez avant d'acheter",
+      "tailored_blazers_in_soft_butteryellow": "Les blazers ajustés jaune beurre remplacent l'ivoire comme neutre du printemps.",
+      "the_quietluxe_swap": "L'échange quiet-luxe"
+    },
+    "transactions": {
+      "buying": "Achats",
+      "confirm_receipt": "Confirmer la réception",
+      "donation": "Don",
+      "donations": "Dons",
+      "explore_the_marketplace": "Explorer le marché",
+      "filter_by_status": "Filtrer par statut",
+      "item_item": "Article ↔ Article",
+      "no_donations_yet": "Aucun don pour le moment",
+      "no_swaps_yet": "Aucun échange pour le moment",
+      "no_transactions_yet": "Aucune transaction pour le moment",
+      "purchase": "Achat",
+      "receipt_confirmed_thanks_for_closing": "Réception confirmée. Merci d'avoir finalisé l'opération !",
+      "selling": "Ventes",
+      "swaps": "Échanges"
+    },
+    "listingDetail": {
+      "claim_this_donation": "Réclamer ce don",
+      "donations_are_free_youre_only": "Les dons sont gratuits — vous ne remboursez que les frais d'expédition. Ou contactez le donateur pour un retrait sur place.",
+      "propose_a_swap": "Proposer un échange",
+      "this_donation_is_free_coordinate": "Ce don est gratuit. Voyez avec le donateur pour une remise en main propre ou l'expédition.",
+      "well_email_the_lister_a": "Nous enverrons au vendeur un lien sécurisé. Aucun frais — les articles sont expédiés directement entre vous.",
+      "or_meet_locally_to_skip": "· Ou RDV sur place pour éviter les frais 🌱",
+      "local_pickup_preferred_no_shipping": "🌱 Retrait sur place privilégié — pas de frais d'expédition"
+    },
+    "extensionConnect": {
+      "connecting_to_dressapp_extension": "Connexion à l'extension DressApp…",
+      "connection_failed": "Échec de la connexion",
+      "dressapp_chrome_extension": "Extension Chrome DressApp",
+      "go_to_home": "Aller à l'accueil",
+      "redirecting_to_sign_in": "Redirection vers la connexion…",
+      "sharing_your_signin_with_the": "Partage de votre connexion avec l'extension. Cette fenêtre se fermera automatiquement.",
+      "the_extension_id": "L'identifiant de l'extension",
+      "the_extension_is_signed_in": "L'extension est connectée en tant que",
+      "untrusted_extension": "Extension non fiable",
+      "you_can_close_this_tab": "Vous pouvez fermer cet onglet et retourner sur le site marchand."
+    },
+    "login": {
+      "editorial_street_style": "Street style éditorial"
+    },
+    "expertsDirectory": {
+      "il_us_fr": "IL, US, FR…"
+    },
+    "createListing": {
+      "leave_at": "Déposer à",
+      "to_encourage_neighbours_to_meet": "pour encourager les voisins à se rencontrer — zéro emballage, zéro émission, et peut-être un nouvel ami stylé. Ajoutez des frais si l'expédition est inévitable.",
+      "prefer_local_pickup": "🌱 Retrait sur place privilégié"
+    },
+    "marketplace": {
+      "nothing_to_sync_no_closet": "Rien à synchroniser — aucun article n'a d'intention de mise en vente.",
+      "remove_listing": "Retirer l'annonce",
+      "sync_from_closet": "Synchroniser depuis le dressing"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "Podium PE26",
+      "street": "Street",
+      "sustainability": "Durabilité",
+      "influencers": "Influenceurs",
+      "second_hand": "Seconde main",
+      "recycling": "Recyclage",
+      "news_flash": "Flash info"
+    }
+  },
+  "item": {
+    "polishingPhoto": "Retouche en cours…",
+    "repairPhoto": "Restaurer la photo",
+    "repairingPhoto": "Restauration…",
+    "reshootSuccess": "Photo restaurée.",
+    "reshootRejected": "La photo restaurée a été refusée — nous gardons l'originale.",
+    "reshootError": "Impossible de restaurer la photo. Réessayez."
   }
 }

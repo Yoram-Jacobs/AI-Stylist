@@ -20,7 +20,7 @@
   },
   "common": {
     "save": "حفظ",
-    "saveAll": "حفظ الكل",
+    "saveAll": "حفظ",
     "saveChanges": "حفظ التغييرات",
     "cancel": "إلغاء",
     "delete": "حذف",
@@ -43,7 +43,7 @@
     "to": "إلى",
     "all": "الكل",
     "apply": "تطبيق",
-    "clear": "مسح",
+    "clear": "مسح البحث",
     "more": "المزيد",
     "today": "اليوم",
     "error": "خطأ",
@@ -98,7 +98,28 @@
     "platformFeeSub": "بعد رسوم المعالجة",
     "trendScout": "كشّاف الموضة",
     "dailyEdit": "الإصدار اليومي",
-    "dailyEditOn": "الإصدار اليومي · {{date}}"
+    "dailyEditOn": "الإصدار اليومي · {{date}}",
+    "trendsRefreshFailed": "تعذر تحديث الاتجاهات",
+    "trendReadSource": "قراءة المصدر",
+    "refreshTrends": "تحديث الاتجاهات",
+    "trendsRefreshed": "تم تحديث الاتجاهات",
+    "fallbackTrends": {
+      "fb1": {
+        "label": "منصة SS26",
+        "headline": "الأصفر الزبدي يحكم ميلانو",
+        "summary": "البليزرات المفصلة باللون الأصفر الزبدي الناعم تحل محل العاجي كلون محايد للربيع."
+      },
+      "fb2": {
+        "label": "الشارع",
+        "headline": "التحول نحو الفخامة الهادئة",
+        "summary": "الشعارات إلى الخلف والأقمشة إلى الأمام: كنزات الكشمير فوق رقبات الميرينو تتصدر عطلات نهاية الأسبوع."
+      },
+      "fb3": {
+        "label": "الاستدامة",
+        "headline": "بادل قبل أن تتسوق",
+        "summary": "غرف التبادل المجتمعية تضاعفت ثلاث مرات سنويًا، وأخيرًا بدأ تجار التجزئة بالإصغاء."
+      }
+    }
   },
   "closet": {
     "title": "خزانتك",
@@ -130,7 +151,9 @@
     "saveFailuresTitle_one": "لم تنجح صورة واحدة",
     "saveFailuresTitle_other": "{{count}} صورة لم تنجح",
     "saveFailuresBody": "لم يتم حفظ هذه القطع في خزانتك. يُرجى محاولة تحميلها مرة أخرى.",
-    "saveFailuresUnnamed": "قطعة بدون عنوان"
+    "saveFailuresUnnamed": "قطعة بدون عنوان",
+    "completeListingCta": "إكمال القائمة",
+    "clearSearch": "مسح البحث"
   },
   "addItem": {
     "title": "إضافة عناصر",
@@ -141,7 +164,7 @@
     "scanning": "يجري الفحص",
     "scanningSub": "يقرأ الأقمشة والألوان والتفاصيل…",
     "analyzeFailed": "فشل التحليل",
-    "saveAll": "حفظ الكل",
+    "saveAll": "حفظ",
     "savedAll": "تم حفظ كل العناصر",
     "saveFailed": "فشل الحفظ",
     "itemName": "الاسم",
@@ -524,7 +547,13 @@
     "netShort": "صافي {{amount}}",
     "sourceFilter": "المصدر",
     "categoryFilter": "الفئة",
-    "noImage": "لا توجد صورة"
+    "noImage": "لا توجد صورة",
+    "removeFailed": "تعذر إزالة القائمة",
+    "syncFailed": "تعذر مزامنة السوق",
+    "removeListing": "إزالة من السوق",
+    "listingRemoved": "تمت الإزالة من السوق",
+    "removing": "جارٍ الإزالة…",
+    "syncing": "جارٍ المزامنة…"
   },
   "createListing": {
     "title": "إنشاء إعلان",
@@ -727,7 +756,8 @@
     "countryPlaceholder": "اختر أو اكتب بلدك…",
     "countrySearch": "بحث عن البلدان…",
     "countryEmpty": "لم يتم العثور على بلد.",
-    "addressNoResults": "لا توجد نتائج."
+    "addressNoResults": "لا توجد نتائج.",
+    "occupation": "المهنة"
   },
   "admin": {
     "title": "الإدارة",
@@ -769,7 +799,61 @@
   },
   "seo": {
     "defaultTitle": "DressApp — خزانتك، بأسلوب راقٍ",
-    "defaultDescription": "افهرس خزانتك، اسأل مصمم الذكاء الاصطناعي، وبادل أو بع برسوم عادلة 7%."
+    "defaultDescription": "افهرس خزانتك، اسأل مصمم الذكاء الاصطناعي، وبادل أو بع برسوم عادلة 7%.",
+    "routes": {
+      "login": {
+        "title": "تسجيل الدخول",
+        "description": "سجّل الدخول إلى DressApp لإدارة خزانتك، وتصفّح السوق، والدردشة مع المصمم الذكي."
+      },
+      "register": {
+        "title": "إنشاء حساب",
+        "description": "انضم إلى DressApp — خزانتك، وسوق المجتمع، والمصمم الذكي في مكان واحد."
+      },
+      "home": {
+        "title": "اليوم",
+        "description": "ملخّصك اليومي في DressApp: الاتجاهات، إحصاءات الخزانة، وآخر مقالات المصمم."
+      },
+      "closet": {
+        "title": "خزانتي",
+        "description": "كل قطعة تملكها — مع تصنيف ذكي، وعلامات للمصدر، وتحرير بالذكاء الاصطناعي بنقرة واحدة."
+      },
+      "closet_add": {
+        "title": "إضافة إلى الخزانة",
+        "description": "أضف قطعة جديدة إلى خزانتك في DressApp من صورة أو رابط."
+      },
+      "stylist": {
+        "title": "المصمم",
+        "description": "مصمم ذكاء اصطناعي متعدد الوسائط يفهم خزانتك وتقويمك والطقس."
+      },
+      "market": {
+        "title": "السوق",
+        "description": "اشترِ أو بِع أو بادل أو تبرّع بقطع المجتمع مع شفافية كاملة في الرسوم."
+      },
+      "market_create": {
+        "title": "إدراج قطعة",
+        "description": "أدرج إحدى قطع خزانتك في سوق DressApp."
+      },
+      "transactions": {
+        "title": "المعاملات",
+        "description": "مشترياتك ومبيعاتك على DressApp بشفافية كاملة لرسوم 7%."
+      },
+      "admin": {
+        "title": "لوحة الإدارة",
+        "description": "وحدة تحكم تشغيلية لـ DressApp: المستخدمون، السوق، مزوّدو الذكاء الاصطناعي، وعميل Trend-Scout."
+      },
+      "me": {
+        "title": "الملف الشخصي والإعدادات",
+        "description": "أدِر ملفك الشخصي في DressApp، والصوت، واتصال تقويم Google."
+      },
+      "closet_item": {
+        "title": "قطعة من الخزانة",
+        "description": "قطعة في خزانتك على DressApp."
+      },
+      "market_listing": {
+        "title": "إعلان في السوق",
+        "description": "قطعة معروضة للبيع على DressApp."
+      }
+    }
   },
   "taxonomy": {
     "categories": {
@@ -1075,7 +1159,10 @@
   },
   "language": {
     "change": "تغيير اللغة",
-    "label": "اللغة"
+    "label": "اللغة",
+    "switching": "جارٍ تغيير اللغة…",
+    "switchingTo": "جارٍ التغيير إلى {{language}}…",
+    "switchingHint": "يستغرق هذا عادةً بضع ثوانٍ."
   },
   "dpp": {
     "nav": {
@@ -1128,5 +1215,201 @@
       "repairInstructions": "الإصلاح",
       "certifications": "الشهادات"
     }
+  },
+  "components": {
+    "swapPickerModal": {
+      "the_lister_will_be_emailed": ". سيتم إرسال بريد إلكتروني إلى صاحب القائمة للموافقة أو الرفض.",
+      "add_items_to_your_closet": "أضف عناصر إلى خزانتك أولاً، ثم حاول مرة أخرى.",
+      "could_not_load_your_closet": "تعذر تحميل خزانتك.",
+      "offer_an_item_in_exchange": "عرض عنصر للمقايضة",
+      "sending": "جارٍ الإرسال…",
+      "swap_proposal_sent_the_lister": "تم إرسال اقتراح المقايضة. سيتلقى صاحب القائمة بريدًا إلكترونيًا يتضمن روابط الموافقة / الرفض."
+    },
+    "seoBase": {
+      "a_piece_for_sale_on": "قطعة للبيع على DressApp.",
+      "a_piece_in_your_dressapp": "قطعة في خزانة DressApp الخاصة بك.",
+      "add_a_new_item_to": "أضف عنصرًا جديدًا إلى خزانة DressApp الخاصة بك من صورة أو رابط.",
+      "admin_dashboard": "لوحة تحكم المسؤول",
+      "buy_sell_swap_or_donate": "بيع، شراء، مقايضة، أو تبرع بقطع المجتمع بشفافية كاملة في الرسوم.",
+      "closet_item": "عنصر الخزانة",
+      "dressapp_operations_console_for_users": "وحدة تحكم عمليات DressApp للمستخدمين والسوق ومزودي AI ووكيل Trend-Scout.",
+      "every_piece_you_own_with": "كل قطعة تملكها — مع تصنيف ذكي، وعلامات المصدر، وتعديل بلمسة واحدة باستخدام AI.",
+      "join_dressapp_your_closet_community": "انضم إلى DressApp — خزانتك وسوق المجتمع ومنسق ملابس AI في مكان واحد.",
+      "list_a_piece": "إدراج قطعة",
+      "list_one_of_your_closet": "أدرج أحد عناصر خزانتك في سوق DressApp.",
+      "manage_your_dressapp_profile_voice": "إدارة ملف DressApp الشخصي، والصوت، والاتصال بـ Google Calendar.",
+      "marketplace_listing": "قائمة السوق",
+      "multimodal_ai_stylist_that_understands": "منسق ملابس AI متعدد الوسائط يفهم خزانتك وتقويمك وحالة الطقس.",
+      "my_closet": "خزانتي",
+      "sign_in_to_dressapp_to": "سجل الدخول إلى DressApp لإدارة خزانتك، وتصفح السوق، والدردشة مع منسق ملابس AI.",
+      "your_dressapp_purchases_and_sales": "مشترياتك ومبيعاتك على DressApp، مع شفافية كاملة لرسوم 7%.",
+      "your_daily_dressapp_brief_trends": "ملخص DressApp اليومي: الاتجاهات، وإحصائيات الخزانة، وآخر قراءات منسق الملابس."
+    },
+    "developerPanel": {
+      "active": "نشط:",
+      "clear_override": "مسح التجاوز",
+      "developer_internal": "مطور / داخلي",
+      "eyes_vision_provider": "مزود رؤية Eyes",
+      "gemini": "Gemini",
+      "gemma": "Gemma",
+      "last_analyze_call": "آخر مكالمة تحليل",
+      "override_set_by": "تم تعيين التجاوز بواسطة",
+      "refresh_status": "تحديث الحالة",
+      "routes_the_closet_analyzer_between": "يوجه محلل الخزانة بين Google Gemini 2.5 Flash ونقطة نهاية Gemma-4 E2B المستضافة ذاتيًا. يتم حفظ التجاوز في Mongo لهذا القسم ويستمر بعد إعادة تشغيل الحاوية. إذا تعذر الوصول إلى Gemma، يتم الرجوع تلقائيًا إلى Gemini.",
+      "toggle_eyes_provider": "تبديل مزود Eyes"
+    },
+    "outfitCanvas": {
+      "brief": "ملخص:",
+      "outfit_canvas": "لوحة الزي",
+      "the_look": "الإطلالة",
+      "view_profile": "عرض الملف الشخصي ←"
+    },
+    "profileDetailsCard": {
+      "eg_marketing_manager_student_barista": "مثال: مدير تسويق، طالب، باريستا",
+      "https": "https://",
+      "nameexamplecom": "name@example.com"
+    }
+  },
+  "pages": {
+    "transactionLanding": {
+      "accepted": "تم القبول",
+      "browse_marketplace": "تصفح السوق",
+      "declined": "تم الرفض",
+      "link_expired_or_already_used": "الرابط منتهي الصلاحية أو تم استخدامه بالفعل",
+      "my_transactions": "معاملاتي",
+      "pending": "قيد الانتظار",
+      "transaction_status": "حالة المعاملة"
+    },
+    "admin": {
+      "all_providers": "جميع المزودين",
+      "calendar": "التقويم",
+      "calls": "المكالمات",
+      "closet_items": "عناصر الخزانة",
+      "created": "تاريخ الإنشاء",
+      "daily_utc": "يوميًا بالتوقيت العالمي:",
+      "dev_bypass": "تجاوز المطور:",
+      "emergent_llm_key": "مفتاح Emergent LLM",
+      "enabled": "مفعّل:",
+      "error_rate": "معدل الخطأ",
+      "errors": "الأخطاء",
+      "failed_to_load_listings": "فشل تحميل القوائم",
+      "failed_to_load_provider_data": "فشل تحميل بيانات المزود",
+      "failed_to_load_system_info": "فشل تحميل معلومات النظام",
+      "failed_to_load_trend_reports": "فشل تحميل تقارير الاتجاهات",
+      "failed_to_load_users": "فشل تحميل المستخدمين",
+      "gross_volume": "إجمالي الحجم",
+      "last": "الأخير",
+      "listing": "قائمة",
+      "manage_in_emergent_profile": "الإدارة في ملف Emergent",
+      "no_calls_recorded_yet": "لم يتم تسجيل أي مكالمات بعد.",
+      "no_listings": "لا توجد قوائم.",
+      "no_provider_activity_yet_trigger": "لا يوجد نشاط للمزود بعد. قم بتشغيل مكالمة منسق ملابس أو فحص اتجاهات.",
+      "no_transactions": "لا توجد معاملات.",
+      "no_trend_reports_yet_hit": "لا توجد تقارير اتجاهات بعد. اضغط على \"فرض التشغيل الآن\" للبدء.",
+      "no_users_match": "لا يوجد مستخدمون متطابقون.",
+      "platform": "المنصة",
+      "platform_fees": "رسوم المنصة",
+      "provider": "المزود",
+      "roles": "الأدوار",
+      "search_by_email_or_display": "البحث بالبريد الإلكتروني أو الاسم المعروض",
+      "seller_net": "صافي البائع",
+      "source_tag": "علامة المصدر",
+      "stripe": "Stripe",
+      "stripe_fees": "رسوم Stripe",
+      "stylist_24h": "منسق ملابس 24 ساعة",
+      "trend_cards_live": "بطاقات الاتجاهات المباشرة",
+      "tx": "المعاملة",
+      "universal_key_usage": "استخدام المفتاح العالمي"
+    },
+    "closet": {
+      "back_to_full_closet": "العودة إلى الخزانة الكاملة",
+      "could_not_delete_the_selected": "تعذر حذف العناصر المختارة",
+      "flat_lay_empty_state": "حالة فارغة لعرض المسطح",
+      "no_meaningful_matches_found_u2014": "لم يتم العثور على تطابقات ذات مغزى — جرب كلمات مختلفة.",
+      "selection_actions": "إجراءات التحديد",
+      "showing": "عرض",
+      "indexed_items": "عناصر مفهرسة."
+    },
+    "home": {
+      "butter_yellow_rules_milan": "الأصفر الزبدي يسيطر على ميلانو",
+      "logos_out_fabric_in_cashmere": "وداعاً للشعارات، وأهلاً بالأقمشة: كنزات الكشمير ذات الرقبة المستديرة تسيطر على عطلات نهاية الأسبوع.",
+      "ss26_runway": "عرض أزياء ربيع وصيف 26",
+      "sustainability": "الاستدامة",
+      "swap_before_you_shop": "قايض قبل أن تتسوق",
+      "tailored_blazers_in_soft_butteryellow": "السترات المفصلة باللون الأصفر الزبدي الناعم تحل محل اللون العاجي كلون ربيعي محايد.",
+      "the_quietluxe_swap": "مقايضة الفخامة الهادئة"
+    },
+    "transactions": {
+      "buying": "شراء",
+      "confirm_receipt": "تأكيد الاستلام",
+      "donation": "تبرع",
+      "donations": "تبرعات",
+      "explore_the_marketplace": "استكشاف السوق",
+      "filter_by_status": "تصفية حسب الحالة",
+      "item_item": "عنصر ↔ عنصر",
+      "no_donations_yet": "لا توجد تبرعات بعد",
+      "no_swaps_yet": "لا توجد مقايضات بعد",
+      "no_transactions_yet": "لا توجد معاملات بعد",
+      "purchase": "شراء",
+      "receipt_confirmed_thanks_for_closing": "تم تأكيد الاستلام. شكراً لإكمال العملية!",
+      "selling": "بيع",
+      "swaps": "المقايضات"
+    },
+    "listingDetail": {
+      "claim_this_donation": "طلب هذا التبرع",
+      "donations_are_free_youre_only": "التبرعات مجانية — أنت تدفع فقط تكاليف الشحن. أو راسل المتبرع لترتيب استلام محلي.",
+      "propose_a_swap": "اقتراح مقايضة",
+      "this_donation_is_free_coordinate": "هذا التبرع مجاني. نسق مع المتبرع للمقابلة محليًا أو لترتيب الشحن مباشرة.",
+      "well_email_the_lister_a": "سنرسل بريدًا إلكترونيًا إلى صاحب القائمة يتضمن رابط قبول / رفض آمن. لا توجد رسوم — يتم شحن العناصر مباشرة بينكما.",
+      "or_meet_locally_to_skip": "· أو قابل محلياً لتجاوز الرسوم 🌱",
+      "local_pickup_preferred_no_shipping": "🌱 يفضل الاستلام المحلي — لا توجد رسوم شحن"
+    },
+    "extensionConnect": {
+      "connecting_to_dressapp_extension": "جارٍ الاتصال بـ DressApp Extension…",
+      "connection_failed": "فشل الاتصال",
+      "dressapp_chrome_extension": "إضافة DressApp لمتصفح Chrome",
+      "go_to_home": "الذهاب للرئيسية",
+      "redirecting_to_sign_in": "جارٍ التحويل إلى تسجيل الدخول…",
+      "sharing_your_signin_with_the": "مشاركة تسجيل دخولك مع الإضافة. ستغلق هذه النافذة تلقائيًا.",
+      "the_extension_id": "معرف الإضافة",
+      "the_extension_is_signed_in": "تم تسجيل دخول الإضافة باسم",
+      "untrusted_extension": "إضافة غير موثوقة",
+      "you_can_close_this_tab": "يمكنك إغلاق هذه التبويب والعودة إلى موقع التسوق."
+    },
+    "login": {
+      "editorial_street_style": "ستريت ستايل تحريري"
+    },
+    "expertsDirectory": {
+      "il_us_fr": "إسرائيل، الولايات المتحدة، فرنسا…"
+    },
+    "createListing": {
+      "leave_at": "اتركه في",
+      "to_encourage_neighbours_to_meet": "لتشجيع الجيران على مقابلتك — صفر تغليف، صفر انبعاثات، بالإضافة إلى أنك قد تكسب صديقاً بذوق رائع. أضف رسومًا فقط إذا كان الشحن لا مفر منه.",
+      "prefer_local_pickup": "🌱 يفضل الاستلام المحلي"
+    },
+    "marketplace": {
+      "nothing_to_sync_no_closet": "لا يوجد شيء للمزامنة — لم يتم تحديد غرض السوق لأي من عناصر الخزانة.",
+      "remove_listing": "إزالة القائمة",
+      "sync_from_closet": "مزامنة من الخزانة"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "ss26-runway": "منصة SS26",
+      "street": "الشارع",
+      "sustainability": "الاستدامة",
+      "influencers": "المؤثرون",
+      "second_hand": "مستعمل",
+      "recycling": "إعادة التدوير",
+      "news_flash": "خبر عاجل"
+    }
+  },
+  "item": {
+    "polishingPhoto": "جارٍ تلميع الصورة…",
+    "repairPhoto": "ترميم الصورة",
+    "repairingPhoto": "جارٍ الترميم…",
+    "reshootSuccess": "تمّت استعادة الصورة.",
+    "reshootRejected": "تمّ رفض الصورة المرمّمة — تم الإبقاء على الأصليّة.",
+    "reshootError": "تعذّرت استعادة الصورة. حاول مرّة أخرى."
   }
 }

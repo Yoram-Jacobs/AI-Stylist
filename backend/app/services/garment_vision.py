@@ -1,18 +1,32 @@
-"""The Eyes \u2014 multimodal garment analyzer.
+"""The Eyes — multimodal garment analyzer.
 
-Phase A implementation
-----------------------
-* Primary analyser: **Gemma 3 27B** via HuggingFace Inference (same model
-  family the user will fine-tune for the on-edge Gemma 4 E2B/E4B release).
-* Bounding-box detector: **Gemini 2.5 Flash** via Emergent universal key
-  (Gemma zero-shot detection is too weak; this stays until the fine-tune).
+Production architecture (Phase O.3+)
+------------------------------------
+* Primary analyser: self-hosted **Gemma 4 E2B** GGUF served by the
+  ``dressapp-eyes`` container (llama.cpp/llama-server). The backend
+  reaches it via ``EYES_GEMMA_SPACE_URL`` — on Hetzner production
+  this is ``http://eyes:7860`` (internal Docker network).
+* Bounding-box detector for the multi-item pipeline:
+  **SegFormer-b3** (sayeed99/segformer_b3_clothes) running LOCALLY
+  in-process via ``app.services.clothing_parser``. No external call.
+* Safety fallback when the Gemma container is unreachable:
+  **Gemini 2.5 Flash** via Emergent / direct Google chat key. Tagged
+  in the response with ``provider_fallback`` so the UI can surface
+  the degraded state.
 * Enum sanitiser, NMS, "already cropped" short-circuit, multi-item
   orchestration are all provider-agnostic and wrap either path.
 
-Swap path
----------
-Set ``GARMENT_VISION_PROVIDER=hf`` and ``GARMENT_VISION_MODEL=<hf repo>``
-(or ``=gemini`` + a Gemini model id) without touching any consumer code.
+Deprecated paths (removed in May 2026)
+--------------------------------------
+* Qwen-VL-Plus Eyes via HuggingFace Inference Providers
+  (``_hf_chat_json`` + ``_hf_client`` + ``QWEN_EYES_MODEL`` setting).
+  Never enabled in production; deleted along with the rest of the
+  DashScope / Qwen integration. The DB-backed override layer
+  (``eyes_override``) already rejects ``"qwen"`` at ``_VALID_PROVIDERS``
+  so any stale persisted override falls through to env-default.
+* DashScope Qwen-VL stylist brain (``QwenStylistBrain`` +
+  ``qwen_client``). Removed alongside the Eyes path — see
+  ``docs/WASTED_WORK_REPORT.md §2.2``.
 """
 from __future__ import annotations
 
@@ -34,25 +48,6 @@ from app.config import settings
 from app.services import provider_activity
 
 logger = logging.getLogger(__name__)
-
-
-# --- HF Inference client (Gemma) ---------------------------------------
-try:
-    from huggingface_hub import InferenceClient as _HFInferenceClient  # type: ignore
-except Exception:  # noqa: BLE001
-    _HFInferenceClient = None  # type: ignore[assignment]
-
-
-def _hf_client(token: str | None, *, base_url: str | None = None) -> Any:
-    if _HFInferenceClient is None:
-        raise RuntimeError("huggingface_hub is not installed.")
-    kwargs: dict[str, Any] = {"token": token}
-    if base_url:
-        # Lets us talk to a custom OpenAI-compatible endpoint (HF
-        # Dedicated Endpoint, llama.cpp --server, vLLM, Modal, etc.)
-        # without routing through HF Inference Providers.
-        kwargs["base_url"] = base_url
-    return _HFInferenceClient(**kwargs)
 
 
 async def _call_gemma_space(
@@ -190,113 +185,6 @@ async def _call_gemma_space(
 
 
 
-async def _hf_chat_json(
-    *,
-    model: str,
-    system_prompt: str,
-    user_text: str,
-    image_b64_jpeg: str,
-    max_tokens: int = 900,
-    temperature: float = 0.1,
-    timeout: float = 45.0,
-) -> str:
-    """Fire a single multimodal chat_completion at the configured Eyes provider.
-
-    Provider routing (in priority order):
-      1. ``EYES_PROVIDER=gemma`` + ``EYES_GEMMA_SPACE_URL`` set ->
-         POST to the self-hosted Gemma-4 E2B HF Space. On any error we
-         log + fall through so AddItem never breaks while the Space is
-         flaky.
-      2. ``GARMENT_VISION_ENDPOINT_URL`` set -> that custom HF
-         Inference / DashScope endpoint (legacy Qwen-VL path).
-      3. Otherwise the HF Inference Providers default routing using
-         ``HF_TOKEN``.
-    """
-    # Step 1 -- Gemma feature flag (Phase O.3). Wrapped in a broad
-    # except so a cold/sleeping Space, network blip, or malformed
-    # JSON response never blocks the user. We record the failure on
-    # ``provider_activity`` so the dashboard can surface regressions.
-    #
-    # The active provider is resolved through ``eyes_override`` so an
-    # admin can flip Qwen<->Gemma at runtime via the Profile toggle
-    # without restarting the backend.
-    from app.services import eyes_override
-
-    active_provider = (await eyes_override.get_active_provider()).lower()
-    if (
-        active_provider == "gemma"
-        and settings.EYES_GEMMA_SPACE_URL
-    ):
-        t0 = time.perf_counter()
-        try:
-            out = await _call_gemma_space(
-                system_prompt=system_prompt,
-                user_text=user_text,
-                image_b64_jpeg=image_b64_jpeg,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=settings.EYES_GEMMA_TIMEOUT_S,
-            )
-            provider_activity.record(
-                "garment-vision",
-                ok=True,
-                latency_ms=int((time.perf_counter() - t0) * 1000),
-                extra={"provider": "gemma", "model": "gemma-4-e2b-q4_k_m"},
-            )
-            return out
-        except Exception as exc:  # noqa: BLE001
-            provider_activity.record(
-                "garment-vision",
-                ok=False,
-                latency_ms=int((time.perf_counter() - t0) * 1000),
-                error=repr(exc),
-                extra={"provider": "gemma", "fallback": "qwen"},
-            )
-            logger.warning(
-                "Gemma Space failed (%s); falling back to legacy provider",
-                exc,
-            )
-            # fall through to the existing path
-    endpoint_url = settings.GARMENT_VISION_ENDPOINT_URL
-    if endpoint_url:
-        token = settings.GARMENT_VISION_ENDPOINT_KEY or settings.HF_TOKEN
-    else:
-        token = settings.HF_TOKEN
-    if not token:
-        raise RuntimeError("HF_TOKEN (or endpoint key) is not configured.")
-
-    def _call() -> str:
-        client = _hf_client(token, base_url=endpoint_url)
-        # Gemma's HF Inference route requires strict user/assistant
-        # alternation with no top-level `system` role; we fold the
-        # system prompt into the first user message.
-        merged = (
-            f"{system_prompt.strip()}\n\n---\n\n{user_text.strip()}"
-        )
-        resp = client.chat_completion(
-            model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": merged},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_b64_jpeg}"
-                            },
-                        },
-                    ],
-                },
-            ],
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
-
-    return await asyncio.wait_for(asyncio.to_thread(_call), timeout=timeout)
-
-
 SYSTEM_PROMPT = (
     "You are The Eyes \u2014 DressApp's visual garment analyst. You look at "
     "a clothing photograph (which may contain one or more garments) and "
@@ -354,6 +242,79 @@ SYSTEM_PROMPT = (
     "No emojis, no markdown, no hashtags, no #tags inside text "
     "fields."
 )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Phase O.6 — single-pass-only suffix
+# ─────────────────────────────────────────────────────────────────────
+# Appended to ``SYSTEM_PROMPT`` ONLY when the caller is the single-pass
+# pipeline (``EYES_ONE_PASS=true`` or the ``analyze_outfit_one_pass``
+# helper). Teaches Eyes to additionally emit a ``region`` object with
+# a tightly-fitted bbox on the 0..1000 normalised grid for every
+# garment. Crucially we keep this OUT of the legacy ``SYSTEM_PROMPT``
+# so:
+#   1. legacy multi-call path keeps validating against the existing
+#      schema (region is optional in the schema, never required there);
+#   2. legacy LoRA evaluation runs are unaffected (no prompt drift);
+#   3. the one-pass change can be A/B'd without a deploy.
+#
+# One-shot example included so Gemma-4 E2B can pattern-match the grid
+# convention without needing a fine-tune (Option α per the proposal).
+SYSTEM_PROMPT_ONE_PASS_SUFFIX = (
+    "\n\n"
+    "ADDITIONAL OUTPUT REQUIREMENT \u2014 spatial region.\n"
+    "For EACH garment object you return, include a `region` block:\n"
+    "  region: {\n"
+    "    bbox: [ymin, xmin, ymax, xmax],   // integers on a 0..1000 grid\n"
+    "    confidence: number 0..1 (optional),\n"
+    "    is_full_frame: boolean (optional)\n"
+    "  }\n"
+    "Rules for `bbox`:\n"
+    "  \u2022 Coordinates are normalised: 0 is the top/left edge, 1000 is "
+    "the bottom/right edge. Use integers; ignore the source pixel size.\n"
+    "  \u2022 Tightly enclose the visible garment, INCLUDING sleeves, "
+    "collars, hems. EXCLUDE the wearer's face and bare skin.\n"
+    "  \u2022 If the photo is a clean, single-garment shot (flat lay, "
+    "studio still, ghost mannequin) and there is no other garment in "
+    "frame, set `region.bbox = [0, 0, 1000, 1000]` and "
+    "`region.is_full_frame = true`. This is the common case.\n"
+    "  \u2022 If multiple garments overlap, each garment's bbox encloses "
+    "ONLY that garment (the bboxes may overlap each other).\n"
+    "  \u2022 If a garment is mostly occluded (less than ~20% visible), "
+    "omit it from the output entirely \u2014 do not return a near-empty "
+    "bbox.\n"
+    "\n"
+    "Worked example. Input: a full-length photo of a person wearing a "
+    "white t-shirt tucked into blue jeans, plus white sneakers. "
+    "Correct output (truncated for clarity):\n"
+    "  [\n"
+    "    { \"title\": \"White crew tee\", "
+    "\"category\": \"Top\", "
+    "\"region\": {\"bbox\": [180, 280, 520, 720], \"confidence\": 0.92, "
+    "\"is_full_frame\": false} },\n"
+    "    { \"title\": \"Blue straight jeans\", "
+    "\"category\": \"Bottom\", "
+    "\"region\": {\"bbox\": [520, 290, 880, 720], \"confidence\": 0.94, "
+    "\"is_full_frame\": false} },\n"
+    "    { \"title\": \"White low-top sneakers\", "
+    "\"category\": \"Footwear\", "
+    "\"region\": {\"bbox\": [880, 320, 985, 700], \"confidence\": 0.88, "
+    "\"is_full_frame\": false} }\n"
+    "  ]"
+)
+
+
+def _build_system_prompt(*, one_pass: bool) -> str:
+    """Return the full system prompt for an Eyes call.
+
+    ``one_pass=False`` returns the legacy prompt verbatim so existing
+    callers (per-crop analysis, reconstruction re-validate, the old
+    ``analyze_outfit``) keep working bit-for-bit. ``one_pass=True``
+    appends the bbox-emission rules + one-shot example.
+    """
+    if one_pass:
+        return SYSTEM_PROMPT + SYSTEM_PROMPT_ONE_PASS_SUFFIX
+    return SYSTEM_PROMPT
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -451,6 +412,47 @@ _GARMENT_OBJECT_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "minItems": 0,
             "maxItems": 16,
+        },
+        # ── Phase O.6 — single-pass region info ───────────────────────
+        # Optional spatial metadata. Only populated when the caller is
+        # the single-pass pipeline (``EYES_ONE_PASS=true``). Legacy
+        # multi-call pipelines never request this field, so the schema
+        # leaves it out of ``required`` and the existing crops/Gemini
+        # paths continue to validate without changes.
+        #
+        # The bbox is on a normalised 0..1000 grid so the model can
+        # answer in pure integers regardless of the source image's
+        # resolution; the backend rescales to pixels using the
+        # ``size`` it sent in the user message.
+        "region": {
+            "type": ["object", "null"],
+            "additionalProperties": False,
+            "required": ["bbox"],
+            "properties": {
+                "bbox": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0, "maximum": 1000},
+                    "minItems": 4,
+                    "maxItems": 4,
+                    "description": (
+                        "[ymin, xmin, ymax, xmax] on the 0..1000 normalised "
+                        "grid. Origin top-left; ymax > ymin; xmax > xmin."
+                    ),
+                },
+                "confidence": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Self-reported confidence in the bbox (optional).",
+                },
+                "is_full_frame": {
+                    "type": ["boolean", "null"],
+                    "description": (
+                        "True when the photo is already a clean, single-garment "
+                        "shot and the bbox is [0, 0, 1000, 1000]."
+                    ),
+                },
+            },
         },
     },
 }
@@ -1227,6 +1229,7 @@ class GarmentVisionService:
         provider: str | None = None,
         language: str | None = None,
         think: bool = False,
+        one_pass: bool = False,
     ) -> dict[str, Any]:
         """Run the 17-field analyser on a single image.
 
@@ -1251,12 +1254,23 @@ class GarmentVisionService:
         ``think`` — pass through to ``_call_gemma_space``. Defaults to
         False so the closet AddItem flow stays fast & non-reasoning.
         Brain experiments / stylist callers can flip it on.
+
+        ``one_pass`` — Phase O.6 single-pass mode. When True we append
+        ``SYSTEM_PROMPT_ONE_PASS_SUFFIX`` so Eyes additionally returns
+        a ``region.bbox`` per garment. The schema includes ``region``
+        as optional either way; this flag is what makes the model
+        actually populate it. Defaults to False so every legacy caller
+        (per-crop analysis, reconstruction re-validate, direct callers
+        in the closet endpoint) keeps the original prompt bit-for-bit.
         """
         from app.services import eyes_override
 
         shrunk = _shrink_for_vision(image_bytes)
         b64 = base64.b64encode(shrunk).decode("ascii")
-        system_prompt = SYSTEM_PROMPT + _language_directive(language)
+        system_prompt = (
+            _build_system_prompt(one_pass=one_pass)
+            + _language_directive(language)
+        )
         user_text = _user_prompt(language)
 
         # 1) Resolve the routing target.
@@ -1829,6 +1843,207 @@ class GarmentVisionService:
             [i["label"] for i in items][:8],
         )
         return items
+
+    # ──────────────────────────────────────────────────────────────────
+    # Phase O.6 — single-pass pipeline
+    # ──────────────────────────────────────────────────────────────────
+    async def analyze_outfit_one_pass(
+        self,
+        image_bytes: bytes,
+        *,
+        max_items: int | None = None,
+        language: str | None = None,
+        think: bool = False,
+    ) -> list[dict[str, Any]]:
+        """End-to-end multi-item pipeline in a SINGLE Eyes call.
+
+        Sends the original photo straight to ``analyze(one_pass=True)``,
+        which returns either a single garment object (already-cropped
+        product photo) or an array of garment objects (multi-item
+        outfit). Each garment carries a ``region.bbox`` on a 0..1000
+        normalised grid; we crop the original image to each bbox to
+        produce per-garment JPEGs that the frontend can render
+        immediately.
+
+        Replaces, on the hot path:
+          • the SegFormer / Gemini detection step,
+          • the rembg matte-as-precondition step,
+          • the Nano-Banana reconstruction + re-validation step.
+
+        rembg + reconstruction are deferred to user-initiated endpoints
+        downstream of ``/save`` — see ``EYES_ONE_PASS_PROPOSAL.md``.
+
+        Output shape matches :meth:`analyze_outfit` exactly so the
+        ``/closet/analyze`` endpoint can swap implementations without
+        any contract change visible to the frontend::
+
+            {
+              "label": "Oxford shirt",
+              "kind": "garment",
+              "bbox": [ymin, xmin, ymax, xmax],   # 0..1000 normalised
+              "crop_base64": "<base64 jpeg>",
+              "crop_mime": "image/jpeg",
+              "analysis": { ...GarmentAnalysis fields, region stripped... },
+              "reconstruction_advised": bool,     # NEW — frontend CTA hint
+              "one_pass": True,                   # NEW — debug breadcrumb
+            }
+        """
+        t0 = time.perf_counter()
+        try:
+            parsed = await self.analyze(
+                image_bytes,
+                language=language,
+                think=think,
+                one_pass=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "one_pass analyze() failed (%s) \u2014 falling back to legacy "
+                "analyze_outfit so the user still gets a result.",
+                repr(exc)[:200],
+            )
+            return await self.analyze_outfit(
+                image_bytes,
+                max_items=max_items,
+                language=language,
+                think=think,
+            )
+
+        # Eyes is allowed to return either a single object (already-cropped
+        # shot) or an array of objects (multi-item outfit). Normalise.
+        if isinstance(parsed, list):
+            garments = parsed
+        elif isinstance(parsed, dict):
+            garments = [parsed]
+        else:
+            logger.warning(
+                "one_pass got %s (expected dict or list) \u2014 falling back",
+                type(parsed).__name__,
+            )
+            return await self.analyze_outfit(
+                image_bytes,
+                max_items=max_items,
+                language=language,
+                think=think,
+            )
+
+        # Cap at ``max_items`` (matches legacy contract).
+        cap = max_items if max_items is not None else self.max_items
+        if cap and len(garments) > cap:
+            logger.info(
+                "one_pass: trimming %d garments down to max_items=%d",
+                len(garments), cap,
+            )
+            garments = garments[:cap]
+
+        items: list[dict[str, Any]] = []
+        for g in garments:
+            region = g.get("region") if isinstance(g, dict) else None
+            bbox: list[int]
+            is_full_frame = False
+            if isinstance(region, dict) and isinstance(region.get("bbox"), list):
+                bbox_in = region["bbox"]
+                # Defensive clamp: schema enforces 0..1000 but a fallback
+                # provider (Gemini direct) may emit slightly out-of-range.
+                try:
+                    ymin, xmin, ymax, xmax = [
+                        max(0, min(1000, int(v))) for v in bbox_in
+                    ]
+                    if ymax <= ymin:
+                        ymax = min(1000, ymin + 1)
+                    if xmax <= xmin:
+                        xmax = min(1000, xmin + 1)
+                    bbox = [ymin, xmin, ymax, xmax]
+                except Exception:
+                    bbox = [0, 0, 1000, 1000]
+                is_full_frame = bool(region.get("is_full_frame"))
+            else:
+                # Model omitted region — treat the whole frame as the bbox.
+                bbox = [0, 0, 1000, 1000]
+                is_full_frame = True
+
+            # Crop. Reuse the same helper the legacy pipeline uses so the
+            # padding/area-floor rules stay consistent across both paths.
+            crop_bytes: bytes
+            if is_full_frame or bbox == [0, 0, 1000, 1000]:
+                crop_bytes = image_bytes
+            else:
+                cropped = _crop_to_bbox(image_bytes, bbox)
+                # ``_crop_to_bbox`` returns None when the bbox is degenerate
+                # or below the min-area floor. In those cases we still want
+                # an item record \u2014 just fall back to the full frame so
+                # the user sees the original photo as the thumbnail.
+                crop_bytes = cropped[0] if cropped else image_bytes
+
+            # Strip ``region`` from the analysis dict so the persisted
+            # closet item card doesn't carry coordinates the rest of the
+            # app doesn't know about. Bbox lives on the item, not in
+            # ``analysis``.
+            analysis = {k: v for k, v in g.items() if k != "region"}
+
+            label = (
+                analysis.get("item_type")
+                or analysis.get("sub_category")
+                or analysis.get("title")
+                or "garment"
+            )
+
+            items.append({
+                "label": label,
+                "kind": "garment",
+                "bbox": bbox,
+                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+                "crop_mime": "image/jpeg",
+                "analysis": analysis,
+                # NEW \u2014 frontend reads this to decide whether to render
+                # the opt-in "Repair photo" CTA (Phase 2 wires the actual
+                # endpoint). Computed cheaply from existing analysis hints.
+                "reconstruction_advised": _should_advise_reconstruction(
+                    analysis, is_full_frame=is_full_frame,
+                ),
+                # Debug breadcrumb \u2014 dropped from prod responses by the
+                # API layer if we want it hidden, but useful for the
+                # diagnostic notebook and during the rollout.
+                "one_pass": True,
+            })
+
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "analyze_outfit_one_pass OK garments=%d full_frame=%s elapsed_ms=%d "
+            "labels=%s",
+            len(items),
+            any(i["bbox"] == [0, 0, 1000, 1000] for i in items),
+            dt_ms,
+            [i["label"] for i in items][:8],
+        )
+        return items
+
+
+def _should_advise_reconstruction(
+    analysis: dict[str, Any], *, is_full_frame: bool,
+) -> bool:
+    """Cheap heuristic for the opt-in "Repair photo" CTA.
+
+    Mirrors the existing ``should_reconstruct`` logic in
+    ``services/reconstruction.py`` but works off ONLY the data the
+    one-pass result carries (no SegFormer mask, no bbox-edge analysis),
+    so the answer is a hint to the user, not an authoritative
+    "this needs reconstruction" verdict.
+
+    Returns True when the analysed garment is reported as ``used`` and
+    the condition is below ``good``, OR when the photo wasn't already
+    a clean single-frame shot \u2014 i.e. exactly the cases where users
+    historically benefited from the Nano-Banana studio reshoot.
+    """
+    state = (analysis.get("state") or "").lower()
+    condition = (analysis.get("condition") or "").lower()
+    if state == "used" and condition in {"bad", "fair"}:
+        return True
+    # If we cropped out of a busy multi-item photo, the user might prefer
+    # a clean studio version for the closet thumbnail.
+    if not is_full_frame:
+        return True
+    return False
 
 
 def _build_vision_service() -> GarmentVisionService | None:

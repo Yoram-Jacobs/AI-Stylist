@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
+import { useTranslation } from 'react-i18next';
 const fmt = (cents, cur = 'USD') =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(
     (cents || 0) / 100,
@@ -65,6 +66,8 @@ const STATUS_COPY = {
 };
 
 export default function TransactionLanding() {
+  const { t } = useTranslation();
+
   const { id } = useParams();
   const [params] = useSearchParams();
   const rawStatus = params.get('status') || 'pending';
@@ -113,7 +116,7 @@ export default function TransactionLanding() {
             <Icon className="h-10 w-10" aria-hidden />
           </div>
           <div className="min-w-0">
-            <div className="caps-label opacity-70">Transaction status</div>
+            <div className="caps-label opacity-70">{t('pages.transactionLanding.transaction_status')}</div>
             <h1
               className="font-display text-3xl leading-tight mt-1"
               data-testid="transaction-landing-title"
@@ -194,12 +197,12 @@ export default function TransactionLanding() {
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button asChild variant="secondary" className="rounded-xl" data-testid="transaction-landing-back-market">
                   <Link to="/market">
-                    Browse marketplace
+                    {t('pages.transactionLanding.browse_marketplace')}
                     <ArrowRight className="h-4 w-4 ms-1" />
                   </Link>
                 </Button>
                 <Button asChild variant="ghost" className="rounded-xl" data-testid="transaction-landing-my-transactions">
-                  <Link to="/transactions">My transactions</Link>
+                  <Link to="/transactions">{t('pages.transactionLanding.my_transactions')}</Link>
                 </Button>
               </div>
             </CardContent>

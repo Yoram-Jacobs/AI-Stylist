@@ -220,4 +220,231 @@ edited    /app/frontend/src/locales/zh.json               (+50 fills)
 
 ---
 
-*End of session log.*
+## Session 2 — Hard-coded string audit + auto-patch
+
+After the first round of locale fills, several UI screens still showed
+English fragments on non-English locales (screenshots provided by the user:
+Profile occupation field, listing detail chips, donation banner, trend cards,
+duplicate-detection dialog). Cause: **hard-coded English strings in JSX/JS
+source that never went through `react-i18next`**.
+
+### Tooling added
+
+```
+/app/scripts/audit_hardcoded_strings.py     — finds user-facing English in /app/frontend/src
+/app/scripts/apply_audit_translations.py    — merges LLM-translated dict back into the 12 locale JSON files
+/app/scripts/patch_hardcoded_strings.py     — rewrites JSX/JS to replace English literals with t('key') calls
+/app/scripts/inject_use_translation.py      — bootstraps the useTranslation hook + import in components missing it
+/app/docs/locale_backfill_untranslated.json — audit output (post-merge: 0 findings)
+/app/docs/code_fixes_needed.md              — module-scope literals & raw-enum bleeds that need manual code work
+```
+
+The audit detects: JSX text content (multi-line tolerant), HTML-attribute
+strings (`placeholder`, `title`, `aria-label`, `alt`), toast/alert calls,
+`t('key', { defaultValue: 'English' })` patterns where the key is missing in
+en.json, and object-literal labels in fixture/array data.
+
+Cross-references every candidate against existing values in `en.json` so
+already-translated strings (rendered raw because the code uses a raw enum
+rather than `t()`) are skipped — those are listed in
+`code_fixes_needed.md` for manual fixes.
+
+### Translation round
+
+* Audit found **154 distinct English strings** across **68 files**.
+* DeepSeek translated all 154 × 11 locales in one shot — payload validated
+  clean (the script auto-repaired 10 inner-quote escapes).
+* Apply script detected **13 `defaultValue` findings** whose existing i18n
+  key was already chosen by the developer (e.g. `home.trendsRefreshed`) —
+  translations got written under the developer's key, not the audit's
+  synthetic `suggested_key`. Avoids dead translation entries.
+* `apply_audit_translations.py` then wrote 154 × 12 locales = **1,848
+  merged entries** (zero placeholder drift).
+
+### Source-code patch round
+
+* `patch_hardcoded_strings.py` rewrote each finding in place. Two passes:
+  - **Pass 1:** 69 patches applied across 8 files.
+  - **Pass 2** (after `inject_use_translation.py` added the hook to four
+    components missing it): 23 more patches across SwapPickerModal,
+    OutfitCanvas, ExtensionConnect, TransactionLanding.
+* **92 source-code patches total** across 12 files.
+* Backups (`.bak`) written alongside every modified file.
+* Whitespace-flexible multi-line JSX regex handles `<p>multi-line\nblock</p>`
+  patterns automatically.
+
+### Final state after Session 2
+
+* **Audit re-run shows 0 hard-coded English strings** in the auditable scope.
+* Frontend builds clean (`esbuild` no errors).
+* All 12 locale files extended with the 154 new keys.
+
+### Manual code work still required (see code_fixes_needed.md)
+
+* `src/pages/ListingDetail.jsx` — 4 chip patches to pipe `listing.mode` /
+  `listing.category` / `listing.condition` / `listing.size` through their
+  existing `taxonomy.*` translations.
+* `src/pages/Home.jsx` — restructure `FALLBACK_TRENDS` (module scope), add
+  `trends.bucket.*` map for Trend-Scout backend labels.
+* `src/components/SeoBase.jsx` — META map at module scope, refactor to use
+  i18n keys.
+* `src/lib/countries.js` — adopt `Intl.DisplayNames` instead of translating
+  the 250-entry ISO country list through the same dictionary.
+
+Estimated effort for the manual fixes: **~50 minutes** to close the last
+gap that translation alone can't reach.
+
+---
+
+## Session 3 — Language-switch UX + remaining TODO
+
+### Added: language-switch loading floater
+
+The picker's `change()` round-trip can take up to ~20 s on slow networks
+(i18n.changeLanguage + LanguageSync DOM re-paint + optional `PATCH /me`
+profile sync). Users were clicking the picker, seeing nothing visible
+happen, and assuming nothing did.
+
+#### Files added / changed
+
+```
+created  src/components/LanguageSwitchOverlay.jsx
+edited   src/App.js                        (mount overlay at BrowserRouter root)
+edited   src/components/LanguagePicker.jsx (dispatch start/done events)
+edited   12 × src/locales/<loc>.json       (3 new keys: language.switching,
+                                            language.switchingTo, language.switchingHint)
+```
+
+#### How it works
+
+* `LanguagePicker.change(code)` dispatches `dressapp:lang-switch-start`
+  *before* the async work begins, with `{ code, nativeName }` so the
+  overlay shows the target locale in its native script (e.g. `中文`).
+* The picker dispatches `dressapp:lang-switch-done` in a `finally` block
+  — guarantees the overlay closes even if `i18n.changeLanguage` or the
+  `PATCH /me` request throws.
+* Custom DOM events (not React context) so the overlay can mount once at
+  the root and doesn't require a provider wrapping every route.
+* The overlay has a 30 s safety-net timer that auto-closes itself if the
+  picker never emits the `done` event (e.g. network hangs).
+* Escape key dismisses immediately (a11y); `aria-live="polite"` announces
+  the state to screen readers; `aria-busy="true"` set on the backdrop.
+* Mounted at the `BrowserRouter` root so authenticated **and** logged-out
+  flows (Login / Register) get the affordance — the picker appears in all
+  three places.
+* Visual: 12 px `backdrop-blur` over `bg-background/60`, centred card with
+  `rounded-2xl` + `shadow-2xl`, `Loader2` spinner from lucide-react. No
+  raw red/green colours; uses the design-system accent token.
+
+### TODO — Experts → Profession dropdown is English-only across all locales
+
+Captured during user QA: in `/experts`, the Profession filter drop-down
+lists user-entered profession strings verbatim across every locale.
+
+Root cause: `professions` is derived from `p.professional?.profession`
+free-text values stored on each professional's profile (not an enum):
+
+```jsx
+// src/pages/ExpertsDirectory.jsx:83
+const professions = useMemo(() => {
+  const set = new Set((items || []).map((p) => p.professional?.profession).filter(Boolean));
+  return Array.from(set);
+}, [items]);
+```
+
+This is NOT a UI-copy translation gap — it's user data. Fixing it
+properly needs:
+
+1. **Backend** — canonicalise profession entries to a closed enum
+   (e.g. `stylist`, `personal_shopper`, `tailor`, `image_consultant`, …)
+   with a free-text `profession_other` escape hatch.
+2. **Taxonomy** — add `taxonomy.profession.<slug>` keys in all 12 locale
+   files (will go through the same Gemini/DeepSeek pipeline as before).
+3. **Frontend** — read the enum, render via
+   `t(\`taxonomy.profession.${item.professional.profession}\`)`.
+4. **Migration** — one-shot DB pass that maps existing free-text values
+   to the nearest enum slug.
+
+Estimated effort: ~2-3 hours total (mostly backend schema + migration).
+
+### Status snapshot at end of Session 3
+
+* Hard-coded English strings in scope: **0** (audit re-confirmed).
+* Locale parity: 12 / 12 locales now have language-switch copy + the 154
+  audit fills + the 13 redirected `defaultValue` keys + Session 1's bulk
+  translation work.
+* Frontend builds clean (`esbuild` in 399 ms).
+* Outstanding manual code patches: 4 (see `code_fixes_needed.md`).
+* Outstanding data/taxonomy work: 1 (Experts profession dropdown, above).
+
+---
+
+*End of Session 3.*
+
+---
+
+## Session 4 — Two follow-ups from QA
+
+### 1. Profile "Save changes" button no longer always-active
+
+**File:** `src/components/ProfileDetailsCard.jsx`
+
+The save button was wired `disabled={busy}` only — so it was clickable
+the moment the page loaded, even when the user hadn't touched anything.
+
+#### Fix
+
+* Capture a JSON-serialised baseline of `initial` in a `useRef` at mount.
+* Compute `isDirty = JSON.stringify(form) !== baselineRef.current` per
+  render (cheap — form is plain JSON, deterministic key order from the
+  `useMemo` above).
+* Re-baseline inside `save()` after the API call succeeds:
+  `baselineRef.current = JSON.stringify(form)`. Drops the button back
+  to its disabled state if the user stays on the page.
+* If `initial` ever recomputes externally (e.g. `updateUserLocal` from
+  another tab, avatar change elsewhere), keep the baseline in step via
+  a `lastSeenInitialRef` reference-identity check — external updates
+  aren't mistaken for dirt.
+* Button now `disabled={busy || !isDirty}`.
+
+Edge cases covered:
+
+| Scenario | Button state |
+|---|---|
+| Page load, no edits | Disabled |
+| User types in a field | Enabled |
+| User reverts the field to its loaded value | Disabled (deep-equality re-check) |
+| User clicks Save, succeeds | Disabled (baseline updated) |
+| Save fails (toast.error) | Still enabled (baseline NOT updated) |
+| User navigates away and back | Disabled (fresh mount, fresh baseline) |
+| Another tab updates user via context | Disabled (baseline tracks `initial`) |
+
+### 2. "Save all" → "Save" in the Add to Closet pipeline
+
+**Files touched:** 12 × `src/locales/<loc>.json`
+
+The internal i18n key was kept as `addItem.saveAll` and `common.saveAll`
+(both refer to the same button) so no JSX/source edits were needed —
+only the displayed value was rewritten per locale. Translations match
+the standard UI verb for "Save" in each language:
+
+| Locale | Old | New |
+|---|---|---|
+| en | Save all | Save |
+| de | Alle speichern | Speichern |
+| es | Guardar todo | Guardar |
+| fr | Tout enregistrer | Enregistrer |
+| it | Salva tutto | Salva |
+| pt | Salvar tudo | Salvar |
+| ru | Сохранить всё | Сохранить |
+| ar | حفظ الكل | حفظ |
+| he | שמור הכל | שמור |
+| hi | सभी सहेजें | सहेजें |
+| ja | すべて保存 | 保存 |
+| zh | 全部保存 | 保存 |
+
+Frontend builds clean (`esbuild` in 240 ms), no JS lint findings.
+
+---
+
+*End of Session 4.*

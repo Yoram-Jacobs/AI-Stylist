@@ -1,0 +1,35 @@
+{
+  "_purpose": "These English strings are currently hard-coded in the React frontend and are NOT yet wired through react-i18next. Translate each `english` value into ALL 11 non-English target languages listed below. The keys / occurrences are reference only — do not invent or rename them. Return ONE JSON object whose top level has each ISO language code as a key, and whose values are dictionaries keyed by `suggested_key` -> translated string.",
+  "_source_language": "English (en)",
+  "_target_languages": [
+    "ar",
+    "de",
+    "es",
+    "fr",
+    "he",
+    "hi",
+    "it",
+    "ja",
+    "pt",
+    "ru",
+    "zh"
+  ],
+  "_instructions": "RULES (read every one):\n1. Output ONE valid JSON object. Top-level keys are the 11 ISO language codes listed in _target_languages.\n2. For each language, return a dict mapping every suggested_key to the translated string.\n3. Translate every entry from `findings[*].english`. Do not skip, merge, or rename keys.\n4. Preserve emoji, punctuation, capitalisation conventions of the target language, and any text in {curly} or {{double-curly}} braces — those are placeholders, leave them verbatim.\n5. Keep these proper nouns / brand terms untranslated: DressApp, Trend-Scout, Fashion Scout, FashionCLIP, Google Calendar, Levi's, Stripe, GitHub, Business of Fashion.\n6. 'AI' should be translated to 'IA' in fr/es/pt/it (and the natural local equivalent elsewhere — e.g. 'KI' in de, 'AI' in ja/zh, 'ИИ' in ru).\n7. Use straight ASCII quotes (\") as JSON delimiters. Escape any literal double quote inside a value with a backslash: \\\".\n8. Use the target-language's typographic conventions (e.g. espace insécable before « : ; ! ? » in French).\n9. Do NOT wrap the JSON in markdown code fences.\n",
+  "_examples": [
+    {
+      "suggested_key": "components.profileDetailsCard.eg_marketing_manager_student_barista",
+      "english": "e.g. Marketing manager, Student, Barista",
+      "fr": "ex. responsable marketing, étudiant·e, barista",
+      "de": "z. B. Marketing-Manager, Student, Barista",
+      "zh": "例如：市场经理、学生、咖啡师",
+      "note": "Placeholder for an Occupation input field."
+    },
+    {
+      "suggested_key": "pages.listingDetail.local_pickup_preferred_no_shipping_fee",
+      "english": "🌱 Local pickup preferred — no shipping fee",
+      "fr": "🌱 Retrait en personne privilégié — pas de frais d'expédition",
+      "note": "Keep the emoji and the em-dash."
+    }
+  ],
+  "findings": []
+}

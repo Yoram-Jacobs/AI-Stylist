@@ -2,8 +2,9 @@
 
 By default the closet vision pipeline reads ``settings.EYES_PROVIDER``
 (an env var, frozen at process start). To let admins flip pods between
-the legacy Qwen-VL path and the self-hosted Gemma-4 E2B path WITHOUT
-restarting the backend, we layer a Mongo override on top:
+the self-hosted Gemma-4 E2B path (production) and the Gemini-2.5-Flash
+fallback path (preview / disaster recovery) WITHOUT restarting the
+backend, we layer a Mongo override on top:
 
     final_provider = mongo.config.eyes_provider OR settings.EYES_PROVIDER
 
@@ -12,7 +13,7 @@ The override is stored in the singleton document
 
     {
         "_id":        "eyes_provider",
-        "value":      "gemma" | "qwen",     # the override
+        "value":      "gemma" | "gemini",   # the override
         "updated_at": "<iso8601>",
         "updated_by": "<email>",            # whoever flipped the switch
     }
@@ -52,9 +53,9 @@ log = logging.getLogger(__name__)
 
 _CONFIG_DOC_ID = "eyes_provider"
 # Phase O.4 — DressApp ships only the self-hosted Gemma-4 E2B Eyes
-# model and Google's Gemini 2.5 Flash. The legacy "qwen" path is
-# disabled until/unless we re-introduce it. Any persisted "qwen"
-# override falls through to the env default at resolution time.
+# model and Google's Gemini 2.5 Flash. Any other persisted value
+# (legacy "qwen", typos, etc.) falls through to the env default at
+# resolution time.
 _VALID_PROVIDERS = ("gemma", "gemini")
 _CACHE_TTL_S = 5.0
 
@@ -108,9 +109,9 @@ async def get_active_provider() -> str:
 
     if override:
         return override
-    # When no DB override is set, fall back to the env-default. We
-    # intentionally bias to "gemini" (not "qwen") because DressApp's
-    # only two supported Eyes backends today are Gemma-4 and Gemini.
+    # When no DB override is set, fall back to the env-default. The
+    # only two supported Eyes backends today are Gemma-4 and Gemini —
+    # we bias to "gemini" so a missing/typo env never 503s the pipeline.
     return _normalize(settings.EYES_PROVIDER) or "gemini"
 
 

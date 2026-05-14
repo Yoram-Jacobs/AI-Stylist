@@ -1,15 +1,21 @@
 """Native Google Gemini image service — Nano Banana (gemini-2.5-flash-image).
 
-Why this exists separately from `hf_image_service.py`:
+Why this exists as its own service:
 
 * The Emergent proxy does not route image-generation traffic to Gemini, so
-  we historically fell back to HF FLUX. With a direct ``GEMINI_API_KEY``
-  configured, we can use Nano Banana — Google's GA image-gen / edit model
-  optimised for fast, photorealistic, character-consistent product shots.
-* This service is the preferred reconstructor when ``settings.has_native_gemini``
-  is true. ``reconstruction.py`` falls back to HF FLUX otherwise.
+  this module talks to Google's API directly via ``google-genai`` using
+  ``settings.GEMINI_API_KEY``.
+* Nano Banana is the GA image-gen / edit model optimised for fast,
+  photorealistic, character-consistent product shots — used by the
+  reconstruction pipeline (``services/reconstruction.py``) and the
+  ``POST /api/v1/closet/{id}/edit-image`` endpoint.
 
-Public surface (matches ``hf_image_service`` so callers can swap freely):
+History note (May 2026): an older sibling module ``hf_image_service`` ran
+HF FLUX.1-schnell as a fallback. That fallback was retired when the user
+asked for HF to be removed from the runtime surface — Nano Banana is now
+the sole image-generation backend.
+
+Public surface:
 
 * ``generate(prompt) -> {image_b64, mime_type, model_used, text}``
 * ``edit(image_bytes, prompt, *, garment_metadata=None) -> {...}``
@@ -83,7 +89,7 @@ class GeminiImageService:
     async def generate(
         self, prompt: str, *, session_id: str | None = None
     ) -> dict[str, Any]:
-        """Pure text-to-image. Returns the same shape as HFImageService.generate."""
+        """Pure text-to-image. Returns ``{image_b64, mime_type, model_used, text}``."""
         return await asyncio.to_thread(self._run_generate, prompt, None)
 
     async def edit(
@@ -231,8 +237,9 @@ async def _to_bytes(image: bytes | str) -> bytes:
         return resp.content
 
 
-# Module-level singleton — None when the direct Gemini key is absent so
-# `reconstruction.py` can cleanly fall back to HF FLUX in dev preview.
+# Module-level singleton — None when the direct Gemini key is absent. The
+# legacy HF FLUX fallback was retired in May 2026, so callers must handle
+# the None case (typically a 503 surfaced to the user).
 gemini_image_service = (
     GeminiImageService() if (settings.has_native_gemini and _genai is not None) else None
 )
@@ -240,7 +247,8 @@ gemini_image_service = (
 if gemini_image_service is None:
     logger.info(
         "Nano Banana disabled (no GEMINI_API_KEY or google-genai missing). "
-        "Image edits will fall back to HF FLUX where applicable."
+        "Image edit / reconstruction endpoints will return 503 until a "
+        "direct GEMINI_API_KEY is configured."
     )
 else:
     logger.info(

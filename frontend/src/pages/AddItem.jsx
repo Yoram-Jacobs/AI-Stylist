@@ -780,6 +780,17 @@ export default function AddItem() {
         // every time, even though the backend already produced the
         // cutout. Reconstruction (Nano Banana) takes priority when
         // validated; otherwise the rembg-matted crop is used.
+        //
+        // Phase O.6 — the single-pass backend pipeline returns
+        // ``one_pass: true`` and ``reconstruction_advised`` on each
+        // item, and does NOT pre-run rembg or reconstruction on the
+        // hot path. We capture both flags so:
+        //   • ``from_one_pass`` flows into ``buildCreatePayload`` →
+        //     backend skips synchronous SegFormer and queues rembg
+        //     as a fire-and-forget BackgroundTask.
+        //   • ``reconstructionAdvised`` decides whether to surface the
+        //     opt-in "Repair photo" CTA on the item card (the
+        //     reconstruction call moves to user-initiated, post-save).
         const it = items[0];
         const mime = it.crop_mime || 'image/jpeg';
         const rec = it.reconstruction;
@@ -800,6 +811,9 @@ export default function AddItem() {
                   fields: hydrate(it.analysis || {}, user),
                   label: it.label || null,
                   potentialDuplicate: it.potential_duplicate || null,
+                  // Phase O.6 flags (absent on legacy responses → falsy)
+                  fromOnePass: !!it.one_pass,
+                  reconstructionAdvised: !!it.reconstruction_advised,
                   // Keep the original card.base64 untouched only if the
                   // analyzer didn't return a usable crop (legacy fallback).
                   ...(cropDataUrl
@@ -866,6 +880,9 @@ export default function AddItem() {
           error: null,
           label: it.label || null,
           potentialDuplicate: it.potential_duplicate || null,
+          // Phase O.6 — single-pass flags (absent on legacy responses).
+          fromOnePass: !!it.one_pass,
+          reconstructionAdvised: !!it.reconstruction_advised,
         };
       });
       if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
@@ -1931,6 +1948,13 @@ function buildCreatePayload(card) {
     source_size_bytes:
       typeof card.sourceSizeBytes === 'number' ? card.sourceSizeBytes : undefined,
     is_duplicate: card.isDuplicate ? true : undefined,
+    // Phase O.6 — flag the backend so it skips the synchronous
+    // SegFormer cutout (the photo is already bbox-cropped to a single
+    // garment) and queues rembg as a BackgroundTask that populates
+    // ``clean_image_url`` asynchronously. Legacy clients that didn't
+    // receive ``one_pass: true`` on the /analyze response simply omit
+    // the field and keep the existing synchronous SegFormer path.
+    from_one_pass: card.fromOnePass ? true : undefined,
   };
   // Strip undefined to keep payload clean (Pydantic `extra=forbid` still accepts unset fields).
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined));

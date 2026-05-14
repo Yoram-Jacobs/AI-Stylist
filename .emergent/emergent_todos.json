@@ -1,22 +1,14 @@
 [
   {
-    "content": "Get EMERGENT_LLM_KEY",
+    "content": "Fix orphan repair*/onRepair refs in ItemDetail.jsx",
     "status": "completed"
   },
   {
-    "content": "Translate via LLM (achieved 6/12 then handed off to user)",
+    "content": "Register EYES_ONE_PASS=false in deploy/.env.example",
     "status": "completed"
   },
   {
-    "content": "Merge user-supplied translations + validate placeholders + brand",
-    "status": "completed"
-  },
-  {
-    "content": "Verify all 12 locales at 1004/1004 parity vs en.json",
-    "status": "completed"
-  },
-  {
-    "content": "Restart frontend",
+    "content": "Run testing agent (backend + frontend) to verify legacy hot path & renamed UI states",
     "status": "completed"
   }
 ]

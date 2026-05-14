@@ -8,7 +8,7 @@
     "me": "Eu",
     "settings": "Ajustes",
     "transactions": "Transações",
-    "admin": "Admin",
+    "admin": "Administrador",
     "signOut": "Sair",
     "skipToContent": "Ir para o conteúdo",
     "openUserMenu": "Abrir menu",
@@ -185,7 +185,7 @@
     "patternPlaceholder": "liso",
     "state": "Estado",
     "qualityLabel": "Qualidade",
-    "tags": "Tags",
+    "tags": "Etiquetas",
     "addTag": "adicionar tag",
     "addAction": "Adicionar",
     "removeTagAria": "Remover tag {{label}}",
@@ -730,7 +730,7 @@
     }
   },
   "admin": {
-    "title": "Admin",
+    "title": "Administrador",
     "subtitle": "Saúde da plataforma e moderação.",
     "overview": "Visão geral",
     "users": "Usuários",

@@ -53,6 +53,14 @@ httplib2==0.31.2
 httptools==0.7.1
 httpx==0.28.1
 httpx-sse==0.4.3
+# DO NOT bump huggingface_hub without also re-pinning transformers.
+# transformers==5.5.4 (below) imports `is_offline_mode` from huggingface_hub
+# at top-level. That symbol was removed in huggingface_hub 1.12+. If pip
+# silently downgrades this (e.g. via a loose dep from rembg / fashion_clip)
+# the entire SegFormer clothing-parser path stops loading and AddItem
+# degrades to single-garment-only via the Gemini fallback. Production runs
+# this exact pin; preview broke once already (May 2026) when it drifted to
+# 0.27.0. Re-pin both lines together if you ever need to upgrade.
 huggingface_hub==1.11.0
 humanfriendly==10.0
 idna==3.11

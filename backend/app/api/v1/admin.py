@@ -244,8 +244,8 @@ async def provider_calls(
 
 # -------------------- eyes provider toggle --------------------
 # Phase O.3 — runtime override for the closet vision pipeline. Flips
-# the model server between the legacy DashScope Qwen-VL path and the
-# self-hosted Gemma-4 E2B endpoint without a backend restart. The
+# the model server between the self-hosted Gemma-4 E2B endpoint and the
+# Gemini-2.5-Flash safety-net path without a backend restart. The
 # override is persisted in ``config.{_id: 'eyes_provider'}`` and read
 # through a 5-second cache (see ``app.services.eyes_override``).
 @router.get("/eyes")
@@ -508,8 +508,8 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
         "ai": {
             "stylist_provider": settings.DEFAULT_STYLIST_PROVIDER,
             "stylist_model": settings.DEFAULT_STYLIST_MODEL,
-            "image_model": settings.HF_IMAGE_MODEL,
-            "image_provider": settings.HF_IMAGE_PROVIDER,
+            "image_model": settings.GEMINI_IMAGE_MODEL,
+            "image_provider": "google-nano-banana",
             "segmentation_model": settings.HF_SAM_MODEL,
             "tts_model": settings.DEFAULT_TTS_MODEL,
             "whisper_model": settings.WHISPER_MODEL,
@@ -517,7 +517,6 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
         "keys_present": {
             "EMERGENT_LLM_KEY": _has(settings.EMERGENT_LLM_KEY),
             "GEMINI_API_KEY": _has(settings.GEMINI_API_KEY),
-            "HF_TOKEN": _has(settings.HF_TOKEN),
             "GROQ_API_KEY": _has(settings.GROQ_API_KEY),
             "DEEPGRAM_API_KEY": _has(settings.DEEPGRAM_API_KEY),
             "OPENWEATHER_API_KEY": _has(settings.OPENWEATHER_API_KEY),

@@ -34,6 +34,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, ShieldCheck, Plug, AlertTriangle, Check } from 'lucide-react';
 import { tokenStore, userStore, api } from '@/lib/api';
 
+import { useTranslation } from 'react-i18next';
 // Extension IDs we trust to receive the token. Tightening this when
 // the extension is published to the Chrome Web Store is a one-line
 // change. During development we accept any extension that injects a
@@ -50,6 +51,8 @@ const TRUSTED_EXTENSION_IDS = (
 const HANDOFF_VERSION = 1;
 
 export default function ExtensionConnect() {
+  const { t } = useTranslation();
+
   const [params] = useSearchParams();
   const nav = useNavigate();
   const extId = params.get('ext_id');
@@ -188,7 +191,7 @@ export default function ExtensionConnect() {
   // ---- Render variants -----------------------------------------------
   if (!token || !user) {
     return (
-      <Shell title="Redirecting to sign in…">
+      <Shell title={t('pages.extensionConnect.redirecting_to_sign_in')}>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </Shell>
     );
@@ -196,14 +199,14 @@ export default function ExtensionConnect() {
 
   if (!extId) {
     return (
-      <Shell title="DressApp Chrome Extension">
+      <Shell title={t('pages.extensionConnect.dressapp_chrome_extension')}>
         <p className="text-sm text-muted-foreground">
           This page is the auth bridge for the DressApp shopping
           assistant extension. Open it from the extension's popup
           (the &quot;Connect to DressApp&quot; button).
         </p>
         <Button onClick={() => nav('/home')} className="mt-4 rounded-xl">
-          Go to home
+          {t('pages.extensionConnect.go_to_home')}
         </Button>
       </Shell>
     );
@@ -211,9 +214,9 @@ export default function ExtensionConnect() {
 
   if (!trusted) {
     return (
-      <Shell title="Untrusted extension" tone="warn">
+      <Shell title={t('pages.extensionConnect.untrusted_extension')} tone="warn">
         <p className="text-sm text-muted-foreground">
-          The extension ID <code className="rounded bg-muted px-1">{extId}</code>{' '}
+          {t('pages.extensionConnect.the_extension_id')} <code className="rounded bg-muted px-1">{extId}</code>{' '}
           is not on the allow-list for this deployment. If you installed
           the extension yourself, ask the DressApp admin to add it.
         </p>
@@ -223,11 +226,10 @@ export default function ExtensionConnect() {
 
   if (phase === 'sending' || phase === 'init') {
     return (
-      <Shell title="Connecting to DressApp Extension…">
+      <Shell title={t('pages.extensionConnect.connecting_to_dressapp_extension')}>
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
         <p className="mt-3 text-xs text-muted-foreground">
-          Sharing your sign-in with the extension. This window will
-          close automatically.
+          {t('pages.extensionConnect.sharing_your_signin_with_the')}
         </p>
       </Shell>
     );
@@ -238,10 +240,10 @@ export default function ExtensionConnect() {
       <Shell title="Connected" tone="ok">
         <div className="flex items-center gap-2 text-sm">
           <Check className="h-5 w-5 text-emerald-600" />
-          <span>The extension is signed in as <strong>{user.email}</strong>.</span>
+          <span>{t('pages.extensionConnect.the_extension_is_signed_in')} <strong>{user.email}</strong>.</span>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          You can close this tab and head back to the shopping site.
+          {t('pages.extensionConnect.you_can_close_this_tab')}
         </p>
         <Button
           onClick={() => { try { window.close(); } catch (_) { /* */ } }}
@@ -255,7 +257,7 @@ export default function ExtensionConnect() {
   }
 
   return (
-    <Shell title="Connection failed" tone="warn">
+    <Shell title={t('pages.extensionConnect.connection_failed')} tone="warn">
       <p className="text-sm text-muted-foreground">{error || 'Unknown error.'}</p>
       <Button
         onClick={sendToExtension}
@@ -269,6 +271,8 @@ export default function ExtensionConnect() {
 }
 
 function Shell({ title, tone, children }) {
+  const { t } = useTranslation();
+
   const Icon =
     tone === 'ok' ? ShieldCheck : tone === 'warn' ? AlertTriangle : Plug;
   const accent =

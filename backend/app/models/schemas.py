@@ -206,6 +206,19 @@ class ClosetItem(BaseDoc):
     # Phase Q — Wardrobe Reconstructor
     reconstructed_image_url: str | None = None
     reconstruction_metadata: dict[str, Any] | None = None
+    # Phase O.6 — single-pass Eyes pipeline (background rembg matte).
+    # ``clean_image_url`` is populated asynchronously after the item is
+    # saved, by a FastAPI BackgroundTask that runs rembg on the raw
+    # bytes. It carries the alpha-channelled PNG so the closet grid can
+    # render a borderless cutout on the next refresh; until rembg
+    # finishes the frontend renders ``original_image_url`` instead.
+    # ``clean_image_status`` cycles ``pending``  ``ready``  ``failed``
+    # so the UI can show a tiny "polishing photo…" affordance during
+    # the few seconds rembg is running. Both fields are nullable so
+    # legacy items (and one-pass items that skipped rembg entirely)
+    # remain valid documents.
+    clean_image_url: str | None = None
+    clean_image_status: str | None = None  # "pending" | "ready" | "failed"
     variants: list[dict[str, Any]] = Field(default_factory=list)
     embedding_id: str | None = None
     # Purchase history

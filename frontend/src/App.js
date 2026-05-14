@@ -8,6 +8,7 @@ import { PayPalProvider } from '@/lib/paypal';
 import { AppLayout } from '@/components/AppLayout';
 import { PublicOnly } from '@/components/PublicOnly';
 import { SeoBase } from '@/components/SeoBase';
+import { LanguageSwitchOverlay } from '@/components/LanguageSwitchOverlay';
 
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
@@ -36,6 +37,7 @@ function App() {
           <PayPalProvider>
             <BrowserRouter>
           <SeoBase />
+          <LanguageSwitchOverlay />
           <a
             href="#main-content"
             className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[1000] focus:bg-primary focus:text-primary-foreground focus:px-4 focus:py-2 focus:rounded-lg"
