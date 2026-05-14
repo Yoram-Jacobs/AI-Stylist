@@ -1,34 +1,34 @@
 [
   {
-    "content": "Phase 3.1: Map AddItemReview / closet grid / item card components",
+    "content": "Phase 4.1: Build the Eyes_OnePass_Benchmark.ipynb cell structure",
     "status": "completed"
   },
   {
-    "content": "Phase 3.2: AddItemReview wires the bbox-cropped JPEG from one-pass /analyze response",
+    "content": "Phase 4.2: Implement CCP bitmap-to-bbox conversion (Supervisely format → normalised 0..1000 grid)",
     "status": "completed"
   },
   {
-    "content": "Phase 3.3: Item thumbnail renders clean_image_url when ready, falls back to original; tiny 'polishing photo…' overlay while pending",
+    "content": "Phase 4.3: ipywidgets accept/reject/edit UI for label verification",
     "status": "completed"
   },
   {
-    "content": "Phase 3.4: Background poll on GET /closet/{id} to swap in clean cutout once status=ready (with backoff & cleanup)",
+    "content": "Phase 4.4: HTTP client that hits /closet/analyze with EYES_ONE_PASS=true + per-photo IoU compute",
     "status": "completed"
   },
   {
-    "content": "Phase 3.5: 'Repair photo' CTA on items with reconstruction_advised=true, wires to existing POST /closet/{id}/repair",
+    "content": "Phase 4.5: 90th-percentile IoU report + gate decision (flip flag if ≥0.7 on 90% of photos)",
     "status": "completed"
   },
   {
-    "content": "Phase 3.6: Add item.repairPhoto + item.polishingPhoto + reshootSuccess/Rejected/Error keys to all 12 locales",
+    "content": "Phase 4.6: Companion runbook doc (one-shot procedure to flip EYES_ONE_PASS=true in deploy/.env.example)",
     "status": "completed"
   },
   {
-    "content": "Phase 3.7: Lint + esbuild + screenshot verification",
+    "content": "Phase 4.7: Validate notebook JSON parses + smoke-run the non-LLM cells locally",
     "status": "completed"
   },
   {
-    "content": "Phase 3 review checkpoint with user",
+    "content": "Phase 4 review checkpoint",
     "status": "in_progress"
   }
 ]
