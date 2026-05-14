@@ -9,6 +9,6 @@
   },
   {
     "content": "Run testing agent (backend + frontend) to verify legacy hot path & renamed UI states",
-    "status": "in_progress"
+    "status": "completed"
   }
 ]
