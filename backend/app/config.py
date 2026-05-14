@@ -133,10 +133,11 @@ class Settings:
     )
 
     # --- Gemini Nano Banana (image generation + edit) -----------------
-    # Native Google model id. Requires ``GEMINI_API_KEY`` — the Emergent
-    # proxy does not route image-generation traffic, which is why we
-    # historically fell back to HF FLUX. In production with a direct
-    # key, this is preferred over FLUX (sharper, no category drift).
+    # Native Google model id used by the reconstruction pipeline and the
+    # /closet/{id}/edit-image endpoint. Requires a direct ``GEMINI_API_KEY``
+    # because the Emergent proxy does not route image-generation traffic.
+    # The earlier HF FLUX fallback was retired in May 2026 — when the
+    # direct key is absent we now return 503 instead of degrading.
     GEMINI_IMAGE_MODEL: str = os.environ.get(
         "GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"
     )
@@ -260,12 +261,6 @@ class Settings:
     )
     # Set to "0" to disable the local load (useful for tests / CI).
     FASHION_CLIP_ENABLED: bool = os.environ.get("FASHION_CLIP_ENABLED", "1") == "1"
-
-    # --- Hugging Face image generation (replaces Nano Banana edit/generate) ---
-    HF_IMAGE_MODEL: str = os.environ.get(
-        "HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell"
-    )
-    HF_IMAGE_PROVIDER: str = os.environ.get("HF_IMAGE_PROVIDER", "hf-inference")
 
     # --- Groq (Whisper-v3) ---
     GROQ_API_KEY: str | None = os.environ.get("GROQ_API_KEY")

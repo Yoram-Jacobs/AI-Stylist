@@ -508,8 +508,8 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
         "ai": {
             "stylist_provider": settings.DEFAULT_STYLIST_PROVIDER,
             "stylist_model": settings.DEFAULT_STYLIST_MODEL,
-            "image_model": settings.HF_IMAGE_MODEL,
-            "image_provider": settings.HF_IMAGE_PROVIDER,
+            "image_model": settings.GEMINI_IMAGE_MODEL,
+            "image_provider": "google-nano-banana",
             "segmentation_model": settings.HF_SAM_MODEL,
             "tts_model": settings.DEFAULT_TTS_MODEL,
             "whisper_model": settings.WHISPER_MODEL,
@@ -517,7 +517,6 @@ async def system_view(_: dict = Depends(require_admin)) -> dict[str, Any]:
         "keys_present": {
             "EMERGENT_LLM_KEY": _has(settings.EMERGENT_LLM_KEY),
             "GEMINI_API_KEY": _has(settings.GEMINI_API_KEY),
-            "HF_TOKEN": _has(settings.HF_TOKEN),
             "GROQ_API_KEY": _has(settings.GROQ_API_KEY),
             "DEEPGRAM_API_KEY": _has(settings.DEEPGRAM_API_KEY),
             "OPENWEATHER_API_KEY": _has(settings.OPENWEATHER_API_KEY),

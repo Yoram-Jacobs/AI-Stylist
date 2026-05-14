@@ -17,8 +17,6 @@ from app.services.deepgram_service import deepgram_service
 from app.services.gemini_stylist import image_bytes_to_base64
 from app.services.stylist_brain import stylist_brain_service
 from app.services.groq_service import groq_whisper_service
-from app.services.hf_image_service import hf_image_service
-from app.services.hf_segmentation import hf_segmentation_service
 from app.services.weather_service import weather_service
 
 logger = logging.getLogger(__name__)
@@ -104,35 +102,17 @@ async def get_styling_advice(
     if not final_user_text:
         raise ValueError("No user text available after transcription")
 
-    # --- 2. Segment the garment if an image was supplied (Hugging Face SAM)
-    if image_bytes and hf_segmentation_service is not None:
-        t0 = time.perf_counter()
-        try:
-            seg = await hf_segmentation_service.segment_garment(image_bytes)
-            if seg.get("image_b64"):
-                result["segmented_image_url"] = (
-                    f"data:{seg.get('mime_type', 'image/png')};base64,"
-                    f"{seg['image_b64']}"
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Segmentation failed: %s", exc)
-        latency["segmentation_ms"] = int((time.perf_counter() - t0) * 1000)
+    # NOTE: the legacy Hugging Face segmentation pre-pass (which used to
+    # populate ``result["segmented_image_url"]``) and the HF FLUX infill
+    # branch (which used to populate ``result["infilled_image_url"]``)
+    # were removed in May 2026 along with the rest of the HF runtime
+    # surface. Both keys are kept in the response shape (initialised to
+    # None above) so existing frontend consumers don't see a missing
+    # field — they just always get ``null``. If we ever re-introduce a
+    # Nano-Banana-based infill, wire it in here so the response shape
+    # stays stable.
 
-    # --- 3. Optional infill / edit (HF FLUX text-to-image)
-    if image_bytes and do_infill and infill_prompt and hf_image_service is not None:
-        t0 = time.perf_counter()
-        try:
-            edit = await hf_image_service.edit(image_bytes, infill_prompt)
-            if edit.get("image_b64"):
-                result["infilled_image_url"] = (
-                    f"data:{edit.get('mime_type', 'image/png')};base64,"
-                    f"{edit['image_b64']}"
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Infill failed: %s", exc)
-        latency["infill_ms"] = int((time.perf_counter() - t0) * 1000)
-
-    # --- 4. Weather
+    # --- 2. Weather
     if lat is not None and lng is not None and weather_service is not None:
         t0 = time.perf_counter()
         try:
@@ -158,13 +138,13 @@ async def get_styling_advice(
     else:
         weather_ctx = None
 
-    # --- 5. Calendar context summary
+    # --- 3. Calendar context summary
     if calendar_events:
         result["calendar_summary"] = ", ".join(
             f"{e.get('title')} [{e.get('formality_hint')}]" for e in calendar_events
         )
 
-    # --- 6. Stylist brain (Gemini 2.5 Pro; future: Gemma4-E4B fallback)
+    # --- 4. Stylist brain (Gemini 2.5 Pro; future: Gemma4-E4B fallback)
     image_b64 = image_bytes_to_base64(image_bytes) if image_bytes else None
     t0 = time.perf_counter()
     advice = await brain.advise(
@@ -199,7 +179,7 @@ async def get_styling_advice(
         "reasoning_summary", ""
     )
 
-    # --- 7. Deepgram Aura-2 TTS
+    # --- 5. Deepgram Aura-2 TTS
     if synthesize_tts and result["spoken_reply"] and deepgram_service is not None:
         t0 = time.perf_counter()
         try:

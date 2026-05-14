@@ -2,16 +2,18 @@
 
 Takes a potentially-bad garment crop (from the multi-item extractor or a
 single upload) and decides whether it needs reconstruction. When it does,
-we prefer **Nano Banana** (`gemini-2.5-flash-image`, native Google SDK,
-requires ``GEMINI_API_KEY``) and fall back to **HF FLUX.1-schnell** when
-the direct Gemini key isn't configured (dev preview).
+we use **Nano Banana** (`gemini-2.5-flash-image`, native Google SDK,
+requires ``GEMINI_API_KEY``). The earlier HF FLUX.1-schnell fallback was
+removed in May 2026 along with the rest of the HF runtime surface — if
+the direct Gemini key is absent, reconstruction returns ``None`` so the
+caller keeps the original crop.
 
 Public API
 ----------
 * ``should_reconstruct(analysis, bbox, frame_size) -> (bool, list[str])``
   Fast, local heuristics. Returns ``(needs_repair, reasons)``.
 * ``reconstruct(crop_bytes, analysis, *, validate=True) -> dict | None``
-  Runs the chosen reconstructor with a composed prompt and (optionally)
+  Runs the reconstructor with a composed prompt and (optionally)
   sanity-checks the output by re-analysing the generated image. Returns
   ``{image_b64, mime_type, prompt, validated, rejected_reason}`` or
   ``None`` on unrecoverable failure.
@@ -25,7 +27,6 @@ import logging
 from typing import Any
 
 from app.services.gemini_image_service import gemini_image_service
-from app.services.hf_image_service import hf_image_service
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +171,13 @@ async def reconstruct(
     reasons: list[str] | None = None,
     validate: bool = True,
 ) -> dict[str, Any] | None:
-    """Run the HF FLUX reconstructor on a crop and return a data payload.
+    """Run the Nano Banana reconstructor on a crop and return a data payload.
 
     The returned dict has:
         image_b64:       base64 PNG of the repaired image
         mime_type:       image/png
         prompt:          the composed text prompt used
-        model:           HF model id
+        model:           model id used for the reconstruction
         reasons:         which heuristics triggered repair
         validated:       True if the post-gen sanity check accepted the
                          result; False if we rejected it (caller should
@@ -186,13 +187,14 @@ async def reconstruct(
     On a pipeline-level failure we return ``None`` and log a warning —
     the caller must keep using the original crop.
     """
-    # Prefer Nano Banana when a direct Gemini key is configured (better
-    # quality, no hallucinated category drift). Fall back to HF FLUX in
-    # dev preview where only the Emergent key is available.
-    image_service = gemini_image_service or hf_image_service
-    if image_service is None:
+    # Reconstruction now runs only on Nano Banana (`gemini-2.5-flash-image`).
+    # The legacy HF FLUX.1-schnell fallback was retired in May 2026 — if no
+    # direct ``GEMINI_API_KEY`` is configured we return ``None`` and the
+    # caller keeps the original crop.
+    if gemini_image_service is None:
         return None
-    using = "nano-banana" if image_service is gemini_image_service else "hf-flux"
+    image_service = gemini_image_service
+    using = "nano-banana"
     prompt = _build_reconstruction_prompt(analysis)
     try:
         out = await image_service.edit(

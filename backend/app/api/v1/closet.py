@@ -39,8 +39,7 @@ from app.services.auth import get_current_user
 from app.services.fees import compute_fees
 from app.services.garment_vision import garment_vision_service
 from app.services.fashion_clip import fashion_clip_service
-from app.services.hf_image_service import hf_image_service
-from app.services.hf_segmentation import hf_segmentation_service
+from app.services.gemini_image_service import gemini_image_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
@@ -369,17 +368,12 @@ async def create_item(
         background_tasks.add_task(
             _run_background_matte, item_id_for_bg, raw_for_bg,
         )
-    elif raw_bytes and hf_segmentation_service is not None:
-        try:
-            seg = await hf_segmentation_service.segment_garment(raw_bytes)
-            if seg.get("image_b64"):
-                doc["segmented_image_url"] = (
-                    f"data:{seg.get('mime_type', 'image/png')};base64,"
-                    f"{seg['image_b64']}"
-                )
-                doc["segmentation_model"] = seg.get("model_used")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Segmentation skipped for item %s: %s", item.id, exc)
+    elif raw_bytes:
+        # Legacy HF Inference API segmentation fallback was removed in May
+        # 2026 — the in-pod SegFormer path (``clothing_parser``) above and
+        # the deferred rembg matte task cover this case, so a missing
+        # ``segmented_image_url`` here is expected when neither was wired.
+        pass
 
     # Best-effort FashionCLIP embedding: persist a 512-d L2-normalised
     # vector so the closet can later be searched by similarity
@@ -2359,10 +2353,11 @@ async def repair_item_image(
     """Rebuild a clean product-grade image for an existing closet item.
 
     Uses the item's stored analysis fields (title, category, color,
-    material, pattern, brand, ...) to drive HF FLUX. An optional
-    ``user_hint`` is woven into the prompt so users who noticed a
-    missing detail (e.g., "three-quarter sleeves") can steer the
-    generation. Falls back cleanly when HF is unavailable.
+    material, pattern, brand, ...) to drive Nano Banana
+    (``gemini-2.5-flash-image``). An optional ``user_hint`` is woven into
+    the prompt so users who noticed a missing detail (e.g., "three-quarter
+    sleeves") can steer the generation. Returns 503 cleanly when Nano
+    Banana is unavailable.
     """
     from app.services.reconstruction import reconstruct
 
@@ -2993,10 +2988,14 @@ async def edit_item_image(
     source_url = item.get("segmented_image_url") or item.get("original_image_url")
     if not source_url:
         raise HTTPException(400, "No source image on this item")
-    if hf_image_service is None:
+    if gemini_image_service is None:
+        # Nano Banana (gemini-2.5-flash-image) requires a direct
+        # GEMINI_API_KEY. The legacy HF FLUX fallback was retired in May
+        # 2026, so when the direct key is absent we surface a clean 503
+        # instead of silently degrading.
         raise HTTPException(503, "Image generation service not configured")
     try:
-        edit = await hf_image_service.edit(
+        edit = await gemini_image_service.edit(
             source_url,
             prompt,
             garment_metadata={
@@ -3009,7 +3008,7 @@ async def edit_item_image(
             },
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("HF image edit failed for item %s: %s", item_id, exc)
+        logger.warning("Nano Banana image edit failed for item %s: %s", item_id, exc)
         raise HTTPException(
             503,
             "Image generation is temporarily unavailable. Please try again shortly.",
