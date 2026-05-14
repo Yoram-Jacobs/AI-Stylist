@@ -737,6 +737,15 @@ class AnalyzeIn(BaseModel):
     # so a single outfit photo expands into one card per garment / accessory.
     # Set False to force a single, whole-frame analysis (legacy behaviour).
     multi: bool = True
+    # Optional ISO-639-1 code (``"en"`` / ``"he"`` / ``"ar"`` / ``"ru"`` / ...)
+    # that overrides ``user.preferred_language`` for THIS request only.
+    # The frontend should pass ``i18n.language`` here so the Gemini output
+    # (``name`` / ``title`` / ``caption``) matches the UI the user is
+    # currently looking at, even when their saved profile language is
+    # stale. When omitted the handler falls back to the profile, then
+    # ``"en"``. Enum/category values stay canonical English regardless
+    # \u2014 the frontend i18n layer translates those for display.
+    language: str | None = None
 
 
 def _apply_defaults(parsed: dict[str, Any]) -> dict[str, Any]:
@@ -795,7 +804,16 @@ async def analyze_item_image(
         raise HTTPException(400, "Could not load image bytes")
 
     # Multi-item pipeline (default). Degrades gracefully to single.
-    user_lang = (user or {}).get("preferred_language") or "en"
+    # Language priority: explicit request override > profile setting > "en".
+    # Letting the frontend pass ``i18n.language`` here keeps the Eyes
+    # output in sync with the locale the user is actually viewing, which
+    # is what they expect (their profile setting is often stale or
+    # was never set during signup).
+    user_lang = (
+        (payload.language or "").strip().lower()
+        or (user or {}).get("preferred_language")
+        or "en"
+    )
     if payload.multi:
         # Phase O.6 — single-pass branch (gated by EYES_ONE_PASS).
         # When enabled the pipeline does ONE Eyes call that returns
@@ -2113,6 +2131,10 @@ class PhotoIn(BaseModel):
     # semantic cutout before storing. When False we store the raw upload
     # verbatim (useful when the user already has a product-shot PNG).
     auto_segment: bool = True
+    # Optional override for the analyzer's output language (see
+    # ``AnalyzeIn.language`` for the full contract). Falls through to
+    # ``user.preferred_language`` then ``"en"`` when omitted.
+    language: str | None = None
 
 
 @router.post("/{item_id}/photo")
@@ -2152,11 +2174,16 @@ async def set_item_photo(
 
     if payload.auto_segment and garment_vision_service is not None:
         # Single-item pipeline: analyse with max_items=1 so we get a
-        # semantic cutout of the dominant garment. Never fatal — on any
+        # semantic cutout of the dominant garment. Never fatal \u2014 on any
         # error we just keep the raw upload.
+        photo_lang = (
+            (payload.language or "").strip().lower()
+            or (user or {}).get("preferred_language")
+            or "en"
+        )
         try:
             items = await garment_vision_service.analyze_outfit(
-                raw, max_items=1
+                raw, max_items=1, language=photo_lang,
             )
             if items:
                 first = items[0]

@@ -124,7 +124,7 @@ const hydrate = (a, user) => {
 
 /* -------------------- page -------------------- */
 export default function AddItem() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const nav = useNavigate();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -503,13 +503,20 @@ export default function AddItem() {
     // is usually a transient timeout / cold-start; a 1.2s pause and a
     // second attempt clears most of those without piling more work
     // onto an already-stressed backend.
+    //
+    // We pass ``language: i18n.language`` so The Eyes' Gemini prompt
+    // produces ``name`` / ``title`` / ``caption`` in the locale the
+    // user is currently viewing the UI in \u2014 not whatever was on
+    // their profile at signup. Enum / category strings stay canonical
+    // English; the frontend i18n layer translates those for display.
+    const requestLang = (i18n.language || '').split('-')[0] || 'en';
     const analyzeWithRetry = async (b64) => {
       try {
-        return await api.analyzeItemImage({ image_base64: b64 });
+        return await api.analyzeItemImage({ image_base64: b64, language: requestLang });
       } catch (firstErr) {
         await new Promise((r) => setTimeout(r, 1200));
         try {
-          return await api.analyzeItemImage({ image_base64: b64 });
+          return await api.analyzeItemImage({ image_base64: b64, language: requestLang });
         } catch (_secondErr) {
           throw firstErr;
         }
@@ -753,7 +760,10 @@ export default function AddItem() {
       );
     }, 250);
     try {
-      const resp = await api.analyzeItemImage({ image_base64: card.base64 });
+      // Pass current UI locale so Gemini name/caption come back in the
+      // language the user is reading the app in — see ``AnalyzeIn.language``.
+      const requestLang = (i18n.language || '').split('-')[0] || 'en';
+      const resp = await api.analyzeItemImage({ image_base64: card.base64, language: requestLang });
       clearInterval(tick);
       // New API shape: { items: [...], count, ...topLevelAnalysisMirror }.
       // Legacy callers that still get a single object without `items` keep working.

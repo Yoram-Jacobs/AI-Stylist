@@ -300,30 +300,47 @@ export default function Closet() {
 
   const handleDelete = async () => {
     if (selected.size === 0) return;
-    setDeleting(true);
     const ids = Array.from(selected);
-    const results = await Promise.allSettled(ids.map((id) => api.deleteItem(id)));
-    const ok = results.filter((r) => r.status === 'fulfilled').length;
-    const fail = results.length - ok;
-    setDeleting(false);
+    // Snapshot the items we're about to remove so we can roll back
+    // any whose backend DELETE later fails. The closetStore is the
+    // UI's source of truth — once we remove from it the user sees
+    // the items gone in the grid, the count tile, the bottom tab
+    // badge, and the duplicate-detector on AddItem. The MongoDB
+    // round-trip happens in the background, restoring the original
+    // "tap-and-done" feel.
+    const snapshots = items.filter((it) => selected.has(it.id));
+
+    // Optimistic: remove from store, close the dialog, exit select
+    // mode. The UI now reflects the deletion instantly.
+    snapshots.forEach((it) => store.remove(it.id));
+    setSelected(new Set());
     setConfirmOpen(false);
-    if (ok && !fail) {
-      toast.success(`${ok} item${ok === 1 ? '' : 's'} deleted`);
-    } else if (ok && fail) {
-      toast.message(`Deleted ${ok}, failed ${fail}`);
+    setSelectMode(false);
+
+    // Background reconciliation. We mark the page as `deleting` only
+    // for the duration of the round-trip so any error state can
+    // surface a spinner if needed (most users will already be doing
+    // something else by the time this resolves).
+    setDeleting(true);
+    const results = await Promise.allSettled(ids.map((id) => api.deleteItem(id)));
+    setDeleting(false);
+
+    const failedIds = ids.filter((_, idx) => results[idx].status === 'rejected');
+    if (failedIds.length === 0) {
+      toast.success(`${ids.length} item${ids.length === 1 ? '' : 's'} deleted`);
+      return;
+    }
+    // Roll back the failed ones so the UI matches reality again.
+    const failedSet = new Set(failedIds);
+    snapshots
+      .filter((it) => failedSet.has(it.id))
+      .forEach((it) => store.upsert(it));
+    const okCount = ids.length - failedIds.length;
+    if (okCount > 0) {
+      toast.message(`Deleted ${okCount}, failed ${failedIds.length}`);
     } else {
       toast.error(t('pages.closet.could_not_delete_the_selected'));
     }
-    // Drop deleted items from the global store so every page sees
-    // the change immediately (Closet, AddItem duplicate-check,
-    // Stylist picker). We let the periodic incremental sync reconcile
-    // ``total`` rather than firing a full refetch.
-    const okIds = new Set(
-      ids.filter((_, idx) => results[idx].status === 'fulfilled'),
-    );
-    okIds.forEach((id) => store.remove(id));
-    setSelected(new Set());
-    setSelectMode(false);
   };
 
   const onCardClick = (e, item) => {

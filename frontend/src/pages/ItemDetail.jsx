@@ -411,7 +411,7 @@ function NullableSelect({ value, onChange, options, placeholder, testid, format 
 
 /* ========================= Page ========================= */
 export default function ItemDetail() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { id } = useParams();
   const nav = useNavigate();
@@ -500,6 +500,11 @@ export default function ItemDetail() {
         // "Analyze" afterwards. This avoids surprise field rewrites
         // and a long automatic wait the user didn't ask for.
         autoSegment: false,
+        // Pass through the current UI locale so that if the caller
+        // later flips ``autoSegment`` back on, the analyzer output
+        // matches what the user sees in the app. Harmless no-op while
+        // ``autoSegment`` is false.
+        language: (i18n.language || '').split('-')[0] || 'en',
       });
       setItem(res.item);
       setForm(toFormState(res.item, user));
@@ -736,19 +741,31 @@ export default function ItemDetail() {
   };
 
   const onDelete = async () => {
+    // Optimistic-first delete: the closetStore is the user's "edge
+    // database" — UI must reflect the change instantly, the
+    // round-trip to MongoDB happens in the background, and we only
+    // reverse the optimistic change if the server actually rejected
+    // the delete. This restores the supercharged UX that turned
+    // closet ops from "tap-and-wait-2s" into "tap-and-done".
+    let closetStoreRef = null;
     try {
-      await api.deleteItem(id);
-      // Drop from the global store so /closet reflects the deletion
-      // immediately without a refetch.
-      try {
-        const { closetStore } = await import('@/lib/closetStore');
-        closetStore.remove(id);
-      } catch { /* non-blocking */ }
-      toast.success(t('itemDetail.deleted'));
-      nav('/closet');
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || t('closet.deleteFailed'));
+      const mod = await import('@/lib/closetStore');
+      closetStoreRef = mod.closetStore;
+    } catch {
+      // If we can't import the store for some weird reason, fall
+      // back to the old serialised path so we don't lose the delete.
     }
+    const snapshot = item;
+    if (closetStoreRef) closetStoreRef.remove(id);
+    toast.success(t('itemDetail.deleted'));
+    nav('/closet');
+    // Fire-and-forget — we're already off the page. Reconcile on failure.
+    api.deleteItem(id).catch((err) => {
+      if (closetStoreRef && snapshot) {
+        closetStoreRef.upsert(snapshot);
+      }
+      toast.error(err?.response?.data?.detail || t('closet.deleteFailed'));
+    });
   };
 
   if (loading || !item || !form) {
