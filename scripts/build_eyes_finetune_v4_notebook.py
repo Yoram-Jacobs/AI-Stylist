@@ -1033,6 +1033,14 @@ class GemmaVLCollator:
     pad_token_id: int
     ignore_index: int = -100
 
+    # Class attribute — ships with the pickled collator, so DataLoader
+    # workers see it whether they fork or spawn. Module-level globals
+    # do not reliably survive cross-process fan-out.
+    SEQ_KEYS = frozenset({
+        'input_ids', 'labels', 'attention_mask',
+        'token_type_ids', 'mm_token_type_ids',
+    })
+
     def __call__(self, batch):
         max_seq = max(b['input_ids'].shape[0] for b in batch)
         keys    = list(batch[0].keys())
@@ -1041,7 +1049,7 @@ class GemmaVLCollator:
             samples = [b[k] for b in batch if k in b]
             if not samples or not torch.is_tensor(samples[0]):
                 continue
-            if k in SEQ_KEYS:
+            if k in self.SEQ_KEYS:
                 pad_val = {
                     'input_ids':         self.pad_token_id,
                     'labels':            self.ignore_index,
