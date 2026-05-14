@@ -511,9 +511,18 @@ target_json_str, source_tag)` tuples.
 """
 
 CODE_CCP_LOADER = """\
-import base64, io, json, zlib, hashlib
+# Drive-safe CCP-DatasetNinja loader:
+#   1) Bounded-depth root discovery (NO rglob - Drive FUSE makes it hang).
+#   2) rsync mirror Drive -> local /content/ SSD (one-shot, ~30-60s vs ~30min
+#      of per-file Drive RPCs).
+#   3) tqdm progress bar.
+#   4) Parsed records cached to /content/ccp_records.json so kernel restarts
+#      don't redo the parse.
+import base64, io, json, zlib
 import numpy as np
+from pathlib import Path
 from PIL import Image
+from tqdm.auto import tqdm
 
 CCP_TO_CATEGORY = {
     # Tops
@@ -535,12 +544,47 @@ CCP_TO_CATEGORY = {
 }
 EXCLUDE = {'skin', 'hair', 'null', ''}
 
+LOCAL_CCP = Path('/content/ccp_local')
+CCP_CACHE = Path('/content/ccp_records.json')
 
-def _find_dataset_root(base):
-    for path in base.rglob('img'):
-        if path.is_dir() and (path.parent / 'ann').is_dir():
-            return path.parent
-    raise FileNotFoundError(f'No img/ + ann/ pair under {base}')
+
+def _find_dataset_root(base: Path) -> Path:
+    \"\"\"Return the directory containing both img/ and ann/. Check up to
+    depth 3 only -- Drive FUSE is too slow for rglob.\"\"\"
+    candidates = [base]
+    try:
+        candidates += [p for p in base.iterdir() if p.is_dir()][:50]
+    except (PermissionError, OSError):
+        pass
+    for p in list(candidates):
+        if p == base: continue
+        try:
+            candidates += [q for q in p.iterdir() if q.is_dir()][:20]
+        except (PermissionError, OSError):
+            pass
+    for c in candidates:
+        if (c / 'img').is_dir() and (c / 'ann').is_dir():
+            return c
+    raise FileNotFoundError(
+        f'No img/ + ann/ pair found under {base} (depth 3). '
+        f'Inspect with: !find {base} -maxdepth 3 -type d | head -30'
+    )
+
+
+if not (LOCAL_CCP / '_done').exists():
+    print('Locating CCP root on Drive...')
+    drive_root = _find_dataset_root(CCP_DIR)
+    print(f'Found: {drive_root}')
+    print(f'Mirroring to {LOCAL_CCP} (one-time)...')
+    LOCAL_CCP.mkdir(parents=True, exist_ok=True)
+    !rsync -a --info=progress2 --exclude='*/.ipynb_checkpoints' \\
+        \"{drive_root}/\" \"{LOCAL_CCP}/\"
+    (LOCAL_CCP / '_done').touch()
+    print('Mirror complete.')
+else:
+    print(f'Using existing local mirror at {LOCAL_CCP}')
+
+ROOT = LOCAL_CCP
 
 
 def _decode_mask_bbox(bitmap_obj):
@@ -566,18 +610,29 @@ def _norm_bbox(x1, y1, x2, y2, w, h):
 
 
 def load_ccp_records():
-    root = _find_dataset_root(CCP_DIR)
+    if CCP_CACHE.exists():
+        print(f'Loading parsed records from cache: {CCP_CACHE}')
+        return [tuple(r) for r in json.loads(CCP_CACHE.read_text())]
+
+    img_files = sorted((ROOT / 'img').glob('*.jpg'))
+    print(f'Found {len(img_files)} jpgs; parsing annotations...')
     records = []
-    for jpg in sorted((root / 'img').glob('*.jpg')):
-        ann_path = root / 'ann' / f'{jpg.name}.json'
+    for jpg in tqdm(img_files, desc='CCP', unit='img'):
+        ann_path = ROOT / 'ann' / f'{jpg.name}.json'
         if not ann_path.exists():
             continue
-        ann = json.loads(ann_path.read_text())
+        try:
+            ann = json.loads(ann_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
         w = int(ann.get('size', {}).get('width') or 0)
         h = int(ann.get('size', {}).get('height') or 0)
         if not (w and h):
-            with Image.open(jpg) as im:
-                w, h = im.size
+            try:
+                with Image.open(jpg) as im:
+                    w, h = im.size
+            except Exception:
+                continue
         items = []
         for obj in ann.get('objects', []):
             cls = (obj.get('classTitle') or '').lower().strip()
@@ -596,11 +651,14 @@ def load_ccp_records():
         if items:
             target = json.dumps(items, ensure_ascii=False, separators=(',', ':'))
             records.append((str(jpg), target, 'ccp'))
+
+    CCP_CACHE.write_text(json.dumps(records))
+    print(f'Cached {len(records)} records to {CCP_CACHE}')
     return records
 
 
 ccp_records = load_ccp_records()
-print(f'CCP records (>=1 garment): {len(ccp_records)}')
+print(f'\\nCCP records (>=1 garment): {len(ccp_records)}')
 print('sample:', ccp_records[0][1][:300])
 """
 
@@ -810,6 +868,8 @@ each source (CCP and DeepFashion) so val + test always contain a mix.
 """
 
 CODE_SPLIT = """\
+import hashlib
+
 def _bucket(path):
     h = int(hashlib.sha256(path.encode()).hexdigest(), 16) % 100
     if h < 80: return 'train'
