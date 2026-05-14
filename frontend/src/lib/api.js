@@ -221,8 +221,10 @@ export const api = {
     client
       .post('/closet/import-dpp', { qr_payload: qrPayload }, { timeout: 30000 })
       .then((r) => r.data),
-  // Phase V6 — add or replace an item's photo (runs The Eyes single-item)
-  setItemPhoto: (itemId, { imageBase64, imageMime = 'image/jpeg', autoSegment = true }) =>
+  // Phase V6 — add or replace an item's photo (runs The Eyes single-item).
+  // ``language`` (optional ISO-639-1 code) overrides the analyzer's output
+  // language for this call — see ``AnalyzeIn.language`` on the backend.
+  setItemPhoto: (itemId, { imageBase64, imageMime = 'image/jpeg', autoSegment = true, language }) =>
     client
       .post(
         `/closet/${itemId}/photo`,
@@ -230,6 +232,7 @@ export const api = {
           image_base64: imageBase64,
           image_mime: imageMime,
           auto_segment: autoSegment,
+          ...(language ? { language } : {}),
         },
         { timeout: 120000 },
       )

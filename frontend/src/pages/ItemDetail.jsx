@@ -411,7 +411,7 @@ function NullableSelect({ value, onChange, options, placeholder, testid, format 
 
 /* ========================= Page ========================= */
 export default function ItemDetail() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { id } = useParams();
   const nav = useNavigate();
@@ -500,6 +500,11 @@ export default function ItemDetail() {
         // "Analyze" afterwards. This avoids surprise field rewrites
         // and a long automatic wait the user didn't ask for.
         autoSegment: false,
+        // Pass through the current UI locale so that if the caller
+        // later flips ``autoSegment`` back on, the analyzer output
+        // matches what the user sees in the app. Harmless no-op while
+        // ``autoSegment`` is false.
+        language: (i18n.language || '').split('-')[0] || 'en',
       });
       setItem(res.item);
       setForm(toFormState(res.item, user));
