@@ -241,7 +241,9 @@ def _match_greedy(
 # -----------------------------------------------------------------
 # Per-image benchmark
 # -----------------------------------------------------------------
-async def _benchmark_one_image(jpg_path: Path) -> dict[str, Any]:
+async def _benchmark_one_image(
+    jpg_path: Path, *, analyzer: str = "one_pass",
+) -> dict[str, Any]:
     ann_path = jpg_path.with_suffix(jpg_path.suffix + ".json")
     if not ann_path.exists():
         return {"image": jpg_path.name, "skipped": "no annotation"}
@@ -262,9 +264,24 @@ async def _benchmark_one_image(jpg_path: Path) -> dict[str, Any]:
 
     t0 = time.perf_counter()
     try:
-        result = await garment_vision_service.analyze_outfit_one_pass(
-            image_bytes, language="en",
-        )
+        if analyzer == "one_pass":
+            # Phase O.6 path — single Gemini call asked to emit bboxes
+            # for every garment in the frame.
+            result = await garment_vision_service.analyze_outfit_one_pass(
+                image_bytes, language="en",
+            )
+        elif analyzer == "legacy":
+            # Production path today — SegFormer crops the photo into
+            # per-garment bboxes, then N parallel Eyes calls analyse
+            # each crop. The bbox in the returned items comes from
+            # SegFormer's segmentation mask, NOT from Eyes.
+            result = await garment_vision_service.analyze_outfit(
+                image_bytes, language="en",
+            )
+        else:
+            raise ValueError(
+                f"Unknown analyzer {analyzer!r}; expected 'one_pass' or 'legacy'."
+            )
     except Exception as exc:  # noqa: BLE001
         return {
             "image": jpg_path.name,
@@ -389,9 +406,10 @@ def _render_markdown(summary: dict[str, Any], per_image: list[dict[str, Any]]) -
     gate_pass = gate_mean and gate_recall
 
     lines: list[str] = []
-    lines.append("# Eyes One-Pass — CCP-Ninja benchmark report")
+    lines.append("# Eyes — CCP-Ninja benchmark report")
     lines.append("")
     lines.append(
+        f"**Analyzer:** ``{summary.get('analyzer', '?')}``  "
         f"**Dataset:** {summary['n_images']} images "
         f"({summary['n_images_failed']} failed) — "
         f"{summary['n_gt_garments_total']} GT garments, "
@@ -468,6 +486,21 @@ async def main() -> int:
         help="Run on at most N images (default: all in the dataset).",
     )
     parser.add_argument(
+        "--analyzer",
+        choices=("one_pass", "legacy"),
+        default="one_pass",
+        help=(
+            "Which Eyes pipeline to benchmark. ``one_pass`` calls "
+            "``analyze_outfit_one_pass`` (Phase O.6: a single Eyes call "
+            "asked to emit bboxes for every garment). ``legacy`` calls "
+            "``analyze_outfit`` (production today: SegFormer crops the "
+            "photo into per-garment regions, then N parallel Eyes calls "
+            "analyse each crop). The latter is slower (1 + N model calls) "
+            "but typically scores much higher recall because the "
+            "garment-splitting decision is made by SegFormer, not the LLM."
+        ),
+    )
+    parser.add_argument(
         "--out-json", type=Path, default=Path("/tmp/eyes_benchmark.json"),
     )
     parser.add_argument(
@@ -494,19 +527,23 @@ async def main() -> int:
         print("garment_vision_service is None — is GEMINI_API_KEY configured?")
         return 2
 
-    logger.info("Running on %d image(s), concurrency=%d", len(jpgs), args.concurrency)
+    logger.info(
+        "Running on %d image(s), analyzer=%s, concurrency=%d",
+        len(jpgs), args.analyzer, args.concurrency,
+    )
     sem = asyncio.Semaphore(args.concurrency)
 
     async def _run(jpg: Path) -> dict[str, Any]:
         async with sem:
             logger.info("  -> %s", jpg.name)
-            return await _benchmark_one_image(jpg)
+            return await _benchmark_one_image(jpg, analyzer=args.analyzer)
 
     t_start = time.perf_counter()
     per_image = await asyncio.gather(*[_run(j) for j in jpgs])
     wall = time.perf_counter() - t_start
 
     summary = _aggregate(per_image)
+    summary["analyzer"] = args.analyzer
     summary["wall_seconds"] = round(wall, 1)
 
     args.out_json.write_text(
