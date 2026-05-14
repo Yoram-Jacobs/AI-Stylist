@@ -1,5 +1,31 @@
 # DressApp — Development Plan (Core-first) **UPDATED (Eyes v3 / Gemma 4 E2B self-host LIVE on production VPS)**
 
+> 📌 **Last in-chat session — 14 May 2026.** See
+> [`docs/SESSION_2026_05_14.md`](./docs/SESSION_2026_05_14.md) for the
+> full patch-by-patch log. TL;DR shipped in that session:
+>
+> * **Qwen + HF runtime calls fully retired** from `/app/backend`
+>   (DashScope, FLUX, HF Inference API). Stylist now goes
+>   straight to Gemini 2.5 Pro; image edits go to Nano Banana.
+> * **Closet UX restored**: optimistic-first delete; new item card
+>   shows a thumbnail immediately (raw bbox crop, swapped to clean
+>   cutout 5–10 s later via background `_run_background_matte`).
+> * **`/analyze` latency cut ~40 %** (47 s → 29 s on a 2-garment
+>   outfit) by deferring rembg matting to a `BackgroundTask`. Flag
+>   `DEFER_REMBG_ON_ANALYZE` (default `true`) is the kill-switch.
+> * **One-pass Eyes retired.** Three CCP-Ninja benchmark runs proved
+>   Gemini-Flash returns ≤1 garment per call regardless of prompt.
+>   Production uses SegFormer + per-crop Eyes only. `EYES_ONE_PASS`
+>   env var is no longer read.
+> * **SegFormer accessory recall lifted from 0 % → 50–100 %** for
+>   sunglasses / belt / bag / hat / purse via per-category min-area
+>   thresholds in `clothing_parser.py`.
+> * **Open thread:** Gemma-3n fine-tuning Colab notebook is
+>   scaffolded but the model-class question is unresolved — do NOT
+>   run as-is; clarify the HF class with the user first.
+> * **Hetzner deploy of these patches is NOT done** — the preview
+>   pod has them; the production VPS does not.
+
 ## 1) Objectives
 
 ### ✅ Production stabilisation (dressapp.co) — **SHIPPED & VERIFIED**
