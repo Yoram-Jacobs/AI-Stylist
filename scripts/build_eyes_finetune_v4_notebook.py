@@ -954,65 +954,60 @@ CODE_BUILD_EXAMPLE = """\
 import torch
 from PIL import Image as _PIL_Image
 
-# 1D sequence tensors that need right-padding to max length in the batch.
-# Everything else (pixel_values, image_position_ids, ...) is multi-dim and
-# uniform-shape across the batch -- just stacked by the collator.
-SEQ_KEYS = {
-    'input_ids', 'labels', 'attention_mask',
-    'token_type_ids', 'mm_token_type_ids',
-}
-
 def build_example(record, *, ignore_index=-100):
     img_path, target_json, _source = record
     image = _PIL_Image.open(img_path).convert('RGB')
 
-    # Gemma-4 chat format: native system/user/assistant roles, every
-    # content is a list of typed parts, image goes BEFORE text in the
-    # user turn, image is inline (no images= kwarg needed).
+    # Two-step processing.
+    # apply_chat_template(tokenize=True) doesn't reliably extract inline
+    # PIL images from {'type':'image','image': pil} content parts on
+    # Gemma-4. The image processor never runs, so 'image_position_ids'
+    # is missing from the output and the SigLIP vision tower crashes
+    # later with:
+    #   AttributeError: 'bool' object has no attribute 'all'
+    # Reliable workaround: render the template to text first (no
+    # tokenize), then call the processor with text= AND images=
+    # explicitly. The chat template's '{type: image}' placeholder
+    # is paired with the PIL image passed via images=.
     messages_full = [
-        {'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM_PROMPT}]},
-        {'role': 'user',   'content': [
-            {'type': 'image', 'image': image},
-            {'type': 'text',  'text':  USER_INSTRUCTION},
+        {'role': 'system',    'content': SYSTEM_PROMPT},
+        {'role': 'user',      'content': [
+            {'type': 'image'},
+            {'type': 'text', 'text': USER_INSTRUCTION},
         ]},
-        {'role': 'assistant', 'content': [{'type': 'text', 'text': target_json}]},
+        {'role': 'assistant', 'content': target_json},
     ]
     messages_prompt = messages_full[:2]
 
-    full = processor.apply_chat_template(
+    full_text = processor.apply_chat_template(
         messages_full,
+        tokenize=False,
         add_generation_prompt=False,
-        tokenize=True,
-        return_dict=True,
-        return_tensors='pt',
         enable_thinking=False,
     )
-    prompt = processor.apply_chat_template(
+    prompt_text = processor.apply_chat_template(
         messages_prompt,
+        tokenize=False,
         add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors='pt',
         enable_thinking=False,
     )
+
+    full   = processor(text=full_text,   images=image, return_tensors='pt', padding=False)
+    prompt = processor(text=prompt_text, images=image, return_tensors='pt', padding=False)
 
     input_ids = full['input_ids'][0]
     labels    = input_ids.clone()
     n_prompt  = prompt['input_ids'].shape[1]
     labels[:n_prompt] = ignore_index
 
-    # Forward EVERY tensor the processor returned (squeeze the batch dim).
-    # Critical for Gemma-4: image_position_ids and mm_token_type_ids MUST
-    # reach the vision tower / decoder, otherwise the SigLIP patch-position
-    # gate at modeling_gemma4.py:2018 crashes with
-    #   AttributeError: 'bool' object has no attribute 'all'
+    # Forward every tensor the processor returned (squeeze the batch dim).
     out = {}
     for k, v in full.items():
         if torch.is_tensor(v):
             out[k] = v[0] if v.shape[0] == 1 else v
         else:
             out[k] = v
-    out['labels'] = labels                       # override with masked labels
+    out['labels'] = labels
     return out
 
 
@@ -1022,6 +1017,10 @@ for k, v in ex.items():
     shape = tuple(v.shape) if torch.is_tensor(v) else type(v).__name__
     dtype = v.dtype if torch.is_tensor(v) else ''
     print(f'  {k:24s} shape={shape}  dtype={dtype}')
+assert 'image_position_ids' in ex, (
+    \"image_position_ids missing -- processor didn't see the image. \"
+    \"Check transformers version >= 5.5.0.\"
+)
 print(f'  loss-active tokens : {(ex[\"labels\"] != -100).sum().item()}')
 """
 
@@ -1235,20 +1234,15 @@ def _denorm(bb, w, h):
 def _predict(img_path):
     image = _PIL_Image.open(img_path).convert('RGB')
     msgs = [
-        {'role':'system','content':[{'type':'text','text':SYSTEM_PROMPT}]},
-        {'role':'user',  'content':[
-            {'type':'image','image':image},
-            {'type':'text', 'text':USER_INSTRUCTION},
+        {'role': 'system', 'content': SYSTEM_PROMPT},
+        {'role': 'user',   'content': [
+            {'type': 'image'},
+            {'type': 'text', 'text': USER_INSTRUCTION},
         ]},
     ]
-    enc = processor.apply_chat_template(
-        msgs,
-        add_generation_prompt=True,
-        tokenize=True,
-        return_dict=True,
-        return_tensors='pt',
-        enable_thinking=False,
-    ).to(model.device)
+    text = processor.apply_chat_template(
+        msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    enc = processor(text=text, images=image, return_tensors='pt').to(model.device)
     with torch.no_grad():
         out = model.generate(
             **enc,
