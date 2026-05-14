@@ -954,13 +954,21 @@ CODE_BUILD_EXAMPLE = """\
 import torch
 from PIL import Image as _PIL_Image
 
+# 1D sequence tensors that need right-padding to max length in the batch.
+# Everything else (pixel_values, image_position_ids, ...) is multi-dim and
+# uniform-shape across the batch -- just stacked by the collator.
+SEQ_KEYS = {
+    'input_ids', 'labels', 'attention_mask',
+    'token_type_ids', 'mm_token_type_ids',
+}
+
 def build_example(record, *, ignore_index=-100):
     img_path, target_json, _source = record
     image = _PIL_Image.open(img_path).convert('RGB')
 
     # Gemma-4 chat format: native system/user/assistant roles, every
-    # content is a list of typed parts, image goes BEFORE text in
-    # the user turn, image is inline (no images= kwarg needed).
+    # content is a list of typed parts, image goes BEFORE text in the
+    # user turn, image is inline (no images= kwarg needed).
     messages_full = [
         {'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM_PROMPT}]},
         {'role': 'user',   'content': [
@@ -971,8 +979,6 @@ def build_example(record, *, ignore_index=-100):
     ]
     messages_prompt = messages_full[:2]
 
-    # Disable thinking via the template flag (belt-and-braces with the
-    # assert above on SYSTEM_PROMPT).
     full = processor.apply_chat_template(
         messages_full,
         add_generation_prompt=False,
@@ -995,20 +1001,27 @@ def build_example(record, *, ignore_index=-100):
     n_prompt  = prompt['input_ids'].shape[1]
     labels[:n_prompt] = ignore_index
 
-    out = {
-        'input_ids':      input_ids,
-        'attention_mask': full['attention_mask'][0],
-        'labels':         labels,
-        'pixel_values':   full['pixel_values'][0],
-    }
-    if 'token_type_ids' in full:
-        out['token_type_ids'] = full['token_type_ids'][0]
+    # Forward EVERY tensor the processor returned (squeeze the batch dim).
+    # Critical for Gemma-4: image_position_ids and mm_token_type_ids MUST
+    # reach the vision tower / decoder, otherwise the SigLIP patch-position
+    # gate at modeling_gemma4.py:2018 crashes with
+    #   AttributeError: 'bool' object has no attribute 'all'
+    out = {}
+    for k, v in full.items():
+        if torch.is_tensor(v):
+            out[k] = v[0] if v.shape[0] == 1 else v
+        else:
+            out[k] = v
+    out['labels'] = labels                       # override with masked labels
     return out
 
 
 ex = build_example(train[0])
+print('build_example keys :', list(ex.keys()))
 for k, v in ex.items():
-    print(f'  {k:16s} shape={tuple(v.shape)} dtype={v.dtype}')
+    shape = tuple(v.shape) if torch.is_tensor(v) else type(v).__name__
+    dtype = v.dtype if torch.is_tensor(v) else ''
+    print(f'  {k:24s} shape={shape}  dtype={dtype}')
 print(f'  loss-active tokens : {(ex[\"labels\"] != -100).sum().item()}')
 """
 
@@ -1021,26 +1034,34 @@ class GemmaVLCollator:
     ignore_index: int = -100
 
     def __call__(self, batch):
-        max_len = max(len(b['input_ids']) for b in batch)
-        out = {'input_ids':[], 'attention_mask':[], 'labels':[], 'pixel_values':[]}
-        for b in batch:
-            n_pad = max_len - len(b['input_ids'])
-            out['input_ids'].append(
-                torch.cat([b['input_ids'],
-                           torch.full((n_pad,), self.pad_token_id, dtype=b['input_ids'].dtype)]))
-            out['attention_mask'].append(
-                torch.cat([b['attention_mask'],
-                           torch.zeros(n_pad, dtype=b['attention_mask'].dtype)]))
-            out['labels'].append(
-                torch.cat([b['labels'],
-                           torch.full((n_pad,), self.ignore_index, dtype=b['labels'].dtype)]))
-            out['pixel_values'].append(b['pixel_values'])
-        return {
-            'input_ids':      torch.stack(out['input_ids']),
-            'attention_mask': torch.stack(out['attention_mask']),
-            'labels':         torch.stack(out['labels']),
-            'pixel_values':   torch.stack(out['pixel_values']),
-        }
+        max_seq = max(b['input_ids'].shape[0] for b in batch)
+        keys    = list(batch[0].keys())
+        out     = {}
+        for k in keys:
+            samples = [b[k] for b in batch if k in b]
+            if not samples or not torch.is_tensor(samples[0]):
+                continue
+            if k in SEQ_KEYS:
+                pad_val = {
+                    'input_ids':         self.pad_token_id,
+                    'labels':            self.ignore_index,
+                    'attention_mask':    0,
+                    'token_type_ids':    0,
+                    'mm_token_type_ids': 0,
+                }.get(k, 0)
+                padded = [
+                    torch.cat([s, torch.full((max_seq - s.shape[0],),
+                                              pad_val, dtype=s.dtype)])
+                    for s in samples
+                ]
+                out[k] = torch.stack(padded)
+            else:
+                # Multi-dim tensors (pixel_values, image_position_ids, ...).
+                # Visual token budget is fixed (1120) so patch counts are
+                # uniform across the batch -- direct stack works.
+                out[k] = torch.stack(samples)
+        return out
+
 
 collator = GemmaVLCollator(pad_token_id=processor.tokenizer.pad_token_id)
 print('collator ready. pad_id =', collator.pad_token_id)
