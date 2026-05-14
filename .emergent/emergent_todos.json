@@ -1,14 +1,26 @@
 [
   {
-    "content": "Fix orphan repair*/onRepair refs in ItemDetail.jsx",
+    "content": "Rewrite generator: model_id google/gemma-4-E2B-it, AutoModelForMultimodalLM, gemma-4 chat template",
     "status": "completed"
   },
   {
-    "content": "Register EYES_ONE_PASS=false in deploy/.env.example",
+    "content": "Switch HF + Kaggle auth to Colab Secrets (userdata.get)",
     "status": "completed"
   },
   {
-    "content": "Run testing agent (backend + frontend) to verify legacy hot path & renamed UI states",
+    "content": "Update freeze pass for Gemma-4 architecture (language_model.* allowlist + diagnostic print)",
+    "status": "completed"
+  },
+  {
+    "content": "Update GGUF/quantize section with llama.cpp master + defensive mmproj fallback for issue #21775",
+    "status": "completed"
+  },
+  {
+    "content": "Rename output notebook to Eyes_FineTune_v4_Gemma4.ipynb; delete stale Gemma3n.ipynb",
+    "status": "completed"
+  },
+  {
+    "content": "Regenerate notebook, verify JSON + content anchors",
     "status": "completed"
   }
 ]

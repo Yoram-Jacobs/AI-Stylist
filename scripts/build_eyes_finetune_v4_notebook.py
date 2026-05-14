@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""Generator for ``/app/docs/notebooks/Eyes_FineTune_v4_Gemma3n.ipynb``.
+"""Generator for ``/app/docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb``.
 
-Reproduces Eyes from scratch on the **correct** Gemma-3n
-(``google/gemma-3n-e2b-it``) base, using TWO datasets:
+Reproduces Eyes from scratch on the **correct** Gemma-4 E2B base
+(``google/gemma-4-E2B-it``), using TWO datasets:
 
 * DeepFashion-Multimodal (Kaggle, ~12 k images)
 * CCP-DatasetNinja (~2 k images, already mounted in user's Drive)
 
-Replaces the prior ``Eyes_FineTune_v4_OnePass.ipynb`` which targeted the
-wrong (Gemma-3) class. The previous v3-merged checkpoint produced by
-an earlier agent is irrecoverable — it lost the audio tower, PLE
-projections, and vision quant-scale tensors during a wrong-class merge.
+Replaces the prior v4-merged checkpoint produced by an earlier agent
+which was loaded with ``Gemma3ForConditionalGeneration`` — wrong family
+entirely. Gemma 4 is a NEW family released March-April 2026, not a
+revision of Gemma-3 or Gemma-3n. The HF model card for
+``google/gemma-4-E2B-it`` instructs loading via the Auto classes
+(``AutoProcessor`` + ``AutoModelForMultimodalLM``), so that's what we
+do here. The conversation roles are gemma-4's native
+``system`` / ``user`` / ``assistant`` (NOT the Gemma-3 ``model`` role),
+and we explicitly disable Gemma-4's built-in thinking mode so Eyes
+emits a clean JSON array with no ``<|think|>`` reasoning trace.
+
+Auth is via Colab Secrets — the user has already defined
+``HF_TOKEN``, ``KAGGLE_USERNAME``, ``KAGGLE_KEY`` in the Colab sidebar
+(Tools → Secrets). No file uploads or hidden prompts are needed.
 
 Run::
 
@@ -18,14 +28,14 @@ Run::
 
 Output::
 
-    /app/docs/notebooks/Eyes_FineTune_v4_Gemma3n.ipynb
+    /app/docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-OUT = Path("/app/docs/notebooks/Eyes_FineTune_v4_Gemma3n.ipynb")
+OUT = Path("/app/docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb")
 OUT.parent.mkdir(parents=True, exist_ok=True)
 
 
@@ -44,29 +54,43 @@ def code(text):
 # Section 0 — header
 # ─────────────────────────────────────────────────────────────
 MD_TITLE = """\
-# Eyes v4 — Fine-Tune Gemma-3n-E2B on DeepFashion + CCP
+# Eyes v4 — Fine-Tune Gemma-4 E2B on DeepFashion + CCP
 
 > **Objective.** Train a fresh Eyes LoRA on top of Google's official
-> `gemma-3n-e2b-it` checkpoint so that a single Eyes call emits a JSON
-> array `[{label, category, region.bbox}, …]` covering every visible
-> garment.
+> `google/gemma-4-E2B-it` checkpoint so that a single Eyes call emits
+> a JSON array `[{label, category, region.bbox}, …]` covering every
+> visible garment, accessory, or footwear item.
 >
-> **Why a clean restart.** The previous `Eyes_v3_Gemma4_E2B_merged`
-> folder was produced by a prior agent that loaded it with
-> `Gemma3ForConditionalGeneration` — the *non-n* class. That silently
-> dropped the audio tower, the per-layer-embedding projections, and
-> the vision quant-scale tensors during the merge, leaving a corrupt
-> checkpoint we can't recover from. We start over from the official
-> base on HF Hub and lay down a v4 LoRA from there.
+> **Why a clean restart.** The previous `Eyes_v3_*_merged` folder was
+> produced by a prior agent that loaded the base with
+> `Gemma3ForConditionalGeneration` — wrong family entirely. Gemma 4
+> is a NEW family (released March-April 2026), architecturally
+> different from both Gemma-3 and Gemma-3n: it has its own native
+> `system` role, an `enable_thinking` flag, a hybrid local/global
+> attention pattern, Per-Layer Embeddings (PLE) on the small
+> variants, and on E2B/E4B a separate audio tower. Loading it with
+> the wrong class silently dropped projector tensors and corrupted
+> the checkpoint past recovery. We start over here from the official
+> HF Hub release.
 >
-> **Target runtime.** Colab Pro+ A100 (40 GB). ≈ 14 k images × 2 epochs
-> with bf16 + LoRA-only training → roughly 25–35 min wall.
+> **Authoritative loading recipe** (from the model card):
+> ```python
+> from transformers import AutoProcessor, AutoModelForMultimodalLM
+> processor = AutoProcessor.from_pretrained("google/gemma-4-E2B-it")
+> model = AutoModelForMultimodalLM.from_pretrained("google/gemma-4-E2B-it", dtype="auto", device_map="auto")
+> ```
+> No hand-rolled `Gemma4*ForConditionalGeneration` import — the Auto
+> classes will dispatch to whatever the current transformers release
+> ships as the multimodal head for Gemma-4.
+>
+> **Target runtime.** Colab Pro+ A100 (40 GB). ≈ 14 k images × 2
+> epochs with bf16 + LoRA-only training → roughly 25–35 min wall.
 
 ## Inputs
 
 | Asset | Source / Path |
 | --- | --- |
-| Base model (gated) | `google/gemma-3n-e2b-it` on HF Hub |
+| Base model (gated) | `google/gemma-4-E2B-it` on HF Hub |
 | DeepFashion-Multimodal | Kaggle dataset `silverstone1903/deep-fashion-multimodal` |
 | CCP-DatasetNinja | `/content/drive/MyDrive/ccp-DatasetNinja` |
 
@@ -74,27 +98,47 @@ MD_TITLE = """\
 
 | Artifact | Path |
 | --- | --- |
-| Merged fp16 (HF format) | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/Eyes_v4_Gemma3n_merged/` |
-| Text-model GGUF (Q4_K_M) | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/Eyes_v4-Q4_K_M.gguf` |
-| Vision projector GGUF | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/mmproj-Eyes_v4-f16.gguf` |
+| Merged bf16 (HF format) | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/Eyes_v4_Gemma4_merged/` |
+| Text-model GGUF (Q4_K_M) | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/Eyes_v4_Gemma4-Q4_K_M.gguf` |
+| Vision projector GGUF | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/mmproj-Eyes_v4_Gemma4-f16.gguf` |
 | Training run dir | `/content/drive/MyDrive/DressApp_Gemma4_E2B_Training/Eyes_v4_run/` |
 
 ## What "freeze the weights" means here
 
-PEFT-LoRA automatically freezes every base parameter — gradient only
-flows through the injected rank-16 adapters wrapped around the text
-decoder's Linear layers. On top of that, this notebook **explicitly**
-sets `requires_grad=False` on:
+We use **two complementary mechanisms** to keep the base model
+weights pristine and only train a thin LoRA adapter on the text
+decoder's attention/MLP projections:
 
-* the SigLIP vision tower (`vision_tower.*`)
-* the audio tower (`audio_tower.*` — Gemma-3n ships one even though we
-  don't use audio)
-* the multimodal projector (`multi_modal_projector.*`, `embed_vision.*`)
-* the audio embedding projection (`embed_audio.*`)
-* the per-layer-embedding projections (`per_layer_*`, `embed_tokens_per_layer`)
+1. An explicit `requires_grad = False` pass at load time on every
+   parameter outside `language_model.*` (so the vision tower, audio
+   tower, multimodal projector, PLE banks, and any other auxiliary
+   submodules stay frozen no matter what).
+2. PEFT-LoRA on top of that — which by construction freezes every
+   base parameter (whether or not it was already frozen in step 1)
+   and only flows gradient through the rank-16 adapter matrices
+   wrapped around the text decoder's `q/k/v/o/gate/up/down_proj`
+   linears.
 
-Belts-and-braces — these wouldn't train under LoRA anyway, but pinning
-them prevents an accidental future cell from un-freezing them.
+Belt-and-braces: even a future cell that calls `.train()` or
+`.requires_grad_(True)` on the whole model would still leave the
+non-text modules untouched, because LoRA is the only thing that
+holds trainable params at that point.
+
+## Authentication — Colab Secrets (zero prompts)
+
+This notebook reads three secrets from the Colab sidebar (Tools →
+Secrets — toggle "Notebook access" ON for each):
+
+* `HF_TOKEN` — read-access token from
+  <https://huggingface.co/settings/tokens>. The HF account behind the
+  token MUST have accepted the Gemma license on
+  <https://huggingface.co/google/gemma-4-E2B-it> first.
+* `KAGGLE_USERNAME` — your Kaggle username.
+* `KAGGLE_KEY` — the `key` value from a Kaggle API token JSON.
+
+No file uploads, no `getpass()` prompts — the runtime grabs all
+three secrets at startup and exports them as env vars where the
+`huggingface_hub` and `kaggle` CLIs expect them.
 """
 
 
@@ -114,8 +158,8 @@ drive.mount('/content/drive', force_remount=False)
 
 CODE_GPU = """\
 # Confirm A100 40 GB (or H100 80 GB if you upgraded). On smaller GPUs
-# you'd need to enable QLoRA — see the commented-out 4-bit block in the
-# model-load cell below.
+# you'd need to enable QLoRA — see the commented-out 4-bit block in
+# the model-load cell below.
 !nvidia-smi
 """
 
@@ -126,14 +170,14 @@ BASE_DIR    = pathlib.Path('/content/drive/MyDrive/DressApp_Gemma4_E2B_Training'
 CCP_DIR     = pathlib.Path('/content/drive/MyDrive/ccp-DatasetNinja')
 DF_DIR      = pathlib.Path('/content/deepfashion_mm')           # Kaggle extracts here
 OUT_RUN     = BASE_DIR / 'Eyes_v4_run'
-OUT_MERGED  = BASE_DIR / 'Eyes_v4_Gemma3n_merged'
-OUT_GGUF    = BASE_DIR / 'Eyes_v4-Q4_K_M.gguf'
-OUT_MMPROJ  = BASE_DIR / 'mmproj-Eyes_v4-f16.gguf'
+OUT_MERGED  = BASE_DIR / 'Eyes_v4_Gemma4_merged'
+OUT_GGUF    = BASE_DIR / 'Eyes_v4_Gemma4-Q4_K_M.gguf'
+OUT_MMPROJ  = BASE_DIR / 'mmproj-Eyes_v4_Gemma4-f16.gguf'
 for p in (BASE_DIR, OUT_RUN, DF_DIR.parent):
     p.mkdir(parents=True, exist_ok=True)
 
 assert CCP_DIR.exists(), f'CCP-DatasetNinja missing at {CCP_DIR}'
-print('✅ Drive paths:')
+print('Drive paths:')
 print('   base dir       :', BASE_DIR)
 print('   CCP corpus     :', CCP_DIR)
 print('   DeepFashion dl :', DF_DIR, '(downloaded in section 3)')
@@ -149,20 +193,26 @@ MD_DEPS = """\
 
 ## 2. Dependencies — minimal upgrade
 
-Same hard-earned policy as before: **only upgrade what we need**
-(`transformers`, `peft`, `accelerate`), pin Pillow back to gradio's
-range, leave everything else at Colab default. Add `kaggle` for the
-DeepFashion download and `huggingface_hub[cli]` for the Gemma-3n auth.
+The Gemma-4 model card specifies:
 
-If you hit an import error *above* this cell after running it,
-**Runtime → Restart session** first (poisoned `sys.modules`), then
-re-run from cell 1.
+```
+pip install -U transformers torch torchvision accelerate
+```
+
+We add `peft` (for LoRA), `kaggle` (for the DeepFashion download),
+and `huggingface_hub[cli]` (for gated-model auth). We do **not** pin
+`numpy` or `Pillow` — Colab now defaults to Python 3.12 and any
+older pin will break `torchvision`/`transformers` imports.
+
+If an import fails after running this cell, do
+**Runtime → Restart session** (poisoned `sys.modules`) and re-run
+from cell 1.
 """
 
 CODE_DEPS = """\
 %pip install -q --upgrade pip
-%pip install -q --upgrade transformers peft accelerate
-%pip install -q 'Pillow<12.0'
+%pip install -q -U transformers torch torchvision accelerate
+%pip install -q -U peft
 %pip install -q 'kaggle' 'huggingface_hub[cli]'
 
 import transformers, peft, accelerate, torch, numpy, PIL
@@ -174,55 +224,66 @@ print('transformers:', transformers.__version__)
 print('peft        :', peft.__version__)
 print('accelerate  :', accelerate.__version__)
 print('bf16 ok?    :', torch.cuda.is_bf16_supported())
+
+# Sanity: transformers must be new enough to know about Gemma-4.
+from transformers import AutoModelForMultimodalLM  # noqa: F401
+print('AutoModelForMultimodalLM import : OK')
 """
 
 
 # ─────────────────────────────────────────────────────────────
-# Section 3 — Kaggle + HF Hub auth + DeepFashion download
+# Section 3 — Auth via Colab Secrets + DeepFashion download
 # ─────────────────────────────────────────────────────────────
 MD_AUTH = """\
 ---
 
-## 3. Auth + dataset download
+## 3. Auth via Colab Secrets + Kaggle download
 
-Two creds to set up:
+This cell expects three secrets to be present in the Colab sidebar
+(Tools → Secrets), each with "Notebook access" toggled ON:
 
-1. **HuggingFace Hub token** — `google/gemma-3n-e2b-it` is gated. You
-   must first visit the model card on HF Hub and accept Google's
-   Gemma license terms with the SAME Hub account whose token you
-   paste below. Get a token at <https://huggingface.co/settings/tokens>
-   with `read` access.
-2. **Kaggle API token** — download `kaggle.json` from
-   <https://www.kaggle.com/settings/account> → "Create New Token".
-   The next cell will prompt you to upload it.
+| Secret name        | What it is                              |
+| ------------------ | --------------------------------------- |
+| `HF_TOKEN`         | HF read token (Gemma license accepted)  |
+| `KAGGLE_USERNAME`  | Your Kaggle username                    |
+| `KAGGLE_KEY`       | Your Kaggle API key                     |
 
-Run the two cells, then the DeepFashion download cell.
+If any of them is missing, the cell will raise a clear error
+pointing at the sidebar so you know exactly what to add — there is
+no file upload and no hidden-input prompt.
 """
 
 CODE_HF_AUTH = """\
+from google.colab import userdata
 from huggingface_hub import login as hf_login
-import getpass
-hf_token = getpass.getpass('HF Hub token (read access, paste hidden): ')
+
+try:
+    hf_token = userdata.get('HF_TOKEN')
+except userdata.SecretNotFoundError as e:
+    raise RuntimeError(
+        \"Colab secret 'HF_TOKEN' is missing. Open Tools -> Secrets, \"
+        \"add HF_TOKEN with your HuggingFace read token, and toggle \"
+        \"'Notebook access' ON.\"
+    ) from e
+
 hf_login(token=hf_token, add_to_git_credential=False)
-print('✅ Logged into HF Hub.')
+print('Logged into HF Hub.')
 """
 
 CODE_KAGGLE_AUTH = """\
-import os, json
-from google.colab import files
+import os
+from google.colab import userdata
 
-# Either upload kaggle.json...
-os.makedirs('/root/.kaggle', exist_ok=True)
-if not os.path.exists('/root/.kaggle/kaggle.json'):
-    print('Upload your kaggle.json (Kaggle → Settings → API → Create New Token):')
-    up = files.upload()
-    fname = next(iter(up))
-    with open('/root/.kaggle/kaggle.json', 'wb') as fh:
-        fh.write(up[fname])
-os.chmod('/root/.kaggle/kaggle.json', 0o600)
-# Sanity
-cfg = json.load(open('/root/.kaggle/kaggle.json'))
-print(f'✅ Kaggle creds present for user: {cfg[\"username\"]}')
+for key in ('KAGGLE_USERNAME', 'KAGGLE_KEY'):
+    try:
+        os.environ[key] = userdata.get(key)
+    except userdata.SecretNotFoundError as e:
+        raise RuntimeError(
+            f\"Colab secret '{key}' is missing. Open Tools -> Secrets, \"
+            f\"add {key}, and toggle 'Notebook access' ON.\"
+        ) from e
+
+print(f'Kaggle creds in env for user: {os.environ[\"KAGGLE_USERNAME\"]}')
 """
 
 CODE_DF_DOWNLOAD = """\
@@ -252,92 +313,83 @@ for p in sorted(DF_DIR.iterdir())[:20]:
 
 
 # ─────────────────────────────────────────────────────────────
-# Section 4 — Load Gemma-3n + freeze everything except text-decoder
+# Section 4 — Load Gemma-4 + freeze everything except text-decoder
 # ─────────────────────────────────────────────────────────────
 MD_LOAD = """\
 ---
 
-## 4. Load `google/gemma-3n-e2b-it` and aggressively freeze
+## 4. Load `google/gemma-4-E2B-it` and aggressively freeze
 
-We use `Gemma3nForConditionalGeneration` (note the `n`). This is the
-correct multimodal class for Gemma-3n — it knows about the audio
-tower, the per-layer embeddings, and the SigLIP vision tower.
+The model card prescribes the Auto-class loading pattern — that's
+the only stable surface for multimodal Gemma-4 in transformers. We
+do not hand-import a `Gemma4*ForConditionalGeneration` symbol; the
+exact module class is whatever the installed transformers release
+maps the Gemma-4 config onto, and the Auto factory dispatches to it
+correctly.
 
-Right after loading we freeze, by name match, everything that is *not*
-inside the text decoder. PEFT-LoRA would freeze them anyway, but this
-explicit pass is a circuit-breaker against any future cell calling
-`.train()` on the whole model.
+Right after loading we do a **two-step parameter freeze**:
+
+1. Print the full named-parameters tree, grouped by top-level
+   submodule (vision tower, audio tower, multimodal projector, PLE
+   banks, language model, ...). This is a diagnostic for any future
+   debugging — Gemma-4's exact submodule names are
+   version-dependent.
+2. Set `requires_grad=False` on every parameter whose name does NOT
+   live inside `language_model.*`. PEFT-LoRA will further freeze the
+   `language_model.*` base weights too; this pass is the
+   belt-and-braces guarantee that nothing outside the text decoder
+   ever sees a gradient.
 """
 
 CODE_LOAD = """\
 import torch
-from transformers import AutoProcessor, Gemma3nForConditionalGeneration
+from collections import Counter
+from transformers import AutoProcessor, AutoModelForMultimodalLM
 
-BASE_MODEL = 'google/gemma-3n-e2b-it'
+BASE_MODEL = 'google/gemma-4-E2B-it'
 
 processor = AutoProcessor.from_pretrained(BASE_MODEL)
-model = Gemma3nForConditionalGeneration.from_pretrained(
+model = AutoModelForMultimodalLM.from_pretrained(
     BASE_MODEL,
-    torch_dtype=torch.bfloat16,
-    attn_implementation='eager',           # safest for Gemma-3n LoRA
+    dtype=torch.bfloat16,                 # transformers 4.x: 'dtype' (was torch_dtype)
     device_map={'': 0},
+    attn_implementation='eager',          # safest for cross-attention LoRA
 )
 
-# Some processor builds ship without an explicit chat template — set the
-# canonical Gemma-3 chat format so train + inference see the same surface.
-if processor.chat_template is None or '<start_of_turn>' not in processor.chat_template:
-    processor.chat_template = (
-        "{% for message in messages %}"
-        "<start_of_turn>{{ message['role'] }}\\n"
-        "{% for content in message['content'] %}"
-        "{% if content['type'] == 'image' %}<image>{% else %}{{ content['text'] }}{% endif %}"
-        "{% endfor %}"
-        "<end_of_turn>\\n"
-        "{% endfor %}"
-        "{% if add_generation_prompt %}<start_of_turn>model\\n{% endif %}"
-    )
-
-# === FREEZE EVERYTHING THAT IS NOT THE TEXT DECODER ===
-#
-# Gemma-3n has FOUR sub-modules that we never want to train on a small
-# corpus:
-#   * vision_tower         — SigLIP image encoder
-#   * audio_tower          — universal audio encoder (we never feed it audio)
-#   * multi_modal_projector + embed_vision  — image-token projection
-#   * embed_audio          — audio-token projection (unused)
-#   * per_layer_*, embed_tokens_per_layer  — Per-Layer Embedding bank
-#
-# Anything matching the substrings below stays frozen.
-FROZEN_SUBSTRINGS = (
-    'vision_tower',
-    'audio_tower',
-    'multi_modal_projector',
-    'embed_vision',
-    'embed_audio',
-    'per_layer_projection',
-    'per_layer_input_gate',
-    'per_layer_model_projection',
-    'post_per_layer_input_norm',
-    'embed_tokens_per_layer',
-    'layer_scalar',
-)
-
-n_frozen = n_trainable = 0
+# ---- Diagnostic: print top-level submodule param counts ----
+top_buckets = Counter()
 for name, p in model.named_parameters():
-    if any(sub in name for sub in FROZEN_SUBSTRINGS):
+    top = name.split('.', 1)[0]
+    top_buckets[top] += p.numel()
+print('Top-level submodules and their param counts (millions):')
+for name, n in sorted(top_buckets.items(), key=lambda kv: -kv[1]):
+    print(f'  {name:30s} {n / 1e6:8.1f} M')
+
+# ---- Freeze every param NOT inside language_model.* ----
+#
+# Allowlist approach: only the text decoder is allowed to be
+# (potentially) trainable. Vision tower, audio tower, multimodal
+# projector, PLE bank, embed_*, lm_head and friends all get pinned
+# regardless of how Gemma-4 names them internally.
+TRAINABLE_PREFIX = 'language_model.'
+
+n_frozen = n_passthrough = 0
+for name, p in model.named_parameters():
+    if not name.startswith(TRAINABLE_PREFIX):
         p.requires_grad = False
         n_frozen += p.numel()
     else:
-        n_trainable += p.numel()        # may still get LoRA-frozen below
+        n_passthrough += p.numel()      # may still be LoRA-frozen below
 
-print(f'Frozen (vision/audio/PLE/projector) : {n_frozen / 1e6:7.1f} M params')
-print(f'Pre-LoRA trainable (text decoder)   : {n_trainable / 1e6:7.1f} M params')
-print(f'Total                                : {(n_frozen + n_trainable) / 1e9:6.2f} B params')
+print()
+print(f'Frozen (non-text submodules)        : {n_frozen / 1e6:7.1f} M params')
+print(f'Pre-LoRA trainable (text decoder)   : {n_passthrough / 1e6:7.1f} M params')
+print(f'Total                                : {(n_frozen + n_passthrough) / 1e9:6.2f} B params')
 """
 
 
 # ─────────────────────────────────────────────────────────────
-# Section 5 — CCP dataset loader (same as v3)
+# Section 5 — CCP dataset loader
 # ─────────────────────────────────────────────────────────────
 MD_CCP = """\
 ---
@@ -346,11 +398,11 @@ MD_CCP = """\
 
 Decode Supervise.ly bitmap masks → enclosing pixel bbox → DressApp
 category → normalised 0..1000 grid. Produces `(image_path,
-target_json_str)` tuples.
+target_json_str, source_tag)` tuples.
 """
 
 CODE_CCP_LOADER = """\
-import base64, io, json, zlib, glob, hashlib
+import base64, io, json, zlib, hashlib
 import numpy as np
 from PIL import Image
 
@@ -439,7 +491,7 @@ def load_ccp_records():
 
 
 ccp_records = load_ccp_records()
-print(f'CCP records (≥1 garment): {len(ccp_records)}')
+print(f'CCP records (>=1 garment): {len(ccp_records)}')
 print('sample:', ccp_records[0][1][:300])
 """
 
@@ -454,14 +506,13 @@ MD_DF = """\
 
 DeepFashion-Multimodal ships with image+attribute pairs and (for the
 Kaggle copy `silverstone1903/deep-fashion-multimodal`) per-image
-bounding boxes for the visible garment(s). We:
+bounding boxes for the visible garment(s). The loader is defensive:
 
-1. Walk the unzipped dataset directory.
-2. Identify the attribute / bbox annotation file (the layout varies by
-   version — the loader is defensive about it).
-3. For each image, map the DeepFashion attribute class to a DressApp
-   category and emit one `{label, category, region.bbox}` entry per
-   annotated garment.
+1. Walks the unzipped dataset directory.
+2. Identifies the annotation file (CSV / JSON / TXT — Kaggle copies
+   vary).
+3. Falls back to whole-frame bboxes if nothing parses, rather than
+   skipping the dataset outright.
 
 If the dataset layout in your downloaded copy differs (e.g. nested
 inside a `dfmm/` folder), the **first cell** below prints what was
@@ -492,10 +543,10 @@ CODE_DF_LOADER = """\
 #       images/                       (.jpg, ~12k)
 #       train.txt | annotations.csv   (per-image attribute / bbox table)
 #
-# The loader below is permissive — it tries a few common paths and a
-# few common annotation column schemas, and skips images it can't parse.
+# The loader below is permissive: it tries a few common paths and
+# common annotation column schemas, and skips images it can't parse.
 
-import csv, glob, json, pathlib
+import csv, json
 from PIL import Image
 
 DF_TO_CATEGORY = {
@@ -516,7 +567,7 @@ def _find_df_image_dir():
         p = DF_DIR / candidate
         if p.is_dir():
             return p
-    # Fallback — first sub-dir with a lot of jpgs
+    # Fallback - first sub-dir with a lot of jpgs
     for sub in DF_DIR.iterdir():
         if sub.is_dir() and len(list(sub.glob('*.jpg'))) > 100:
             return sub
@@ -541,11 +592,10 @@ def load_deepfashion_records():
 
     records = []
     if ann_path is None:
-        # No annotation file? Then we can't extract bboxes — bail out.
-        print('⚠ No annotation file found; skipping DeepFashion.')
+        print('No annotation file found; skipping DeepFashion.')
         return records
 
-    # Strategy A — CSV with columns like image_name,category,x1,y1,x2,y2
+    # Strategy A - CSV with columns like image_name,category,x1,y1,x2,y2
     if ann_path.suffix == '.csv':
         rows = list(csv.DictReader(open(ann_path)))
         for row in rows:
@@ -578,14 +628,13 @@ def load_deepfashion_records():
             records.append((str(img_path), target, 'deepfashion'))
         return records
 
-    # Strategy B — JSON list of dicts
+    # Strategy B - JSON list of dicts
     if ann_path.suffix == '.json':
         try:
             data = json.load(open(ann_path))
             if isinstance(data, dict) and 'annotations' in data:
                 data = data['annotations']
             for row in data:
-                # Map adaptively — the column names will vary.
                 img_name = (row.get('image_name') or row.get('file_name')
                             or row.get('image') or row.get('img'))
                 if not img_name:
@@ -616,9 +665,8 @@ def load_deepfashion_records():
             print(f'JSON parse failed: {e}')
             return records
 
-    # Strategy C — fallback: just enumerate images with no bbox.
-    # Better than nothing — uses the whole frame as the bbox.
-    print('⚠ Annotation format not recognised; falling back to whole-frame bboxes.')
+    # Strategy C - fallback: enumerate images with whole-frame bboxes.
+    print('Annotation format not recognised; falling back to whole-frame bboxes.')
     for img_path in sorted(img_dir.glob('*.jpg'))[:5000]:
         with Image.open(img_path) as im:
             w, h = im.size
@@ -680,26 +728,42 @@ MD_CONV = """\
 
 ## 8. Conversation builder + masked-loss collator
 
-Identical to v3's design — we mask the user-side tokens so gradient
-only flows through the JSON the model is supposed to emit.
+Three things this section gets right that the prior v3 attempt got
+wrong:
+
+1. **Roles are `system` / `user` / `assistant`**, the native Gemma-4
+   convention — *not* the Gemma-3 `model` role. The HF model card
+   explicitly notes: "Compared to Gemma 3, the models use standard
+   `system`, `assistant`, and `user` roles."
+2. **`enable_thinking=False`** is set on the chat template. Gemma-4
+   has a built-in `<|think|>` reasoning mode that we explicitly
+   disable for Eyes — we want a clean JSON array as the only output,
+   not a reasoning trace.
+3. **Images come BEFORE text** inside the user message content
+   array, per the model-card best practice. The processor handles
+   the image-placeholder injection.
+
+The collator then masks out user-side tokens with `ignore_index=-100`
+so gradient flows ONLY through the JSON the model is supposed to
+emit (the assistant turn).
 """
 
 CODE_PROMPT = """\
 SYSTEM_PROMPT = (
-    \"You are DressApp Eyes, a vision model specialised in clothing.\\n\"
-    \"You receive ONE photograph and return ONLY valid JSON.\\n\\n\"
-    \"Schema: a JSON array. Each element describes ONE distinct visible\\n\"
-    \"garment, accessory, or footwear item:\\n\"
-    \"  { \\\"label\\\":    string,\\n\"
-    \"    \\\"category\\\": one of [Top|Bottom|Outerwear|Full-body|Footwear|Accessory],\\n\"
-    \"    \\\"region\\\":   { \\\"bbox\\\": [ymin, xmin, ymax, xmax] }  // 0..1000 grid\\n\"
-    \"  }\\n\\n\"
-    \"Rules:\\n\"
-    \" - Always return an array. A single-garment photo returns a one-element array.\\n\"
-    \" - List EVERY distinct garment. Layered outfits = N elements.\\n\"
-    \" - Skip skin, hair, body parts, backgrounds.\\n\"
-    \" - bbox values are integers on a 0..1000 grid, NOT pixels.\\n\"
-    \" - No prose, no markdown — JSON only.\\n\"
+    'You are DressApp Eyes, a vision model specialised in clothing.\\n'
+    'You receive ONE photograph and return ONLY valid JSON.\\n\\n'
+    'Schema: a JSON array. Each element describes ONE distinct visible\\n'
+    'garment, accessory, or footwear item:\\n'
+    '  { \"label\":    string,\\n'
+    '    \"category\": one of [Top|Bottom|Outerwear|Full-body|Footwear|Accessory],\\n'
+    '    \"region\":   { \"bbox\": [ymin, xmin, ymax, xmax] }  // 0..1000 grid\\n'
+    '  }\\n\\n'
+    'Rules:\\n'
+    ' - Always return an array. A single-garment photo returns a one-element array.\\n'
+    ' - List EVERY distinct garment. Layered outfits = N elements.\\n'
+    ' - Skip skin, hair, body parts, backgrounds.\\n'
+    ' - bbox values are integers on a 0..1000 grid, NOT pixels.\\n'
+    ' - No prose, no markdown - JSON only.\\n'
 )
 USER_INSTRUCTION = 'Analyze this outfit photograph and return the JSON array.'
 print(SYSTEM_PROMPT[:200], '...')
@@ -713,23 +777,40 @@ def build_example(record, *, ignore_index=-100):
     img_path, target_json, _source = record
     image = _PIL_Image.open(img_path).convert('RGB')
 
+    # Gemma-4 native roles: system / user / assistant. Image BEFORE text.
     messages_full = [
+        {'role': 'system', 'content': SYSTEM_PROMPT},
         {'role': 'user', 'content': [
             {'type': 'image'},
-            {'type': 'text', 'text': SYSTEM_PROMPT + '\\n\\n' + USER_INSTRUCTION},
+            {'type': 'text', 'text': USER_INSTRUCTION},
         ]},
-        {'role': 'model', 'content': [{'type': 'text', 'text': target_json}]},
+        {'role': 'assistant', 'content': target_json},
     ]
-    messages_prompt = messages_full[:1]
-    full_text   = processor.apply_chat_template(messages_full,   add_generation_prompt=False, tokenize=False)
-    prompt_text = processor.apply_chat_template(messages_prompt, add_generation_prompt=True,  tokenize=False)
-    full   = processor(text=full_text,   images=image, return_tensors='pt', padding=False)
-    prompt = processor(text=prompt_text, images=image, return_tensors='pt', padding=False)
+    messages_prompt = messages_full[:2]
+
+    # Disable thinking - Eyes emits JSON only, no <|think|> trace.
+    full_text = processor.apply_chat_template(
+        messages_full,
+        tokenize=False,
+        add_generation_prompt=False,
+        enable_thinking=False,
+    )
+    prompt_text = processor.apply_chat_template(
+        messages_prompt,
+        tokenize=False,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+    full = processor(text=full_text, images=image,
+                     return_tensors='pt', padding=False)
+    prompt = processor(text=prompt_text, images=image,
+                       return_tensors='pt', padding=False)
 
     input_ids = full['input_ids'][0]
     labels    = input_ids.clone()
     n_prompt  = prompt['input_ids'].shape[1]
     labels[:n_prompt] = ignore_index
+
     out = {
         'input_ids':      input_ids,
         'attention_mask': full['attention_mask'][0],
@@ -803,6 +884,15 @@ MD_LORA = """\
 ---
 
 ## 9. LoRA (text decoder only)
+
+Standard rank-16 / alpha-32 LoRA on the text decoder's
+`q/k/v/o/gate/up/down_proj` linears. PEFT auto-discovers them by
+suffix match — the discovery is restricted to the parameters that
+*could* be trainable at this point, which is exactly
+`language_model.*` (everything else was hard-frozen in section 4).
+The `model.print_trainable_parameters()` call right after should
+print something like "0.6 % trainable" — sanity-check that figure
+before kicking off training.
 """
 
 CODE_LORA = """\
@@ -833,9 +923,9 @@ MD_TRAIN = """\
 
 ## 10. Train
 
-A100 + bf16 → no QLoRA. Batch 2 × grad-accum 8 = effective 16. ≈14 k
-records ÷ 16 ≈ 875 steps / epoch × 2 epochs = ~1750 total steps.
-Checkpoint to Drive every 200 steps for disconnect insurance.
+A100 + bf16 -> no QLoRA. Batch 2 x grad-accum 8 = effective 16.
+~14 k records / 16 ~= 875 steps/epoch x 2 epochs = ~1750 total
+steps. Checkpoint to Drive every 200 steps for disconnect insurance.
 """
 
 CODE_TRAIN_ARGS = """\
@@ -894,9 +984,9 @@ MD_EVAL = """\
 
 ## 11. Quick bbox-IoU eval on held-out test split
 
-Same metric as `/app/scripts/run_eyes_benchmark.py` so v4 numbers are
-directly comparable to the v3 (Gemini-Flash) and SegFormer+per-crop
-benches we recorded earlier:
+Same metric as `/app/scripts/run_eyes_benchmark.py` so v4 numbers
+are directly comparable to the v3 (Gemini-Flash) and SegFormer +
+per-crop benches we recorded earlier:
 
 | Pipeline | mean IoU | recall@0.5 | precision@0.5 |
 | --- | ---: | ---: | ---: |
@@ -931,16 +1021,26 @@ def _denorm(bb, w, h):
 
 def _predict(img_path):
     image = _PIL_Image.open(img_path).convert('RGB')
-    msgs = [{'role':'user','content':[
-        {'type':'image'},
-        {'type':'text','text':SYSTEM_PROMPT + '\\n\\n' + USER_INSTRUCTION},
-    ]}]
-    text = processor.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+    msgs = [
+        {'role':'system','content':SYSTEM_PROMPT},
+        {'role':'user','content':[
+            {'type':'image'},
+            {'type':'text','text':USER_INSTRUCTION},
+        ]},
+    ]
+    text = processor.apply_chat_template(
+        msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     enc = processor(text=text, images=image, return_tensors='pt').to(model.device)
     with torch.no_grad():
-        out = model.generate(**enc, max_new_tokens=512, do_sample=False,
-                              pad_token_id=processor.tokenizer.pad_token_id)
-    return _safe_parse(processor.tokenizer.decode(out[0][enc['input_ids'].shape[1]:], skip_special_tokens=True))
+        out = model.generate(
+            **enc,
+            max_new_tokens=512,
+            do_sample=False,
+            pad_token_id=processor.tokenizer.pad_token_id,
+        )
+    return _safe_parse(
+        processor.tokenizer.decode(out[0][enc['input_ids'].shape[1]:],
+                                   skip_special_tokens=True))
 
 ious, n_gt, n_pred, n_match = [], 0, 0, 0
 t0 = time.perf_counter()
@@ -956,7 +1056,11 @@ for img_path, target_json, _src in test_ds.recs:
         bb = (p.get('region') or {}).get('bbox')
         if isinstance(bb, list) and len(bb) == 4:
             preds_px.append(_denorm(bb, w, h))
-    triples = sorted([(_iou(p, g), pi, gi) for pi, p in enumerate(preds_px) for gi, g in enumerate(gts_px)], reverse=True)
+    triples = sorted(
+        [(_iou(p, g), pi, gi)
+         for pi, p in enumerate(preds_px)
+         for gi, g in enumerate(gts_px)],
+        reverse=True)
     up, ug = set(), set()
     for iou, pi, gi in triples:
         if pi in up or gi in ug: continue
@@ -974,22 +1078,29 @@ print(f'  avg preds / image   : {n_pred/len(test_ds.recs):.2f}')
 
 
 # ─────────────────────────────────────────────────────────────
-# Section 12 — Merge LoRA + save fp16
+# Section 12 — Merge LoRA + save bf16
 # ─────────────────────────────────────────────────────────────
 MD_MERGE = """\
 ---
 
-## 12. Merge LoRA + save fp16 to Drive
+## 12. Merge LoRA + save bf16 to Drive
+
+`merge_and_unload()` folds the rank-16 adapter matrices back into
+the base linear layers, so the resulting checkpoint is a vanilla
+Gemma-4 multimodal model that any downstream tool (llama.cpp, vLLM,
+HF Transformers, etc.) can load without PEFT in the picture.
 """
 
 CODE_MERGE = """\
 merged = model.merge_and_unload()
 OUT_MERGED.mkdir(parents=True, exist_ok=True)
-merged.save_pretrained(str(OUT_MERGED), safe_serialization=True, max_shard_size='4GB')
+merged.save_pretrained(str(OUT_MERGED),
+                       safe_serialization=True,
+                       max_shard_size='4GB')
 processor.save_pretrained(str(OUT_MERGED))
 
 total_gb = sum(p.stat().st_size for p in OUT_MERGED.rglob('*')) / (1024**3)
-print(f'✅ Saved merged fp16 to {OUT_MERGED} ({total_gb:.2f} GB)')
+print(f'Saved merged bf16 to {OUT_MERGED} ({total_gb:.2f} GB)')
 """
 
 
@@ -1001,31 +1112,39 @@ MD_QUANT = """\
 
 ## 13. Convert to GGUF + quantize to Q4_K_M
 
-Two artifacts get produced this time:
+Two artifacts get produced:
 
 1. **Text-model GGUF** (Q4_K_M, ~3 GB) — the language decoder + token
    embeddings, what the Hetzner llama-server actually runs.
-2. **Vision projector GGUF** (fp16, ~1 GB) — the SigLIP + projector
-   from `gemma-3n-e2b-it`. *Different from v2's `mmproj-Gemma4E2B-f16.gguf`*
-   because we're starting from a different base — so this REPLACES
-   v2's mmproj on the Hetzner pod, both files ship together.
+2. **Vision projector GGUF** (fp16, ~1 GB) — the SigLIP-style vision
+   tower + multimodal projector from `gemma-4-E2B-it`.
 
-llama.cpp's `convert_hf_to_gguf.py` knows how to split a Gemma-3n
-multimodal checkpoint into these two pieces when invoked with
-`--mmproj` for the projector run.
+### Known caveats (Gemma-4 + llama.cpp, as of May 2026)
+
+* Gemma-4 **text + image inference is stable** on llama.cpp `master`.
+* Gemma-4 **audio support is still WIP** in llama.cpp — we don't
+  need audio for Eyes, so we skip it cleanly.
+* `convert_hf_to_gguf.py` has a known `KeyError: 'image_mean'` when
+  exporting the multimodal projector on some Gemma-4 checkpoints
+  (llama.cpp issue #21775). The mmproj cell below patches the
+  preprocessor config in-place if the key is missing, then retries.
+
+We build llama.cpp from `master` (not a pinned tag) to pick up the
+latest Gemma-4 PRs.
 """
 
 CODE_GGUF_BUILD = """\
 %cd /content
-![ -d llama.cpp ] || git clone --depth 1 https://github.com/ggerganov/llama.cpp llama.cpp
+![ -d llama.cpp ] || git clone --depth 1 https://github.com/ggml-org/llama.cpp llama.cpp
 %cd /content/llama.cpp
+!git pull --ff-only 2>&1 | tail -3
 !pip install -q -r requirements/requirements-convert_hf_to_gguf.txt
 !cmake -B build -DGGML_CUDA=ON 2>&1 | tail -3
 !cmake --build build --config Release --target llama-quantize -j 2>&1 | tail -3
 """
 
 CODE_GGUF_TEXT = """\
-F16_GGUF = OUT_RUN / 'Eyes_v4-f16.gguf'
+F16_GGUF = OUT_RUN / 'Eyes_v4_Gemma4-f16.gguf'
 
 # Convert the text decoder to GGUF in fp16.
 !python /content/llama.cpp/convert_hf_to_gguf.py \\
@@ -1038,19 +1157,48 @@ print('fp16 text GGUF size:', round(F16_GGUF.stat().st_size / 1024**3, 2), 'GB')
 
 CODE_GGUF_MMPROJ = """\
 # Convert the vision tower + multimodal projector to its own GGUF.
-# Newer llama.cpp ships a dedicated path; on older clones, the same
-# convert_hf_to_gguf.py with --mmproj is the right invocation.
-!python /content/llama.cpp/convert_hf_to_gguf.py \\
-    {OUT_MERGED} \\
-    --mmproj \\
-    --outtype f16 \\
-    --outfile {OUT_MMPROJ}
+#
+# Workaround for llama.cpp issue #21775: convert_hf_to_gguf.py
+# crashes with KeyError: 'image_mean' when the merged checkpoint's
+# preprocessor_config.json is missing certain HF defaults. If that
+# happens, we patch the config and retry once.
+import json, subprocess, pathlib
+
+pp_cfg = pathlib.Path(OUT_MERGED) / 'preprocessor_config.json'
+if pp_cfg.exists():
+    cfg = json.loads(pp_cfg.read_text())
+    patched = False
+    if 'image_mean' not in cfg:
+        cfg['image_mean'] = [0.5, 0.5, 0.5]; patched = True
+    if 'image_std' not in cfg:
+        cfg['image_std']  = [0.5, 0.5, 0.5]; patched = True
+    if patched:
+        pp_cfg.write_text(json.dumps(cfg, indent=2))
+        print('Patched preprocessor_config.json with default image_mean/std.')
+
+cmd = [
+    'python', '/content/llama.cpp/convert_hf_to_gguf.py',
+    str(OUT_MERGED),
+    '--mmproj',
+    '--outtype', 'f16',
+    '--outfile', str(OUT_MMPROJ),
+]
+r = subprocess.run(cmd, capture_output=True, text=True)
+print(r.stdout[-2000:])
+if r.returncode != 0:
+    print('STDERR:', r.stderr[-2000:])
+    raise RuntimeError(
+        'mmproj conversion failed. If the error mentions an '
+        'unsupported architecture, rebuild llama.cpp from master '
+        '(git pull, cmake --build) and retry this cell. See '
+        'https://github.com/ggml-org/llama.cpp/issues/21775 for context.'
+    )
 
 print('mmproj fp16 size:', round(OUT_MMPROJ.stat().st_size / 1024**3, 2), 'GB')
 """
 
 CODE_GGUF_QUANT = """\
-# Quantize the TEXT model only (mmproj stays fp16 — image-tower
+# Quantize the TEXT model only (mmproj stays fp16 - image-tower
 # quantization is finicky and the projector is small anyway).
 !/content/llama.cpp/build/bin/llama-quantize \\
     {F16_GGUF} \\
@@ -1073,9 +1221,13 @@ MD_PROBE = """\
 
 ## 14. Sanity probe — load the new GGUFs via llama-cpp-python
 
-Confirms the new artifact pair loads together, emits valid JSON, and
-returns multi-element arrays on multi-garment photos. If THIS works,
-the Hetzner deploy will too.
+Confirms the new artifact pair loads together, emits valid JSON,
+and returns multi-element arrays on multi-garment photos. If THIS
+works, the Hetzner deploy will too.
+
+If `llama-cpp-python` doesn't yet ship a `Gemma4ChatHandler`, the
+generic `Llava15ChatHandler` is a compatible fallback for vision +
+text on Gemma-family multimodal GGUFs.
 """
 
 CODE_PROBE_INSTALL = """\
@@ -1087,9 +1239,16 @@ CODE_PROBE_INSTALL = """\
 CODE_PROBE_RUN = """\
 import random, json
 from llama_cpp import Llama
-from llama_cpp.llama_chat_format import Gemma3ChatHandler
 
-handler = Gemma3ChatHandler(clip_model_path=str(OUT_MMPROJ))
+try:
+    from llama_cpp.llama_chat_format import Gemma4ChatHandler as VisionHandler
+    print('Using Gemma4ChatHandler.')
+except ImportError:
+    from llama_cpp.llama_chat_format import Llava15ChatHandler as VisionHandler
+    print('Gemma4ChatHandler not in this llama-cpp-python build; '
+          'falling back to Llava15ChatHandler.')
+
+handler = VisionHandler(clip_model_path=str(OUT_MMPROJ))
 llm = Llama(
     model_path=str(OUT_GGUF),
     chat_handler=handler,
@@ -1102,13 +1261,14 @@ random.seed(42)
 samples = random.sample(test_ds.recs, k=min(5, len(test_ds.recs)))
 
 for img_path, target_json, src in samples:
-    print('═' * 70)
+    print('=' * 70)
     print(f'Image  : {pathlib.Path(img_path).name}  (source: {src})')
     resp = llm.create_chat_completion(
         messages=[
+            {'role':'system','content':SYSTEM_PROMPT},
             {'role':'user','content':[
                 {'type':'image_url','image_url':{'url': f'file://{img_path}'}},
-                {'type':'text','text':SYSTEM_PROMPT + '\\n\\n' + USER_INSTRUCTION},
+                {'type':'text','text': USER_INSTRUCTION},
             ]},
         ],
         temperature=0.0,
@@ -1116,7 +1276,8 @@ for img_path, target_json, src in samples:
     )
     raw = resp['choices'][0]['message']['content']
     parsed = _safe_parse(raw)
-    print('Predicted :', json.dumps(parsed, indent=2)[:600] if parsed else f'(unparseable) raw={raw[:200]}')
+    print('Predicted :', json.dumps(parsed, indent=2)[:600]
+          if parsed else f'(unparseable) raw={raw[:200]}')
     print('Truth     :', json.dumps(json.loads(target_json), indent=2)[:600])
 """
 
@@ -1127,32 +1288,32 @@ for img_path, target_json, src in samples:
 MD_DONE = """\
 ---
 
-## ✅ Done — Hetzner deploy hand-off
+## Done — Hetzner deploy hand-off
 
-Both GGUF artifacts ship together this time:
+Both GGUF artifacts ship together:
 
 ```bash
 # on the Hetzner box, replace the running v2/v3 pair with the new v4 pair
-scp Eyes_v4-Q4_K_M.gguf       hetzner:/srv/eyes/models/
-scp mmproj-Eyes_v4-f16.gguf   hetzner:/srv/eyes/models/
+scp Eyes_v4_Gemma4-Q4_K_M.gguf      hetzner:/srv/eyes/models/
+scp mmproj-Eyes_v4_Gemma4-f16.gguf  hetzner:/srv/eyes/models/
 
 # update the llama-server invocation to point to the new files:
-#   --model      /srv/eyes/models/Eyes_v4-Q4_K_M.gguf
-#   --mmproj     /srv/eyes/models/mmproj-Eyes_v4-f16.gguf
+#   --model      /srv/eyes/models/Eyes_v4_Gemma4-Q4_K_M.gguf
+#   --mmproj     /srv/eyes/models/mmproj-Eyes_v4_Gemma4-f16.gguf
 docker compose restart eyes
 ```
 
-Then re-run the in-pod benchmark from the chat thread to validate the
-gate end-to-end through the FastAPI bridge:
+Then re-run the in-pod benchmark from the chat thread to validate
+the gate end-to-end through the FastAPI bridge:
 
 ```bash
 /root/.venv/bin/python /app/scripts/run_eyes_benchmark.py \\
     --analyzer=one_pass --limit=30
 ```
 
-If `recall@0.5 ≥ 0.8` holds and `mean IoU ≥ 0.6`, you can un-retire
-`EYES_ONE_PASS=true` in production and ship the simpler one-call path
-back into the closet analyze flow.
+If `recall@0.5 >= 0.8` holds and `mean IoU >= 0.6`, you can un-retire
+`EYES_ONE_PASS=true` in production and ship the simpler one-call
+path back into the closet analyze flow.
 """
 
 
