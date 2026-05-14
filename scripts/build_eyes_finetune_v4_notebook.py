@@ -73,15 +73,22 @@ MD_TITLE = """\
 > the checkpoint past recovery. We start over here from the official
 > HF Hub release.
 >
-> **Authoritative loading recipe** (from the model card):
+> **Authoritative loading recipe** (from the HF model card + dev.to
+> fine-tuning guide):
 > ```python
-> from transformers import AutoProcessor, AutoModelForMultimodalLM
+> from transformers import AutoProcessor, AutoModelForImageTextToText
 > processor = AutoProcessor.from_pretrained("google/gemma-4-E2B-it")
-> model = AutoModelForMultimodalLM.from_pretrained("google/gemma-4-E2B-it", dtype="auto", device_map="auto")
+> model = AutoModelForImageTextToText.from_pretrained(
+>     "google/gemma-4-E2B-it", dtype="auto", device_map="auto")
 > ```
+> We pick `AutoModelForImageTextToText` (vision-language head) over
+> `AutoModelForMultimodalLM` (text+image+audio head) because Eyes is
+> vision-only — no audio. The dev.to QLoRA recipe uses the same
+> class. Either would work; this is the narrower correct choice.
 > No hand-rolled `Gemma4*ForConditionalGeneration` import — the Auto
-> classes will dispatch to whatever the current transformers release
-> ships as the multimodal head for Gemma-4.
+> classes dispatch to whatever the installed transformers release
+> ships as the vision-language head for Gemma-4. Requires
+> `transformers >= 5.5.0`.
 >
 > **Target runtime.** Colab Pro+ A100 (40 GB). ≈ 14 k images × 2
 > epochs with bf16 + LoRA-only training → roughly 25–35 min wall.
@@ -193,16 +200,20 @@ MD_DEPS = """\
 
 ## 2. Dependencies — minimal upgrade
 
-The Gemma-4 model card specifies:
+Per the dev.to Gemma-4 practical guide (April 2026):
 
 ```
-pip install -U transformers torch torchvision accelerate
+pip install -U transformers torch torchvision accelerate timm
 ```
 
-We add `peft` (for LoRA), `kaggle` (for the DeepFashion download),
-and `huggingface_hub[cli]` (for gated-model auth). We do **not** pin
-`numpy` or `Pillow` — Colab now defaults to Python 3.12 and any
-older pin will break `torchvision`/`transformers` imports.
+`transformers >= 5.5.0` is required to know about Gemma-4. `timm` is
+needed for the vision encoder's image preprocessing. We add `peft`
+(for LoRA), `kaggle` (for the DeepFashion download), and
+`huggingface_hub[cli]` (for gated-model auth).
+
+We do **not** pin `numpy` or `Pillow` — Colab now defaults to
+Python 3.12 and any older pin will break `torchvision`/`transformers`
+imports.
 
 If an import fails after running this cell, do
 **Runtime → Restart session** (poisoned `sys.modules`) and re-run
@@ -211,7 +222,7 @@ from cell 1.
 
 CODE_DEPS = """\
 %pip install -q --upgrade pip
-%pip install -q -U transformers torch torchvision accelerate
+%pip install -q -U 'transformers>=5.5.0' torch torchvision accelerate timm
 %pip install -q -U peft
 %pip install -q 'kaggle' 'huggingface_hub[cli]'
 
@@ -226,8 +237,13 @@ print('accelerate  :', accelerate.__version__)
 print('bf16 ok?    :', torch.cuda.is_bf16_supported())
 
 # Sanity: transformers must be new enough to know about Gemma-4.
-from transformers import AutoModelForMultimodalLM  # noqa: F401
-print('AutoModelForMultimodalLM import : OK')
+from transformers import AutoModelForImageTextToText  # noqa: F401
+print('AutoModelForImageTextToText import : OK')
+
+# Hard-stop if transformers is too old.
+from packaging.version import Version
+assert Version(transformers.__version__) >= Version('5.5.0'), \\
+    f'transformers {transformers.__version__} is too old for Gemma-4 (need >= 5.5.0)'
 """
 
 
@@ -320,12 +336,12 @@ MD_LOAD = """\
 
 ## 4. Load `google/gemma-4-E2B-it` and aggressively freeze
 
-The model card prescribes the Auto-class loading pattern — that's
-the only stable surface for multimodal Gemma-4 in transformers. We
-do not hand-import a `Gemma4*ForConditionalGeneration` symbol; the
-exact module class is whatever the installed transformers release
-maps the Gemma-4 config onto, and the Auto factory dispatches to it
-correctly.
+The dev.to QLoRA recipe for Gemma-4 fine-tuning uses
+`AutoModelForImageTextToText` — that's the vision-language head and
+the right Auto class for our use case (Eyes is image+text, no
+audio). Both Auto factories dispatch to the same concrete class for
+Gemma-4 in transformers 5.5+, but the narrower one is the dev-blog
+canonical recipe.
 
 Right after loading we do a **two-step parameter freeze**:
 
@@ -344,17 +360,31 @@ Right after loading we do a **two-step parameter freeze**:
 CODE_LOAD = """\
 import torch
 from collections import Counter
-from transformers import AutoProcessor, AutoModelForMultimodalLM
+from transformers import AutoProcessor, AutoModelForImageTextToText
 
 BASE_MODEL = 'google/gemma-4-E2B-it'
 
 processor = AutoProcessor.from_pretrained(BASE_MODEL)
-model = AutoModelForMultimodalLM.from_pretrained(
+model = AutoModelForImageTextToText.from_pretrained(
     BASE_MODEL,
-    dtype=torch.bfloat16,                 # transformers 4.x: 'dtype' (was torch_dtype)
+    dtype=torch.bfloat16,                 # transformers 5.x: 'dtype' (was torch_dtype)
     device_map={'': 0},
     attn_implementation='eager',          # safest for cross-attention LoRA
 )
+
+# Gemma-4 supports variable image resolution via a visual token
+# budget (70 / 140 / 280 / 560 / 1120 tokens per image). Clothing
+# detection benefits from fine-grained detail, so we use the
+# highest budget. If the processor exposes a different knob name in
+# your transformers version, this is a no-op.
+for knob in ('vision_token_budget', 'image_token_budget', 'num_image_tokens'):
+    if hasattr(processor, knob):
+        try:
+            setattr(processor, knob, 1120)
+            print(f'Set processor.{knob} = 1120 (max detail)')
+            break
+        except (AttributeError, TypeError):
+            pass
 
 # ---- Diagnostic: print top-level submodule param counts ----
 top_buckets = Counter()
@@ -728,8 +758,8 @@ MD_CONV = """\
 
 ## 8. Conversation builder + masked-loss collator
 
-Three things this section gets right that the prior v3 attempt got
-wrong:
+Four things this section gets right per the dev.to Gemma-4 guide
+and the HF model card:
 
 1. **Roles are `system` / `user` / `assistant`**, the native Gemma-4
    convention — *not* the Gemma-3 `model` role. The HF model card
@@ -738,10 +768,16 @@ wrong:
 2. **`enable_thinking=False`** is set on the chat template. Gemma-4
    has a built-in `<|think|>` reasoning mode that we explicitly
    disable for Eyes — we want a clean JSON array as the only output,
-   not a reasoning trace.
+   not a reasoning trace. (We also make sure SYSTEM_PROMPT does NOT
+   start with the `<|think|>` token, which is the alternate way
+   thinking gets enabled.)
 3. **Images come BEFORE text** inside the user message content
-   array, per the model-card best practice. The processor handles
-   the image-placeholder injection.
+   array, per the model-card best practice.
+4. **Content is a list-of-parts** for every role
+   (`[{"type": "text", "text": "..."}]`), matching the dev.to
+   examples. The processor reads the PIL image directly from
+   `{"type": "image", "image": <PIL>}` inline — no separate
+   `images=` kwarg.
 
 The collator then masks out user-side tokens with `ignore_index=-100`
 so gradient flows ONLY through the JSON the model is supposed to
@@ -766,6 +802,12 @@ SYSTEM_PROMPT = (
     ' - No prose, no markdown - JSON only.\\n'
 )
 USER_INSTRUCTION = 'Analyze this outfit photograph and return the JSON array.'
+
+# Sanity: SYSTEM_PROMPT MUST NOT start with <|think|>, which would
+# enable Gemma-4's chain-of-thought reasoning trace.
+assert not SYSTEM_PROMPT.lstrip().startswith('<|think|>'), \\
+    'Remove the <|think|> token from SYSTEM_PROMPT - Eyes emits JSON only.'
+
 print(SYSTEM_PROMPT[:200], '...')
 """
 
@@ -777,34 +819,37 @@ def build_example(record, *, ignore_index=-100):
     img_path, target_json, _source = record
     image = _PIL_Image.open(img_path).convert('RGB')
 
-    # Gemma-4 native roles: system / user / assistant. Image BEFORE text.
+    # Gemma-4 chat format: native system/user/assistant roles, every
+    # content is a list of typed parts, image goes BEFORE text in
+    # the user turn, image is inline (no images= kwarg needed).
     messages_full = [
-        {'role': 'system', 'content': SYSTEM_PROMPT},
-        {'role': 'user', 'content': [
-            {'type': 'image'},
-            {'type': 'text', 'text': USER_INSTRUCTION},
+        {'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM_PROMPT}]},
+        {'role': 'user',   'content': [
+            {'type': 'image', 'image': image},
+            {'type': 'text',  'text':  USER_INSTRUCTION},
         ]},
-        {'role': 'assistant', 'content': target_json},
+        {'role': 'assistant', 'content': [{'type': 'text', 'text': target_json}]},
     ]
     messages_prompt = messages_full[:2]
 
-    # Disable thinking - Eyes emits JSON only, no <|think|> trace.
-    full_text = processor.apply_chat_template(
+    # Disable thinking via the template flag (belt-and-braces with the
+    # assert above on SYSTEM_PROMPT).
+    full = processor.apply_chat_template(
         messages_full,
-        tokenize=False,
         add_generation_prompt=False,
+        tokenize=True,
+        return_dict=True,
+        return_tensors='pt',
         enable_thinking=False,
     )
-    prompt_text = processor.apply_chat_template(
+    prompt = processor.apply_chat_template(
         messages_prompt,
-        tokenize=False,
         add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors='pt',
         enable_thinking=False,
     )
-    full = processor(text=full_text, images=image,
-                     return_tensors='pt', padding=False)
-    prompt = processor(text=prompt_text, images=image,
-                       return_tensors='pt', padding=False)
 
     input_ids = full['input_ids'][0]
     labels    = input_ids.clone()
@@ -1022,15 +1067,20 @@ def _denorm(bb, w, h):
 def _predict(img_path):
     image = _PIL_Image.open(img_path).convert('RGB')
     msgs = [
-        {'role':'system','content':SYSTEM_PROMPT},
-        {'role':'user','content':[
-            {'type':'image'},
-            {'type':'text','text':USER_INSTRUCTION},
+        {'role':'system','content':[{'type':'text','text':SYSTEM_PROMPT}]},
+        {'role':'user',  'content':[
+            {'type':'image','image':image},
+            {'type':'text', 'text':USER_INSTRUCTION},
         ]},
     ]
-    text = processor.apply_chat_template(
-        msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
-    enc = processor(text=text, images=image, return_tensors='pt').to(model.device)
+    enc = processor.apply_chat_template(
+        msgs,
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors='pt',
+        enable_thinking=False,
+    ).to(model.device)
     with torch.no_grad():
         out = model.generate(
             **enc,
@@ -1228,6 +1278,14 @@ works, the Hetzner deploy will too.
 If `llama-cpp-python` doesn't yet ship a `Gemma4ChatHandler`, the
 generic `Llava15ChatHandler` is a compatible fallback for vision +
 text on Gemma-family multimodal GGUFs.
+
+> **Optional second smoke-test via Ollama.** The Ollama project
+> ships an official Q4_K_M build of stock Gemma-4 E2B as
+> `gemma4:e2b`. After Eyes v4 is exported, you can sanity-check the
+> base prompt template by running `ollama run gemma4:e2b` against
+> the same photos and comparing the response shape. Our Q4_K_M
+> tensor formats and tokenizer match Ollama's, so any divergence
+> means the merge step corrupted something.
 """
 
 CODE_PROBE_INSTALL = """\
@@ -1265,7 +1323,7 @@ for img_path, target_json, src in samples:
     print(f'Image  : {pathlib.Path(img_path).name}  (source: {src})')
     resp = llm.create_chat_completion(
         messages=[
-            {'role':'system','content':SYSTEM_PROMPT},
+            {'role':'system','content':[{'type':'text','text':SYSTEM_PROMPT}]},
             {'role':'user','content':[
                 {'type':'image_url','image_url':{'url': f'file://{img_path}'}},
                 {'type':'text','text': USER_INSTRUCTION},
