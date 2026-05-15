@@ -1328,253 +1328,148 @@ print(f'avg preds / image   : {n_pred/len(records):.2f}')
 
 
 # ─────────────────────────────────────────────────────────────
-# Section 12 — Merge LoRA + save bf16
-# ─────────────────────────────────────────────────────────────
-MD_MERGE = """\
----
-
-## 12. Merge LoRA + save bf16 to Drive
-
-`merge_and_unload()` folds the rank-16 adapter matrices back into
-the base linear layers, so the resulting checkpoint is a vanilla
-Gemma-4 multimodal model that any downstream tool (llama.cpp, vLLM,
-HF Transformers, etc.) can load without PEFT in the picture.
-"""
-
-CODE_MERGE = """\
-# Workaround for PEFT bug #3025: _unload_and_optionally_merge crashes
-# in cleanup with `del self.model.peft_config` because peft_config is
-# a read-only property in current PEFT releases. The merge has ALREADY
-# been applied to the underlying weights at that point.
-import peft.tuners.tuners_utils as _ptu
-
-if not getattr(_ptu.BaseTuner, '_neo_patched', False):
-    _orig = _ptu.BaseTuner._unload_and_optionally_merge
-
-    def _patched(self, *args, **kwargs):
-        try:
-            return _orig(self, *args, **kwargs)
-        except AttributeError as e:
-            if 'peft_config' not in str(e):
-                raise
-            print('[PEFT bug #3025] cleanup of peft_config failed but merge '
-                  'is already applied -- returning self.model.')
-            return self.model
-
-    _ptu.BaseTuner._unload_and_optionally_merge = _patched
-    _ptu.BaseTuner._neo_patched = True
-
-# In-place merge via merge_adapter() -- avoids the unload-side cleanup
-# entirely. After this, the LoRA deltas are baked into the base linear
-# layers; we then walk the wrapper chain to find the actual non-PEFT
-# Gemma-4 PreTrainedModel and save THAT.
-import shutil, pathlib
-from transformers import PreTrainedModel
-from peft import PeftModel
-
-if isinstance(model, PeftModel):
-    print('Merging adapters in place via merge_adapter()...')
-    model.base_model.merge_adapter()
-
-
-def find_real_base(root, max_depth=15):
-    \"\"\"Descend through .base_model / .model until we hit a
-    transformers PreTrainedModel that is NOT a PeftModel. Handles the
-    nested-wrap pathology that the partial merge_and_unload patch can
-    leave behind.\"\"\"
-    obj, visited = root, set()
-    for d in range(max_depth):
-        if id(obj) in visited:
-            print(f'  depth {d}: CIRCULAR'); break
-        visited.add(id(obj))
-        cls   = type(obj).__name__
-        is_pt = isinstance(obj, PreTrainedModel)
-        is_pf = isinstance(obj, PeftModel)
-        mt    = getattr(getattr(obj, 'config', None), 'model_type', None)
-        print(f'  depth {d}: {cls:40s} pretrained={is_pt} peft={is_pf} model_type={mt!r}')
-        if is_pt and not is_pf and mt:
-            return obj
-        nxt = None
-        for attr in ('base_model', 'model'):
-            if hasattr(obj, attr):
-                cand = getattr(obj, attr)
-                if cand is not obj and cand is not None:
-                    nxt = cand; break
-        if nxt is None:
-            print('  (cannot descend further)'); break
-        obj = nxt
-    return obj
-
-
-print('Walking wrapper chain:')
-base = find_real_base(model)
-print(f'=> selected: {type(base).__name__}')
-assert isinstance(base, PreTrainedModel) and not isinstance(base, PeftModel), \\
-    f'No non-PEFT PreTrainedModel found; got {type(base).__name__}'
-assert getattr(base.config, 'model_type', None), 'base.config.model_type is empty!'
-
-# Save to local /content/ first. Drive's FUSE mount serializes metadata
-# writes through one API client; small early files (config.json) can
-# get clobbered by the index-file commit at the end of multi-shard
-# save_pretrained. Local SSD has no such race.
-LOCAL_BASE   = pathlib.Path('/content/eyes_v4_local')
-LOCAL_MERGED = LOCAL_BASE / 'merged'
-LOCAL_BASE.mkdir(parents=True, exist_ok=True)
-if LOCAL_MERGED.exists():
-    shutil.rmtree(LOCAL_MERGED)
-LOCAL_MERGED.mkdir(parents=True, exist_ok=True)
-
-base.save_pretrained(
-    str(LOCAL_MERGED),
-    safe_serialization=True,
-    max_shard_size='4GB',
-)
-processor.save_pretrained(str(LOCAL_MERGED))
-
-cfg_path = LOCAL_MERGED / 'config.json'
-assert cfg_path.exists(),                          'config.json missing!'
-assert any(LOCAL_MERGED.glob('*.safetensors')),    'safetensors shards missing!'
-
-print(f'\\nconfig.json size : {cfg_path.stat().st_size} bytes')
-total_gb = sum(p.stat().st_size for p in LOCAL_MERGED.rglob('*')) / (1024**3)
-print(f'Saved merged bf16 to {LOCAL_MERGED} ({total_gb:.2f} GB)')
-
-# Repoint downstream paths to local. Stash Drive paths for final rsync.
-OUT_MERGED_DRIVE = OUT_MERGED
-OUT_GGUF_DRIVE   = OUT_GGUF
-OUT_MMPROJ_DRIVE = OUT_MMPROJ
-
-OUT_MERGED = LOCAL_MERGED
-F16_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-f16.gguf'
-OUT_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-Q4_K_M.gguf'
-OUT_MMPROJ = LOCAL_BASE / 'mmproj-Eyes_v4_Gemma4-f16.gguf'
-
-print(f'OUT_MERGED -> {OUT_MERGED}')
-print(f'(Drive targets preserved as OUT_*_DRIVE for final rsync.)')
-"""
-
-
-# ─────────────────────────────────────────────────────────────
-# Section 13 — Quantize to GGUF (text + mmproj)
+# Section 12-13 — Adapter-only GGUF export
 # ─────────────────────────────────────────────────────────────
 MD_QUANT = """\
 ---
 
-## 13. Convert to GGUF + quantize to Q4_K_M
+## 12-13. Adapter-only export (skip the merge)
 
-Two artifacts get produced:
+We deliberately skip the full HF -> GGUF merge + convert path because
+upstream `convert_hf_to_gguf.py` doesn't yet recognise Gemma-4
+multimodal architectures (`Gemma4ForConditionalGeneration`). Instead
+we ship Eyes as a **3-file bundle**:
 
-1. **Text-model GGUF** (Q4_K_M, ~3 GB) — the language decoder + token
-   embeddings, what the Hetzner llama-server actually runs.
-2. **Vision projector GGUF** (fp16, ~1 GB) — the SigLIP-style vision
-   tower + multimodal projector from `gemma-4-E2B-it`.
+* Pre-converted Q4_K_M base from `ggml-org/gemma-4-E2B-it-GGUF`
+* Pre-converted vision projector from the same repo
+* Our **trained LoRA delta** as a separate GGUF (~50 MB)
 
-### Known caveats (Gemma-4 + llama.cpp, as of May 2026)
+llama.cpp combines them at load time via `--lora`, so there's no
+merge step on either side. Bonus: the base + projector are reusable
+across re-trains, so iterating on Eyes is just a 30 s LoRA export
+instead of a 30 min merge + Q4_K_M run.
 
-* Gemma-4 **text + image inference is stable** on llama.cpp `master`.
-* Gemma-4 **audio support is still WIP** in llama.cpp — we don't
-  need audio for Eyes, so we skip it cleanly.
-* `convert_hf_to_gguf.py` has a known `KeyError: 'image_mean'` when
-  exporting the multimodal projector on some Gemma-4 checkpoints
-  (llama.cpp issue #21775). The mmproj cell below patches the
-  preprocessor config in-place if the key is missing, then retries.
+For Phase 2 (audio LoRA on top of vision-Eyes) we just train a
+second LoRA and stack it via repeated `--lora` flags.
+"""
 
-We build llama.cpp from `master` (not a pinned tag) to pick up the
-latest Gemma-4 PRs.
+CODE_MERGE = """\
+# Save the adapter only -- skip the merge entirely.
+import shutil, pathlib
+
+LOCAL_BASE  = pathlib.Path('/content/eyes_v4_local')
+ADAPTER_DIR = LOCAL_BASE / 'adapter'
+LOCAL_BASE.mkdir(parents=True, exist_ok=True)
+if ADAPTER_DIR.exists():
+    shutil.rmtree(ADAPTER_DIR)
+ADAPTER_DIR.mkdir(parents=True)
+
+# model.save_pretrained() on a PeftModel saves ONLY the adapter
+# (adapter_config.json + adapter_model.safetensors). That's exactly
+# what we need for convert_lora_to_gguf.py.
+model.save_pretrained(str(ADAPTER_DIR))
+
+print('Adapter files:')
+for p in sorted(ADAPTER_DIR.iterdir()):
+    print(f'  {p.name}  {p.stat().st_size // 1024} KB')
+
+# Sanity: adapter_model.safetensors must be > 0 KB. If it is empty,
+# the LoRA weights were already merged in place by an earlier
+# merge_adapter() call -- the only way to recover is to restart and
+# reload the latest trainer checkpoint.
+adapter_sf = ADAPTER_DIR / 'adapter_model.safetensors'
+if adapter_sf.stat().st_size < 1024:
+    raise RuntimeError(
+        'adapter_model.safetensors is empty -- adapter weights were '
+        'already merged. Restart kernel and reload the latest trainer '
+        f'checkpoint from {OUT_RUN}/checkpoint-* before re-running this cell.'
+    )
 """
 
 CODE_GGUF_BUILD = """\
+# Build llama.cpp from master (we only need the LoRA converter +
+# llama-cli for the probe; full quant binaries not needed any more).
 %cd /content
 ![ -d llama.cpp ] || git clone --depth 1 https://github.com/ggml-org/llama.cpp llama.cpp
 %cd /content/llama.cpp
 !git pull --ff-only 2>&1 | tail -3
-!pip install -q -r requirements/requirements-convert_hf_to_gguf.txt
-!cmake -B build -DGGML_CUDA=ON 2>&1 | tail -3
-!cmake --build build --config Release --target llama-quantize -j 2>&1 | tail -3
+!pip install -q -r requirements/requirements-convert_lora_to_gguf.txt 2>&1 | tail -3
 """
 
 CODE_GGUF_TEXT = """\
-F16_GGUF = OUT_RUN / 'Eyes_v4_Gemma4-f16.gguf'
+# Download pre-converted base + mmproj from HF Hub. These are the
+# stock Gemma-4 E2B GGUFs; reusable across all Eyes versions.
+from huggingface_hub import hf_hub_download
 
-# Convert the text decoder to GGUF in fp16.
-!python /content/llama.cpp/convert_hf_to_gguf.py \\
-    {OUT_MERGED} \\
-    --outtype f16 \\
-    --outfile {F16_GGUF}
-
-print('fp16 text GGUF size:', round(F16_GGUF.stat().st_size / 1024**3, 2), 'GB')
+GGUF_REPO = 'ggml-org/gemma-4-E2B-it-GGUF'
+print(f'Downloading pre-converted artifacts from {GGUF_REPO}...')
+BASE_GGUF = pathlib.Path(hf_hub_download(
+    GGUF_REPO, 'gemma-4-E2B-it-Q4_K_M.gguf', local_dir=str(LOCAL_BASE)))
+MMPROJ_GGUF = pathlib.Path(hf_hub_download(
+    GGUF_REPO, 'mmproj-gemma-4-E2B-it-f16.gguf', local_dir=str(LOCAL_BASE)))
+print(f'  base   : {BASE_GGUF}  ({BASE_GGUF.stat().st_size / 1024**3:.2f} GB)')
+print(f'  mmproj : {MMPROJ_GGUF}  ({MMPROJ_GGUF.stat().st_size / 1024**3:.2f} GB)')
 """
 
 CODE_GGUF_MMPROJ = """\
-# Convert the vision tower + multimodal projector to its own GGUF.
-#
-# Workaround for llama.cpp issue #21775: convert_hf_to_gguf.py
-# crashes with KeyError: 'image_mean' when the merged checkpoint's
-# preprocessor_config.json is missing certain HF defaults. If that
-# happens, we patch the config and retry once.
-import json, subprocess, pathlib
+# Convert the LoRA adapter to GGUF. This is the ONLY conversion we
+# do ourselves -- much narrower than full convert_hf_to_gguf.py and
+# works for Gemma-4 today (only needs the base architecture's tensor
+# names, which llama.cpp does know).
+LORA_GGUF = LOCAL_BASE / 'eyes_v4_lora.gguf'
 
-pp_cfg = pathlib.Path(OUT_MERGED) / 'preprocessor_config.json'
-if pp_cfg.exists():
-    cfg = json.loads(pp_cfg.read_text())
-    patched = False
-    if 'image_mean' not in cfg:
-        cfg['image_mean'] = [0.5, 0.5, 0.5]; patched = True
-    if 'image_std' not in cfg:
-        cfg['image_std']  = [0.5, 0.5, 0.5]; patched = True
-    if patched:
-        pp_cfg.write_text(json.dumps(cfg, indent=2))
-        print('Patched preprocessor_config.json with default image_mean/std.')
+!python /content/llama.cpp/convert_lora_to_gguf.py \\
+    --base {BASE_MODEL} \\
+    --outfile {LORA_GGUF} \\
+    {ADAPTER_DIR}
 
-cmd = [
-    'python', '/content/llama.cpp/convert_hf_to_gguf.py',
-    str(OUT_MERGED),
-    '--mmproj',
-    '--outtype', 'f16',
-    '--outfile', str(OUT_MMPROJ),
-]
-r = subprocess.run(cmd, capture_output=True, text=True)
-print(r.stdout[-2000:])
-if r.returncode != 0:
-    print('STDERR:', r.stderr[-2000:])
-    raise RuntimeError(
-        'mmproj conversion failed. If the error mentions an '
-        'unsupported architecture, rebuild llama.cpp from master '
-        '(git pull, cmake --build) and retry this cell. See '
-        'https://github.com/ggml-org/llama.cpp/issues/21775 for context.'
-    )
-
-print('mmproj fp16 size:', round(OUT_MMPROJ.stat().st_size / 1024**3, 2), 'GB')
+assert LORA_GGUF.exists(), 'LoRA GGUF conversion failed'
+print(f'LoRA delta GGUF: {LORA_GGUF}  ({LORA_GGUF.stat().st_size / 1024**2:.1f} MB)')
 """
 
 CODE_GGUF_QUANT = """\
-# Quantize the TEXT model only (mmproj stays fp16 - image-tower
-# quantization is finicky and the projector is small anyway).
-!/content/llama.cpp/build/bin/llama-quantize \\
-    {F16_GGUF} \\
-    {OUT_GGUF} \\
-    Q4_K_M
-
-print('text Q4_K_M size:', round(OUT_GGUF.stat().st_size / 1024**3, 2), 'GB')
+# No quantization step -- the base GGUF is already Q4_K_M and the
+# LoRA delta is fp16 (LoRA weights are tiny so quant offers no win).
+# This cell is just a status check before the rsync.
+print('=== Eyes v4 GGUF bundle ===')
+for p in [BASE_GGUF, MMPROJ_GGUF, LORA_GGUF]:
+    print(f'  {p.name:50s} {p.stat().st_size / 1024**2:>8.1f} MB')
 """
 
 CODE_GGUF_RSYNC = """\
-# Final stash: copy Q4_K_M + mmproj to Drive (single sequential write
-# per file, much more reliable than letting save_pretrained shard
-# directly to Drive).
+# Stash the bundle to Drive. Only the LoRA delta is unique to this
+# Eyes version; base + mmproj are stock and don't need re-uploading
+# every train run, but copying them once means Hetzner deploy is a
+# self-contained 3-scp.
 import shutil
-OUT_GGUF_DRIVE.parent.mkdir(parents=True, exist_ok=True)
-print(f'Copying {OUT_GGUF.stat().st_size / 1024**3:.2f} GB Q4_K_M to Drive...')
-shutil.copy2(OUT_GGUF, OUT_GGUF_DRIVE)
-print(f'Copying {OUT_MMPROJ.stat().st_size / 1024**3:.2f} GB mmproj  to Drive...')
-shutil.copy2(OUT_MMPROJ, OUT_MMPROJ_DRIVE)
+
+DRIVE_OUT = pathlib.Path('/content/drive/MyDrive/DressApp_Gemma4_E2B_Training')
+DRIVE_OUT.mkdir(parents=True, exist_ok=True)
+
+DRIVE_LORA   = DRIVE_OUT / LORA_GGUF.name
+DRIVE_BASE   = DRIVE_OUT / BASE_GGUF.name
+DRIVE_MMPROJ = DRIVE_OUT / MMPROJ_GGUF.name
+
+print(f'Copying LoRA delta ({LORA_GGUF.stat().st_size / 1024**2:.1f} MB) to Drive...')
+shutil.copy2(LORA_GGUF, DRIVE_LORA)
+
+if not DRIVE_BASE.exists() or DRIVE_BASE.stat().st_size != BASE_GGUF.stat().st_size:
+    print(f'Copying base ({BASE_GGUF.stat().st_size / 1024**3:.2f} GB) to Drive...')
+    shutil.copy2(BASE_GGUF, DRIVE_BASE)
+else:
+    print('Base already on Drive, skipping.')
+
+if not DRIVE_MMPROJ.exists() or DRIVE_MMPROJ.stat().st_size != MMPROJ_GGUF.stat().st_size:
+    print(f'Copying mmproj ({MMPROJ_GGUF.stat().st_size / 1024**3:.2f} GB) to Drive...')
+    shutil.copy2(MMPROJ_GGUF, DRIVE_MMPROJ)
+else:
+    print('mmproj already on Drive, skipping.')
 
 print()
-print('=== v4 artifacts on Drive ===')
-print(' ', OUT_GGUF_DRIVE)
-print(' ', OUT_MMPROJ_DRIVE)
+print('=== Drive bundle ready for scp -> Hetzner ===')
+for p in (DRIVE_LORA, DRIVE_BASE, DRIVE_MMPROJ):
+    print(f'  {p}')
 """
-
 
 # ─────────────────────────────────────────────────────────────
 # Section 14 — Sanity probe
@@ -1624,17 +1519,17 @@ from llama_cpp import Llama
 
 # Use importlib so static checkers (Pyright/Pylance) don't whine about
 # the import not existing pre-install. Llava15ChatHandler is the
-# universal Gemma/PaliGemma/LLaVA-family vision handler -- works for
-# Gemma-4 mmproj GGUFs because the projector format is compatible.
+# universal Gemma/PaliGemma/LLaVA-family vision handler.
 _cf = importlib.import_module('llama_cpp.llama_chat_format')
 VisionHandler = _cf.Llava15ChatHandler
 
-handler = VisionHandler(clip_model_path=str(OUT_MMPROJ), verbose=False)
+handler = VisionHandler(clip_model_path=str(MMPROJ_GGUF), verbose=False)
 llm = Llama(
-    model_path=str(OUT_GGUF),
+    model_path=str(BASE_GGUF),
     chat_handler=handler,
     n_ctx=4096,
     n_gpu_layers=-1,
+    lora_path=str(LORA_GGUF),     # runtime-applied Eyes LoRA delta
     verbose=False,
 )
 
@@ -1654,7 +1549,7 @@ for img_path, target_json, src in samples:
             ]},
         ],
         temperature=0.0,
-        max_tokens=512,
+        max_tokens=200,
     )
     raw = resp['choices'][0]['message']['content']
     parsed = _safe_parse(raw)
@@ -1717,8 +1612,8 @@ CELLS = [
     md(MD_LORA),   code(CODE_LORA),
     md(MD_TRAIN),  code(CODE_TRAIN_ARGS), code(CODE_TRAIN_RUN),
     md(MD_EVAL),   code(CODE_EVAL),
-    md(MD_MERGE),  code(CODE_MERGE),
-    md(MD_QUANT),  code(CODE_GGUF_BUILD), code(CODE_GGUF_TEXT),
+    md(MD_QUANT),  code(CODE_MERGE),
+                   code(CODE_GGUF_BUILD), code(CODE_GGUF_TEXT),
                    code(CODE_GGUF_MMPROJ), code(CODE_GGUF_QUANT),
                    code(CODE_GGUF_RSYNC),
     md(MD_PROBE),  code(CODE_PROBE_INSTALL), code(CODE_PROBE_RUN),
