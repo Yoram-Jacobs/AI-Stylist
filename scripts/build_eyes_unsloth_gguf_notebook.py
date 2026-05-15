@@ -466,13 +466,20 @@ vision tower and the audio tower). For our use case:
 * We load at `load_in_4bit=True` because we're about to merge into a
   Q4_K_M GGUF anyway — going through 4-bit shaves ~30 s off the merge
   on T4 and avoids OOM peaks.
-* After the base is up, `model.load_adapter(ADAPTER_DIR)` plays our
-  LoRA onto it. We use `is_trainable=False` so PEFT freezes the
-  weights (otherwise the next merge step would try to allocate
-  optimizer state we don't need).
+* We attach the adapter with **`PeftModel.from_pretrained`**, NOT
+  `model.load_adapter()`. This is critical — `load_adapter` is the
+  Transformers-native adapter API that injects LoRA modules but
+  leaves the model class unchanged. Unsloth's
+  `save_pretrained_gguf` gates its merge step on
+  `isinstance(model, PeftModel)`; with `load_adapter` that check
+  returns False and Unsloth silently exports the base model with
+  **zero fine-tuning applied**. `PeftModel.from_pretrained` returns
+  a real `PeftModel` wrapper, so the merge runs as expected. We
+  add a hard `assert isinstance(...)` so the next cell can never
+  silently produce an untrained GGUF.
 
-`save_pretrained_gguf` later auto-merges, so we do NOT need an
-explicit `merge_and_unload()` here.
+`save_pretrained_gguf` auto-merges, so we do NOT need an explicit
+`merge_and_unload()` here.
 """
 
 CODE_LOAD = """\
@@ -480,6 +487,7 @@ import time
 import os
 
 from unsloth import FastVisionModel
+from peft import PeftModel
 
 BASE_MODEL = "unsloth/gemma-4-E2B-it"
 HF_TOKEN   = os.environ.get("HF_TOKEN") or None
@@ -495,20 +503,41 @@ model, processor = FastVisionModel.from_pretrained(
 print(f"  base loaded in {time.time()-t0:.1f}s")
 
 t0 = time.time()
-print(f"Attaching Eyes v4 LoRA adapter from {ADAPTER_DIR} …")
-# load_adapter() is exposed by the PeftModel that FastVisionModel
-# returns. is_trainable=False saves ~1 GB of would-be optimizer state.
-model.load_adapter(ADAPTER_DIR, adapter_name="eyes_v4", is_trainable=False)
-# Activate it (no-op if it's already the only adapter, but explicit
-# in case future runs stack multiple adapters).
-model.set_adapter("eyes_v4")
-print(f"  adapter attached in {time.time()-t0:.1f}s")
+print(f"Wrapping in PeftModel from {ADAPTER_DIR} …")
+# CRITICAL — use PeftModel.from_pretrained, NOT model.load_adapter.
+#
+# Why: model.load_adapter() is Transformers' NATIVE adapter API
+# (added in transformers 4.40). It injects LoRA modules into the
+# existing module tree but does NOT change the class of `model`.
+#
+# Unsloth's save_pretrained_gguf gates the merge step on
+# `isinstance(model, PeftModel)`. With load_adapter() the class
+# stays as Gemma4ForConditionalGeneration, isinstance returns False,
+# and Unsloth silently takes the "save base without merge" path —
+# the GGUF you get is just the base model, with zero fine-tuning.
+#
+# PeftModel.from_pretrained returns a real PeftModel wrapper, so
+# isinstance succeeds and merge_and_unload runs as expected.
+model = PeftModel.from_pretrained(
+    model,
+    ADAPTER_DIR,
+    adapter_name = "eyes_v4",
+    is_trainable = False,
+)
+print(f"  wrapped in {time.time()-t0:.1f}s")
 
-# A quick sanity print so the next cell doesn't run against the wrong
-# weights.
-total_params  = sum(p.numel() for p in model.parameters())
-adapter_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"\\nModel ready  : total {total_params/1e9:.2f} B params, "
+# Hard guard — failing here is infinitely better than silently
+# producing an untrained-base GGUF in Step 6.
+assert isinstance(model, PeftModel), (
+    "Wrap failed — Step 6 would export the base without LoRA merge. "
+    "Restart kernel and re-run from Step 1."
+)
+
+# Sanity print so the next cell doesn't run against the wrong weights.
+total_params    = sum(p.numel() for p in model.parameters())
+adapter_params  = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"\\nModel ready  : {type(model).__name__}, "
+      f"total {total_params/1e9:.2f} B params, "
       f"adapter {adapter_params/1e6:.1f} M trainable")
 """
 
