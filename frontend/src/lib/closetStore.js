@@ -83,6 +83,21 @@ let _state = {
     lastRunAt: 0,
     lastError: null,
   },
+  // Phase Z2.6 — same shape as ``repairProgress``, but for the
+  // streaming ``/closet/repair-thumbnails`` pass. Kept as a
+  // separate snapshot so the two repair flows can run sequentially
+  // (typically: hashes first, then thumbnails, both auto-triggered
+  // after the first prewarm of the session) without their progress
+  // chips contending for the same state.
+  thumbProgress: {
+    running: false,
+    scanned: 0,
+    total: 0,
+    regenerated: 0,
+    failed: 0,
+    lastRunAt: 0,
+    lastError: null,
+  },
 };
 
 const _listeners = new Set();
@@ -150,10 +165,25 @@ export const closetStore = {
       // so a rapid prewarm → navigate → prewarm cycle doesn't spam
       // the endpoint.
       if (Date.now() - (_state.repairProgress?.lastRunAt || 0) >= MIN_REPAIR_INTERVAL_MS) {
-        this.repairHashes().catch((err) => {
-          // eslint-disable-next-line no-console
-          console.info('closet hash repair failed (will retry next session)', err?.message || err);
-        });
+        this.repairHashes()
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.info('closet hash repair failed (will retry next session)', err?.message || err);
+          })
+          // Phase Z2.6 — chain the thumbnail repair AFTER the hash
+          // repair finishes (or fails). Running them sequentially
+          // avoids two streams hammering the backend at once and
+          // keeps the chip experience linear: the user sees one
+          // "Tuning duplicate detector…" pass, then one "Refreshing
+          // thumbnails…" pass, not both at once.
+          .finally(() => {
+            if (Date.now() - (_state.thumbProgress?.lastRunAt || 0) >= MIN_REPAIR_INTERVAL_MS) {
+              this.repairThumbnails().catch((err) => {
+                // eslint-disable-next-line no-console
+                console.info('closet thumbnail repair failed (will retry next session)', err?.message || err);
+              });
+            }
+          });
       }
       return next;
     } catch (err) {
@@ -292,6 +322,15 @@ export const closetStore = {
         lastRunAt: 0,
         lastError: null,
       },
+      thumbProgress: {
+        running: false,
+        scanned: 0,
+        total: 0,
+        regenerated: 0,
+        failed: 0,
+        lastRunAt: 0,
+        lastError: null,
+      },
     });
   },
 
@@ -408,6 +447,140 @@ export const closetStore = {
       throw err;
     }
   },
+
+  /**
+   * Phase Z2.6 — stream the server-side closet-thumbnail repair pass
+   * and apply each row's regenerated thumbnail into the local store
+   * as it arrives.
+   *
+   * The repair endpoint emits an NDJSON stream of ``{type, ...}``
+   * events. For each row reported as ``regenerated`` we proactively
+   * invalidate the in-memory ``thumbnail_data_url`` on that item (by
+   * setting it to ``null``) so the next render reads from the
+   * server-side update via the next incremental sync. We deliberately
+   * DON'T splice the new data URL into the store mid-stream because
+   * the server doesn't echo it back in the event payload — that
+   * would push tens of MB of base64 across the stream for a 300-item
+   * closet. Forcing a soft re-fetch is fine: the lazy backfill +
+   * fresh ``GET /closet`` rehydrates without the user noticing.
+   *
+   * Returns the final ``done`` summary object. Re-throws on
+   * unrecoverable stream errors so callers can decide; the
+   * auto-trigger in ``prewarm`` deliberately catches and downgrades
+   * because a failed repair is not a fatal app condition.
+   */
+  async repairThumbnails({ onlyStale = true } = {}) {
+    if (_state.thumbProgress?.running) {
+      return null;
+    }
+    _set({
+      thumbProgress: {
+        running: true,
+        scanned: 0,
+        total: 0,
+        regenerated: 0,
+        failed: 0,
+        lastRunAt: _state.thumbProgress?.lastRunAt || 0,
+        lastError: null,
+      },
+    });
+    try {
+      const done = await api.repairClosetThumbnails({
+        onlyStale,
+        onEvent: (ev) => {
+          if (!ev || typeof ev !== 'object') return;
+          if (ev.type === 'start') {
+            _set({
+              thumbProgress: {
+                ..._state.thumbProgress,
+                running: true,
+                scanned: 0,
+                total: Number(ev.total) || 0,
+                regenerated: 0,
+                failed: 0,
+                lastError: null,
+              },
+            });
+            return;
+          }
+          if (ev.type === 'item') {
+            // Drop the cached thumbnail on the matching item so the
+            // next incremental sync (or full re-fetch) repaints it
+            // from the freshly-regenerated server-side value. We
+            // can't splice the new bytes in here because the server
+            // doesn't echo them — see method docstring.
+            if (ev.id && ev.status === 'regenerated') {
+              const items = _state.items;
+              const idx = items.findIndex((it) => it.id === ev.id);
+              if (idx >= 0) {
+                const merged = {
+                  ...items[idx],
+                  thumbnail_data_url: null,
+                };
+                _set({
+                  items: [
+                    ...items.slice(0, idx),
+                    merged,
+                    ...items.slice(idx + 1),
+                  ],
+                });
+              }
+            }
+            const p = _state.thumbProgress || {};
+            _set({
+              thumbProgress: {
+                ...p,
+                scanned: (p.scanned || 0) + 1,
+                regenerated:
+                  (p.regenerated || 0) +
+                  (ev.status === 'regenerated' ? 1 : 0),
+                failed:
+                  (p.failed || 0) + (ev.status === 'failed' ? 1 : 0),
+              },
+            });
+            return;
+          }
+          if (ev.type === 'done') {
+            _set({
+              thumbProgress: {
+                running: false,
+                scanned: Number(ev.scanned) || 0,
+                total: Number(ev.scanned) || 0,
+                regenerated: Number(ev.regenerated) || 0,
+                failed: Number(ev.failed) || 0,
+                lastRunAt: Date.now(),
+                lastError: null,
+              },
+            });
+            // After a successful regeneration pass, kick a forced
+            // prewarm so the just-invalidated thumbnails re-fetch
+            // their bytes from the server. Without this, the
+            // closet grid would show empty thumbs until the user
+            // navigates away and back. A full prewarm is heavier
+            // than an incremental sync, but it's correct here:
+            // many items typically have new thumbnail bytes after
+            // a regen pass, and an incremental sync would only
+            // pick up items whose ``updated_at`` advanced.
+            if (Number(ev.regenerated) > 0) {
+              this.prewarm({ force: true }).catch(() => {});
+            }
+          }
+        },
+      });
+      return done;
+    } catch (err) {
+      _set({
+        thumbProgress: {
+          ..._state.thumbProgress,
+          running: false,
+          lastRunAt: Date.now(),
+          lastError: err?.message || String(err),
+        },
+      });
+      throw err;
+    }
+  },
+
 
   /**
    * Phase Z4 — record one or more "Save all" failures so the Closet

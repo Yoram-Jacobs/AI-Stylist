@@ -161,6 +161,11 @@
       "doneEmpty": "Todo listo",
       "failed": "No se pudieron actualizar las huellas",
       "failedCount": "{{n}} fallidos"
+    },
+    "thumbRepair": {
+      "running": "Actualizando miniaturas… {{n}}/{{total}}",
+      "regenerated": "{{n}} actualizadas",
+      "failed": "No se pudieron actualizar las miniaturas"
     }
   },
   "addItem": {

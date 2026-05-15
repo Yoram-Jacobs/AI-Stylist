@@ -161,6 +161,11 @@
       "doneEmpty": "Tutto pronto",
       "failed": "Impossibile aggiornare le impronte",
       "failedCount": "{{n}} non riusciti"
+    },
+    "thumbRepair": {
+      "running": "Aggiornamento miniature… {{n}}/{{total}}",
+      "regenerated": "{{n}} aggiornate",
+      "failed": "Impossibile aggiornare le miniature"
     }
   },
   "addItem": {

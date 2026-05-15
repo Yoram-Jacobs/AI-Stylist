@@ -161,6 +161,11 @@
       "doneEmpty": "All set",
       "failed": "Couldn’t refresh fingerprints",
       "failedCount": "{{n}} failed"
+    },
+    "thumbRepair": {
+      "running": "Refreshing thumbnails… {{n}}/{{total}}",
+      "regenerated": "{{n}} refreshed",
+      "failed": "Couldn’t refresh thumbnails"
     }
   },
   "addItem": {

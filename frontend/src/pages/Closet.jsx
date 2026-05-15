@@ -23,6 +23,7 @@ import {
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
 import { HashRepairChip } from '@/components/closet/HashRepairChip';
+import { ThumbRepairChip } from '@/components/closet/ThumbRepairChip';
 import { api } from '@/lib/api';
 import { bestImageUrl, isCleanImagePending } from '@/lib/itemImage';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
@@ -373,14 +374,18 @@ export default function Closet() {
               ({total})
             </span>
           </h1>
-          {/* Phase Z2.3 — ambient progress chip for the streaming
-              hash-repair pass. Renders nothing while idle; ticks
-              live during the pass; fades out a few seconds after
-              completion. The chip subscribes to the same store
-              snapshot, so a multi-tab refresh on another window
-              still produces a visible reaction here. */}
-          <div className="mt-2 h-5">
+          {/* Phase Z2.3 + Z2.6 — two ambient progress chips, side-by-side.
+              ``HashRepairChip`` ticks during the duplicate-detector
+              tune-up (fires first after prewarm). ``ThumbRepairChip``
+              ticks during the post-Z2.6 stale-thumbnail regeneration
+              (fires immediately after the hash repair completes).
+              Both render nothing while idle, both fade out a few
+              seconds after completion. Chained, not concurrent, so
+              the user reads them as a coherent sequence. The flex
+              wrap keeps phones happy when both chips are visible. */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 min-h-5">
             <HashRepairChip progress={store.repairProgress} />
+            <ThumbRepairChip progress={store.thumbProgress} />
           </div>
         </div>
         <div className="flex items-center gap-2">

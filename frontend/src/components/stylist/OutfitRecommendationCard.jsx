@@ -148,7 +148,11 @@ export function OutfitRecommendationCard({ rec, index, sessionId, onItemClick })
             return (
               <li
                 key={j}
-                className="flex items-center gap-2"
+                // ``min-w-0`` lets the text span below shrink under
+                // the thumbnail's fixed width when the description
+                // contains a long unbreakable token — same fix as
+                // the outer chat bubble.
+                className="flex min-w-0 items-center gap-2"
                 data-testid={`outfit-recommendation-${index}-item-${j}`}
               >
                 {clickable ? (
@@ -164,7 +168,7 @@ export function OutfitRecommendationCard({ rec, index, sessionId, onItemClick })
                 ) : (
                   thumb
                 )}
-                <span className="flex-1">
+                <span className="flex-1 min-w-0 break-words">
                   {it.description || labelForRole(it.role, t) || it.role}
                   {it.role ? (
                     <Badge
@@ -179,7 +183,7 @@ export function OutfitRecommendationCard({ rec, index, sessionId, onItemClick })
             );
           })}
         </ul>
-        {rec.why ? <p className="text-xs mt-2 italic">{rec.why}</p> : null}
+        {rec.why ? <p className="text-xs mt-2 italic break-words">{rec.why}</p> : null}
         <div className="mt-3 flex items-center justify-end">
           <ShareOutfitButton rec={rec} sessionId={sessionId} />
         </div>

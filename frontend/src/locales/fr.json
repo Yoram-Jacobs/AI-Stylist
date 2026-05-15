@@ -161,6 +161,11 @@
       "doneEmpty": "Tout est prêt",
       "failed": "Impossible d’actualiser les empreintes",
       "failedCount": "{{n}} échec(s)"
+    },
+    "thumbRepair": {
+      "running": "Mise à jour des miniatures… {{n}}/{{total}}",
+      "regenerated": "{{n}} actualisées",
+      "failed": "Impossible de rafraîchir les miniatures"
     }
   },
   "addItem": {

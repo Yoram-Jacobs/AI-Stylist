@@ -161,6 +161,11 @@
       "doneEmpty": "準備完了",
       "failed": "フィンガープリントを更新できませんでした",
       "failedCount": "{{n}} 件失敗"
+    },
+    "thumbRepair": {
+      "running": "サムネイルを更新中… {{n}}/{{total}}",
+      "regenerated": "{{n}} 件更新",
+      "failed": "サムネイルを更新できませんでした"
     }
   },
   "addItem": {

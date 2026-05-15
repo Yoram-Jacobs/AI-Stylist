@@ -161,6 +161,11 @@
       "doneEmpty": "كل شيء جاهز",
       "failed": "تعذّر تحديث البصمات",
       "failedCount": "{{n}} فشل"
+    },
+    "thumbRepair": {
+      "running": "تحديث الصور المصغّرة… {{n}}/{{total}}",
+      "regenerated": "{{n}} تم تحديثها",
+      "failed": "تعذّر تحديث الصور المصغّرة"
     }
   },
   "addItem": {

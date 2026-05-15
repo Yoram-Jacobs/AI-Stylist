@@ -161,6 +161,11 @@
       "doneEmpty": "一切就绪",
       "failed": "无法刷新指纹",
       "failedCount": "{{n}} 失败"
+    },
+    "thumbRepair": {
+      "running": "正在刷新缩略图… {{n}}/{{total}}",
+      "regenerated": "{{n}} 已刷新",
+      "failed": "无法刷新缩略图"
     }
   },
   "addItem": {

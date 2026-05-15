@@ -506,8 +506,15 @@ export default function ItemDetail() {
         // ``autoSegment`` is false.
         language: (i18n.language || '').split('-')[0] || 'en',
       });
+      // Phase Z2.6 — same fix as Clean Background. Only refresh the
+      // baseline ``item`` so the image preview picks up the new
+      // ``original_image_url``; do NOT call ``setForm(toFormState(...))``,
+      // which would wipe the user's pending edits to other fields.
+      // With ``autoSegment=false`` the backend only mutates image
+      // URLs (no editable-field touches), so ``diffPatch`` against
+      // the new baseline correctly reflects only the user's
+      // editable-field drafts.
       setItem(res.item);
-      setForm(toFormState(res.item, user));
       toast.dismiss(loadingId);
       toast.success(t('itemDetail.photo.success'));
     } catch (err) {
@@ -639,8 +646,21 @@ export default function ItemDetail() {
       const res = await api.cleanItemBackground(id);
       if (res.applied) {
         toast.success(t('itemDetail.cleanBackground.success'));
+        // Phase Z2.6 — only refresh the baseline ``item`` so the
+        // image preview picks up the new ``reconstructed_image_url``.
+        // We intentionally DO NOT call ``setForm(toFormState(...))``
+        // here — that would clobber any pending field edits the user
+        // had in flight (title, condition, colour, marketplace
+        // intent…), and would re-align ``form`` with the new baseline
+        // such that ``diffPatch`` returns ``{}`` and the Save button
+        // disables even though the user *did* have unsaved changes.
+        //
+        // The ``patch`` memo below recomputes against the new
+        // ``item`` baseline, so the user's editable-field drafts
+        // remain visible AND still register as dirty. Image URLs are
+        // not part of the form schema, so the swap has no spurious
+        // side-effect on ``isDirty``.
         setItem(res.item);
-        setForm(toFormState(res.item, user));
         setCleanBackgroundHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));
@@ -671,8 +691,16 @@ export default function ItemDetail() {
     try {
       const res = await api.repairItemImage(id);
       if (res?.applied && res.item) {
+        // Phase Z2.6 — same fix as Clean Background. Only refresh
+        // the baseline ``item`` so the image preview swaps to the
+        // new ``reconstructed_image_url``; do NOT clobber the
+        // form-state with ``setForm(toFormState(...))`` (would wipe
+        // pending edits). The /repair endpoint only mutates image
+        // fields (reconstructed_image_url + reconstruction_metadata
+        // + updated_at + $unset thumbnail_data_url), so ``diffPatch``
+        // against the new baseline correctly reflects only the
+        // user's editable-field drafts.
         setItem(res.item);
-        setForm(toFormState(res.item, user));
         toast.success(
           t('item.reshootSuccess', { defaultValue: 'Photo restored.' }),
         );
