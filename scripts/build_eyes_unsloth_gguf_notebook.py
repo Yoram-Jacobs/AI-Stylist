@@ -207,6 +207,14 @@ matter:
 If a previous cell in this kernel has already imported `transformers`
 (e.g. you re-ran the install cell after experimenting), **Runtime →
 Disconnect and delete runtime** and start fresh.
+
+> **Note on the telemetry stub below.** `FastVisionModel.from_pretrained`
+> calls Unsloth's `_get_statistics(...)` which pings their stats
+> endpoint with a hard 120 s timeout. When that endpoint is degraded
+> (frequent in 2026 per their GitHub issues) the load fails with a
+> misleading "HuggingFace seems to be down" error. We stub the two
+> entry points to no-ops below — the actual model download uses
+> `huggingface_hub` directly and is unaffected.
 """
 
 CODE_INSTALL = """\
@@ -230,6 +238,23 @@ CODE_IMPORT_UNSLOTH = """\
 # After this cell, you can safely import anything else.
 import unsloth  # noqa: F401 — side-effects only
 print(f"Unsloth {unsloth.__version__} imported (must be first ML import).")
+
+# ---------------------------------------------------------------------
+# WORKAROUND — Unsloth telemetry timeout
+# ---------------------------------------------------------------------
+# ``FastVisionModel.from_pretrained`` calls ``_get_statistics`` first,
+# which pings Unsloth's own download-counter endpoint with a hard 120 s
+# timeout. When that endpoint is degraded (frequent in mid-2026 per the
+# Unsloth GitHub issues tracker) the call raises ``TimeoutError`` and
+# the misleading error message blames Hugging Face. There is no
+# documented env var to disable it (we checked the official flags page
+# at https://unsloth.ai/docs/basics/unsloth-environment-flags), so we
+# stub both the public and private entry points before any model load.
+# The stats are pure telemetry and have zero functional impact.
+import unsloth.models._utils as _u
+_u._get_statistics = lambda *a, **k: None
+_u.get_statistics  = lambda *a, **k: None
+print("Stubbed Unsloth telemetry ping (prevents 120 s timeout on load).")
 """
 
 # ─────────────────────────────────────────────────────────────────────
