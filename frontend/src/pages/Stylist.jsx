@@ -506,7 +506,10 @@ export default function Stylist() {
       </div>
 
       <ScrollArea className="flex-1" data-testid="stylist-chat-thread">
-        <div ref={threadRef} className="p-4 md:p-6 space-y-4">
+        <div ref={threadRef} className="p-3 md:p-6 space-y-4">
+          {/* CSS-fix Phase Z2.5 — outer padding eased from p-4 to p-3
+              on mobile to give ~8px more horizontal room to the
+              bubbles below. The desktop value (md:p-6) is unchanged. */}
           {messages.length === 0 && !busy && !messagesLoading && (
             <div className="text-center py-10">
               <Sparkles className="h-10 w-10 mx-auto mb-3 text-[hsl(var(--accent))]" />
@@ -522,17 +525,41 @@ export default function Stylist() {
                 key={m.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={
-                  m.role === 'user' ? 'flex justify-end' : 'flex justify-start'
-                }
+                className={cn(
+                  // ``min-w-0`` is the critical bit — by spec a flex
+                  // child's ``min-width`` defaults to ``auto`` (its
+                  // intrinsic content size), so a single unbreakable
+                  // token (long URL, hashtag, single long word) would
+                  // override the bubble's ``max-w-[85%]`` and push it
+                  // past the card boundary, where the Card's
+                  // ``overflow-hidden`` clips it.  Adding ``min-w-0``
+                  // restores the expected "shrink to allowed width"
+                  // behaviour and is what unblocks ``break-words``
+                  // inside the bubble below.
+                  'flex min-w-0',
+                  m.role === 'user' ? 'justify-end' : 'justify-start',
+                )}
                 data-testid={`chat-message-${m.role}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl border px-4 py-3 ${
+                  className={cn(
+                    // ``break-words`` (overflow-wrap: break-word)
+                    // wraps the long unbreakable tokens that
+                    // ``whitespace-pre-wrap`` on the child <p> would
+                    // otherwise keep on one line.  ``min-w-0`` mirrors
+                    // the parent so the cascade is consistent on
+                    // every nested flex level.  We do NOT add an
+                    // ``overflow-hidden`` here — Tailwind's
+                    // ``rounded-2xl`` clips visible overflow already
+                    // via border-radius, and ``overflow-hidden``
+                    // would crop the speak/share popovers that some
+                    // child components anchor with absolute
+                    // positioning.
+                    'max-w-[85%] min-w-0 rounded-2xl border px-4 py-3 break-words',
                     m.role === 'user'
                       ? 'bg-[hsl(var(--accent))]/10 border-[hsl(var(--accent))]/30'
-                      : 'bg-card border-border'
-                  }`}
+                      : 'bg-card border-border',
+                  )}
                 >
                   {m.imagePreview && (
                     <img
@@ -719,8 +746,8 @@ export default function Stylist() {
             ))}
           </AnimatePresence>
           {busy && (
-            <div className="flex justify-start" data-testid="stylist-thinking">
-              <div className="max-w-[85%] rounded-2xl border border-border bg-card p-4">
+            <div className="flex min-w-0 justify-start" data-testid="stylist-thinking">
+              <div className="max-w-[85%] min-w-0 rounded-2xl border border-border bg-card p-4 break-words">
                 <div className="caps-label text-muted-foreground mb-2">
                   {t('stylist.thinking')}
                 </div>
@@ -737,10 +764,10 @@ export default function Stylist() {
           )}
           {recording && interim && (
             <div
-              className="flex justify-end"
+              className="flex min-w-0 justify-end"
               data-testid="stylist-interim-transcript"
             >
-              <div className="max-w-[85%] rounded-2xl border border-dashed border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/5 px-4 py-3">
+              <div className="max-w-[85%] min-w-0 rounded-2xl border border-dashed border-[hsl(var(--accent))]/40 bg-[hsl(var(--accent))]/5 px-4 py-3 break-words">
                 <div className="caps-label text-[hsl(var(--accent))] mb-1">
                   {t('stylist.listening')}
                 </div>
