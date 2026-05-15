@@ -614,9 +614,17 @@ os.makedirs(EXPORT_DIR, exist_ok=True)
 
 t0 = time.time()
 print(f"Exporting to {EXPORT_DIR} as {QUANT_METHOD.upper()} GGUF …")
+# IMPORTANT: pass the FULL processor, not processor.tokenizer.
+# Gemma-4 is multimodal: the vision/audio preprocessing constants
+# (image_mean, image_std, image_size, audio sample rate …) live on
+# the parent Gemma4Processor, NOT on its inner tokenizer. The mmproj
+# converter reads them out of `preprocessor_config.json`, which only
+# gets written when the FULL processor is saved. Passing
+# `processor.tokenizer` writes only the text tokenizer files and the
+# mmproj converter then KeyErrors on 'image_mean' halfway through.
 model.save_pretrained_gguf(
     EXPORT_DIR,
-    processor.tokenizer if hasattr(processor, "tokenizer") else processor,
+    processor,
     quantization_method = QUANT_METHOD,
 )
 print(f"  done in {(time.time()-t0)/60:.1f} min")
