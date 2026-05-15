@@ -153,7 +153,15 @@
     "saveFailuresBody": "Estas prendas no pudieron guardarse en tu armario. Por favor, inténtalo de nuevo.",
     "saveFailuresUnnamed": "Prenda sin título",
     "completeListingCta": "Completar anuncio",
-    "clearSearch": "Limpiar búsqueda"
+    "clearSearch": "Limpiar búsqueda",
+    "repair": {
+      "running": "Afinando detector de duplicados… {{n}}/{{total}}",
+      "repaired": "{{n}} actualizados",
+      "cleared": "{{n}} borrados",
+      "doneEmpty": "Todo listo",
+      "failed": "No se pudieron actualizar las huellas",
+      "failedCount": "{{n}} fallidos"
+    }
   },
   "addItem": {
     "title": "Añadir prendas",

@@ -153,7 +153,15 @@
     "saveFailuresBody": "これらのアイテムをクローゼットに保存できませんでした。もう一度アップロードしてください。",
     "saveFailuresUnnamed": "無題のアイテム",
     "completeListingCta": "出品を完了",
-    "clearSearch": "検索をクリア"
+    "clearSearch": "検索をクリア",
+    "repair": {
+      "running": "重複検出器を調整中… {{n}}/{{total}}",
+      "repaired": "{{n}} 件更新",
+      "cleared": "{{n}} 件クリア",
+      "doneEmpty": "準備完了",
+      "failed": "フィンガープリントを更新できませんでした",
+      "failedCount": "{{n}} 件失敗"
+    }
   },
   "addItem": {
     "title": "アイテムを追加",

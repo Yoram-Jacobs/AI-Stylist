@@ -153,7 +153,15 @@
     "saveFailuresBody": "لم يتم حفظ هذه القطع في خزانتك. يُرجى محاولة تحميلها مرة أخرى.",
     "saveFailuresUnnamed": "قطعة بدون عنوان",
     "completeListingCta": "إكمال القائمة",
-    "clearSearch": "مسح البحث"
+    "clearSearch": "مسح البحث",
+    "repair": {
+      "running": "تحسين كاشف التكرارات… {{n}}/{{total}}",
+      "repaired": "{{n}} تم تحديثه",
+      "cleared": "{{n}} تم مسحه",
+      "doneEmpty": "كل شيء جاهز",
+      "failed": "تعذّر تحديث البصمات",
+      "failedCount": "{{n}} فشل"
+    }
   },
   "addItem": {
     "title": "إضافة عناصر",

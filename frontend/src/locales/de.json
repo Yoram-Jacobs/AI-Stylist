@@ -153,7 +153,15 @@
     "saveFailuresBody": "Diese Artikel konnten nicht in deinem Closet gespeichert werden. Bitte versuche den Upload erneut.",
     "saveFailuresUnnamed": "Unbenannter Artikel",
     "completeListingCta": "Eintrag vervollständigen",
-    "clearSearch": "Suche löschen"
+    "clearSearch": "Suche löschen",
+    "repair": {
+      "running": "Duplikatserkennung wird abgestimmt… {{n}}/{{total}}",
+      "repaired": "{{n}} aktualisiert",
+      "cleared": "{{n}} geleert",
+      "doneEmpty": "Alles bereit",
+      "failed": "Fingerabdrücke konnten nicht aktualisiert werden",
+      "failedCount": "{{n}} fehlgeschlagen"
+    }
   },
   "addItem": {
     "title": "Teile hinzufügen",

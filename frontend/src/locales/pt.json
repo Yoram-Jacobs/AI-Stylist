@@ -153,7 +153,15 @@
     "saveFailuresBody": "Estes artigos não puderam ser guardados no seu armário. Por favor, tente carregá-los novamente.",
     "saveFailuresUnnamed": "Artigo sem título",
     "completeListingCta": "Completar anúncio",
-    "clearSearch": "Limpar pesquisa"
+    "clearSearch": "Limpar pesquisa",
+    "repair": {
+      "running": "Ajustando detector de duplicados… {{n}}/{{total}}",
+      "repaired": "{{n}} atualizados",
+      "cleared": "{{n}} limpos",
+      "doneEmpty": "Tudo pronto",
+      "failed": "Não foi possível atualizar as impressões",
+      "failedCount": "{{n}} falharam"
+    }
   },
   "addItem": {
     "title": "Adicionar peças",

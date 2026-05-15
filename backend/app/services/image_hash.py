@@ -200,6 +200,71 @@ def compute_signatures(image_data) -> tuple[str | None, str | None]:
     return (ph, cs)
 
 
+# ── Phase Z2.3 — authoritative source selection ────────────────────
+# ``best_authoritative_source`` and ``compute_authoritative_signatures``
+# are the *correct* way for any backfill / repair / migration code to
+# pull bytes off a closet item: ground truth FIRST, never the
+# downscaled thumbnail. See the long comment in
+# ``app/api/v1/closet.py`` /preflight backfill for why.
+#
+# ``thumbnail_data_url`` is *deliberately* excluded — phashes computed
+# from the lossy thumbnail trivially collide across two visually
+# different garments of similar overall colour (e.g. any two white
+# tops), which is the documented production bug this helper exists to
+# prevent recurrence of.
+
+# Field-priority chain used by the repair pipeline + any future
+# backfill caller. Order matters: the first non-empty wins.
+AUTHORITATIVE_SOURCE_FIELDS: tuple[str, ...] = (
+    "original_image_url",
+    "segmented_image_url",
+)
+
+
+def best_authoritative_source(row: dict) -> str | None:
+    """Return the first authoritative image source on a closet item,
+    or ``None`` if the row only has a (lossy) thumbnail.
+
+    ``row`` is a closet-item Mongo document or any dict that follows
+    the same key names. A ``None`` return is a signal to the repair
+    pipeline that this row *cannot* be safely re-fingerprinted from
+    available data — its hashes should be **cleared** (not
+    recomputed from the thumbnail) so the duplicate detector treats
+    it as un-fingerprinted instead of trusting a hallucinated hash.
+    """
+    if not isinstance(row, dict):
+        return None
+    for field in AUTHORITATIVE_SOURCE_FIELDS:
+        val = row.get(field)
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def compute_authoritative_signatures(
+    row: dict,
+) -> tuple[str | None, str | None, str | None]:
+    """Compute (phash, color_sig, source_field_used) from the best
+    authoritative source on a closet item. Returns ``(None, None, None)``
+    when no authoritative source exists.
+
+    Returning the *field that was used* lets the repair endpoint
+    surface diagnostics ("recomputed from original_image_url" vs
+    "skipped — only thumbnail available") in its streaming log
+    without re-deriving the choice on the caller side.
+    """
+    for field in AUTHORITATIVE_SOURCE_FIELDS:
+        val = row.get(field) if isinstance(row, dict) else None
+        if not isinstance(val, str) or not val:
+            continue
+        ph, cs = compute_signatures(val)
+        if ph or cs:
+            return (ph, cs, field)
+    return (None, None, None)
+
+
+
+
 def hamming_distance(a: str | None, b: str | None) -> int:
     """Hamming bit-distance between two 16-char hex digests. Returns
     a sentinel (65) for any malformed input so callers can treat it

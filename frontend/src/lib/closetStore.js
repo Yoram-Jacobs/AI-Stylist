@@ -36,6 +36,14 @@ const FRESH_MS = 5 * 60 * 1000; // 5 minutes
 // page receives a focus event every time the address bar collapses.
 const MIN_INCREMENTAL_SYNC_INTERVAL_MS = 30 * 1000;
 
+// Phase Z2.3 — minimum gap between two consecutive ``repairHashes``
+// passes. The repair is idempotent (a second pass right after a
+// successful one reports every row as ``unchanged``), but it still
+// streams the full closet through PIL on the server. 6 h is enough
+// that a daily-active user gets one repair per session window, and
+// a multi-tab refresh storm doesn't spam the endpoint.
+const MIN_REPAIR_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 // We hold the canonical snapshot in a single mutable variable but
 // **never** mutate the object's properties in place. Every state
 // transition replaces ``_state`` with a fresh object reference so
@@ -58,6 +66,23 @@ let _state = {
   // disappearing from the optimistic view). Cleared by
   // ``dismissSaveFailures`` once the user acknowledges the dialog.
   lastSaveFailures: [],
+  // Phase Z2.3 — live progress snapshot for the streaming
+  // ``/closet/repair-hashes`` pass. Subscribers (e.g. the Closet
+  // header chip) re-render as fields tick. ``running`` flips to
+  // true the instant we POST; everything else fills in from the
+  // NDJSON stream. When ``running`` returns to false, ``lastRunAt``
+  // holds the epoch-ms timestamp of the most recent completion —
+  // used by the auto-trigger to throttle re-runs.
+  repairProgress: {
+    running: false,
+    scanned: 0,
+    total: 0,
+    repaired: 0,
+    cleared: 0,
+    failed: 0,
+    lastRunAt: 0,
+    lastError: null,
+  },
 };
 
 const _listeners = new Set();
@@ -117,6 +142,19 @@ export const closetStore = {
         lastFullSync: now,
         lastIncSync: now,
       });
+      // Phase Z2.3 — fire-and-forget hash repair. We don't await
+      // because (a) the closet UI must paint immediately from the
+      // freshly-loaded snapshot, and (b) the repair pass can take
+      // several seconds on a 300-item closet — the user shouldn't
+      // see a spinner for that. Throttled by MIN_REPAIR_INTERVAL_MS
+      // so a rapid prewarm → navigate → prewarm cycle doesn't spam
+      // the endpoint.
+      if (Date.now() - (_state.repairProgress?.lastRunAt || 0) >= MIN_REPAIR_INTERVAL_MS) {
+        this.repairHashes().catch((err) => {
+          // eslint-disable-next-line no-console
+          console.info('closet hash repair failed (will retry next session)', err?.message || err);
+        });
+      }
       return next;
     } catch (err) {
       _set({ error: err });
@@ -244,7 +282,131 @@ export const closetStore = {
       lastIncSync: 0,
       error: null,
       lastSaveFailures: [],
+      repairProgress: {
+        running: false,
+        scanned: 0,
+        total: 0,
+        repaired: 0,
+        cleared: 0,
+        failed: 0,
+        lastRunAt: 0,
+        lastError: null,
+      },
     });
+  },
+
+  /**
+   * Phase Z2.3 — stream the server-side closet-hash repair pass and
+   * splice each row's patch into the local store as it arrives.
+   *
+   * The repair endpoint emits an NDJSON stream of ``{type, ...}``
+   * events; we forward per-row patches into ``upsert`` so the
+   * duplicate detector starts seeing corrected hashes mid-stream
+   * (no need to wait for the full pass to complete). The
+   * ``repairProgress`` snapshot is updated on every event so a
+   * subscribed UI chip can show "Tuning duplicate detector… 47/300"
+   * live.
+   *
+   * Returns the final ``done`` summary object. Re-throws on
+   * unrecoverable stream errors so callers can decide whether to
+   * retry; the auto-trigger in ``prewarm`` deliberately catches
+   * and downgrades to a console.info because a failed repair is
+   * not a fatal app condition.
+   */
+  async repairHashes({ dryRun = false, onlyMissing = false } = {}) {
+    if (_state.repairProgress?.running) {
+      return null;  // already running — don't fan out concurrent passes
+    }
+    _set({
+      repairProgress: {
+        running: true,
+        scanned: 0,
+        total: 0,
+        repaired: 0,
+        cleared: 0,
+        failed: 0,
+        lastRunAt: _state.repairProgress?.lastRunAt || 0,
+        lastError: null,
+      },
+    });
+    try {
+      const done = await api.repairClosetHashes({
+        dryRun,
+        onlyMissing,
+        onEvent: (ev) => {
+          if (!ev || typeof ev !== 'object') return;
+          if (ev.type === 'start') {
+            _set({
+              repairProgress: {
+                ..._state.repairProgress,
+                running: true,
+                scanned: 0,
+                total: Number(ev.total) || 0,
+                repaired: 0,
+                cleared: 0,
+                failed: 0,
+                lastError: null,
+              },
+            });
+            return;
+          }
+          if (ev.type === 'item') {
+            // Splice the patch into the matching closet row so the
+            // detector picks up the corrected hashes immediately —
+            // no need to wait for the ``done`` event.
+            if (ev.id && ev.patch && typeof ev.patch === 'object') {
+              const items = _state.items;
+              const idx = items.findIndex((it) => it.id === ev.id);
+              if (idx >= 0) {
+                const merged = { ...items[idx], ...ev.patch };
+                const nextItems = [
+                  ...items.slice(0, idx),
+                  merged,
+                  ...items.slice(idx + 1),
+                ];
+                _set({ items: nextItems });
+              }
+            }
+            const p = _state.repairProgress || {};
+            _set({
+              repairProgress: {
+                ...p,
+                scanned: (p.scanned || 0) + 1,
+                repaired: (p.repaired || 0) + (ev.status === 'repaired' ? 1 : 0),
+                cleared: (p.cleared || 0) + (ev.status === 'cleared' ? 1 : 0),
+                failed: (p.failed || 0) + (ev.status === 'failed' ? 1 : 0),
+              },
+            });
+            return;
+          }
+          if (ev.type === 'done') {
+            _set({
+              repairProgress: {
+                running: false,
+                scanned: Number(ev.scanned) || 0,
+                total: Number(ev.scanned) || 0,
+                repaired: Number(ev.repaired) || 0,
+                cleared: Number(ev.cleared) || 0,
+                failed: Number(ev.failed) || 0,
+                lastRunAt: Date.now(),
+                lastError: null,
+              },
+            });
+          }
+        },
+      });
+      return done;
+    } catch (err) {
+      _set({
+        repairProgress: {
+          ..._state.repairProgress,
+          running: false,
+          lastRunAt: Date.now(),
+          lastError: err?.message || String(err),
+        },
+      });
+      throw err;
+    }
   },
 
   /**

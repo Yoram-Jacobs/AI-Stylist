@@ -153,7 +153,15 @@
     "saveFailuresBody": "פריטים אלו לא הצליחו להישמר בארון שלך. נסי להעלות אותם שוב.",
     "saveFailuresUnnamed": "פריט ללא כותרת",
     "completeListingCta": "השלמת פרסום",
-    "clearSearch": "ניקוי חיפוש"
+    "clearSearch": "ניקוי חיפוש",
+    "repair": {
+      "running": "מכוונן את גלאי הכפילויות… {{n}}/{{total}}",
+      "repaired": "{{n}} עודכנו",
+      "cleared": "{{n}} נוקו",
+      "doneEmpty": "הכול מוכן",
+      "failed": "לא ניתן לרענן את הטביעות",
+      "failedCount": "{{n}} נכשלו"
+    }
   },
   "addItem": {
     "title": "העלאה ומילוי אוטומטי",

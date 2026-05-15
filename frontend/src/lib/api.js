@@ -44,6 +44,133 @@ client.interceptors.response.use(
   }
 );
 
+/**
+ * streamNdjson — open an `application/x-ndjson` POST stream from the
+ * backend and invoke ``onLine`` once per JSON object as it arrives.
+ *
+ * Why this exists
+ * ===============
+ * axios doesn't expose the raw ReadableStream until the response is
+ * complete, which defeats the entire purpose of NDJSON streaming.
+ * We use the platform ``fetch`` directly so we can attach a reader
+ * to ``response.body`` and dispatch events to the caller in real
+ * time — that's what makes the closet hash-repair feel "alive"
+ * rather than blocked-then-reveal.
+ *
+ * The function:
+ *   1. Auth-injects the same Bearer token axios uses, so callers
+ *      don't have to think about it.
+ *   2. Splits the stream on ``\n``. Carry-over bytes between chunks
+ *      are buffered so a JSON object that straddles a TCP boundary
+ *      isn't accidentally cut in two.
+ *   3. Calls ``onLine(obj)`` for every parsed event and resolves
+ *      with the *last* parsed object (typically the ``done``
+ *      summary) when the stream closes cleanly.
+ *   4. Rejects on network errors, non-2xx status, or AbortSignal
+ *      trip. The signal is honoured mid-stream too (the reader
+ *      cancels promptly).
+ *
+ * @param {string} path        Path relative to API_BASE, e.g. ``/closet/repair-hashes``.
+ * @param {object} [options]
+ * @param {string} [options.method='POST']
+ * @param {object} [options.params]   Query params (URLSearchParams-compatible).
+ * @param {object} [options.body]     JSON body; serialised with JSON.stringify.
+ * @param {Function} [options.onLine] ``(obj) => void`` invoked per event.
+ * @param {AbortSignal} [options.signal]
+ * @returns {Promise<object|null>} The final parsed event, or null on empty stream.
+ */
+export async function streamNdjson(path, {
+  method = 'POST',
+  params,
+  body,
+  onLine,
+  signal,
+} = {}) {
+  const url = new URL(`${API_BASE}${path}`);
+  if (params && typeof params === 'object') {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    });
+  }
+  const headers = {
+    'Accept': 'application/x-ndjson',
+  };
+  const tok = tokenStore.get();
+  if (tok) headers.Authorization = `Bearer ${tok}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  const resp = await fetch(url.toString(), {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+    // Match axios: cookies for same-site, no credentials cross-site.
+    credentials: 'same-origin',
+  });
+
+  if (resp.status === 401) {
+    tokenStore.clear();
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login';
+    }
+    throw new Error(`stream 401`);
+  }
+  if (!resp.ok || !resp.body) {
+    throw new Error(`stream ${resp.status}: ${resp.statusText || 'no body'}`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  let last = null;
+
+  try {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // Drain every complete line we have so far. The leftover
+      // (potentially-partial last line) stays in ``buf`` for the
+      // next chunk.
+      let nl = buf.indexOf('\n');
+      while (nl !== -1) {
+        const raw = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (raw) {
+          try {
+            const obj = JSON.parse(raw);
+            last = obj;
+            if (onLine) onLine(obj);
+          } catch (parseErr) {
+            // Soft-fail individual malformed lines. The server's
+            // gen() never produces them, but proxies that munge
+            // utf-8 boundaries occasionally inject a stray byte.
+            // Throwing here would kill the whole repair pass.
+            // eslint-disable-next-line no-console
+            console.warn('streamNdjson: skipping malformed line', parseErr);
+          }
+        }
+        nl = buf.indexOf('\n');
+      }
+    }
+    // End-of-stream — drain any leftover that didn't end with \n.
+    const tail = buf.trim();
+    if (tail) {
+      try {
+        const obj = JSON.parse(tail);
+        last = obj;
+        if (onLine) onLine(obj);
+      } catch {
+        /* ignore tail parse error */
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+  return last;
+}
+
 export const api = {
   // auth
   register: (body) => client.post('/auth/register', body).then((r) => r.data),
@@ -83,6 +210,36 @@ export const api = {
     client
       .post('/closet/preflight', { photos })
       .then((r) => r.data),
+  /**
+   * Phase Z2.3 — streaming hash-repair pass.
+   *
+   * Opens an ``application/x-ndjson`` POST stream against
+   * ``/closet/repair-hashes`` and dispatches each event to ``onEvent``.
+   * Resolves with the final ``{type:'done', ...}`` summary.
+   *
+   * Events the caller may receive (one per line, in this order):
+   *
+   *   * ``{type:'start', total, only_missing, dry_run}``
+   *   * ``{type:'item', id, status, source_field, delta, patch, error}``
+   *     where ``status ∈ {repaired, cleared, unchanged, skipped, failed}``
+   *     and ``patch`` (when non-null) carries only the changed fields,
+   *     ready to be shallow-merged into the closet store.
+   *   * ``{type:'done', scanned, repaired, cleared, unchanged,
+   *        skipped, failed, wrote_db}``
+   *
+   * Safe to call repeatedly; the endpoint is idempotent.
+   */
+  repairClosetHashes: ({ dryRun = false, onlyMissing = false, limit = 2000, onEvent, signal } = {}) =>
+    streamNdjson('/closet/repair-hashes', {
+      method: 'POST',
+      params: {
+        dry_run: dryRun ? 'true' : 'false',
+        only_missing: onlyMissing ? 'true' : 'false',
+        limit,
+      },
+      onLine: onEvent,
+      signal,
+    }),
   analyzeItemImage: (body) =>
     client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
   searchCloset: (body) =>

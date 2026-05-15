@@ -153,7 +153,15 @@
     "saveFailuresBody": "这些单品无法保存到您的衣橱。请尝试重新上传。",
     "saveFailuresUnnamed": "未命名单品",
     "completeListingCta": "完成发布",
-    "clearSearch": "清除搜索"
+    "clearSearch": "清除搜索",
+    "repair": {
+      "running": "正在调校重复检测器… {{n}}/{{total}}",
+      "repaired": "{{n}} 已刷新",
+      "cleared": "{{n}} 已清空",
+      "doneEmpty": "一切就绪",
+      "failed": "无法刷新指纹",
+      "failedCount": "{{n}} 失败"
+    }
   },
   "addItem": {
     "title": "添加单品",

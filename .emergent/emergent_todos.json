@@ -1,6 +1,38 @@
 [
   {
-    "content": "Phase V4.4: build_eyes_unsloth_gguf_notebook.py generator + emitted ipynb — 23 cells, nbformat-valid, import-order-safe (unsloth first), ruff clean",
+    "content": "Read api.js & closet route registration to understand HTTP client + endpoint mount path",
+    "status": "completed"
+  },
+  {
+    "content": "Fix A — invert backfill priority in /preflight (server, server-side only)",
+    "status": "completed"
+  },
+  {
+    "content": "Backend B.1 — add image_hash.recompute_from_image helper that prefers original_image_url",
+    "status": "completed"
+  },
+  {
+    "content": "Backend B.2 — new POST /api/v1/closet/repair-hashes streaming endpoint (NDJSON)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend streaming infra — add streamNdjson helper in api.js",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend B.3 — closetStore.repairHashes() consumes stream + updates repairProgress",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend B.4 — auto-trigger repair after prewarm (once per session, idempotent)",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend B.5 — non-blocking progress chip in Closet header",
+    "status": "completed"
+  },
+  {
+    "content": "i18n strings + lint sweep + smoke test (curl backend, screenshot frontend)",
     "status": "completed"
   }
 ]

@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { OutfitCompletionSheet } from '@/components/OutfitCompletionSheet';
+import { HashRepairChip } from '@/components/closet/HashRepairChip';
 import { api } from '@/lib/api';
 import { bestImageUrl, isCleanImagePending } from '@/lib/itemImage';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
@@ -372,6 +373,15 @@ export default function Closet() {
               ({total})
             </span>
           </h1>
+          {/* Phase Z2.3 — ambient progress chip for the streaming
+              hash-repair pass. Renders nothing while idle; ticks
+              live during the pass; fades out a few seconds after
+              completion. The chip subscribes to the same store
+              snapshot, so a multi-tab refresh on another window
+              still produces a visible reaction here. */}
+          <div className="mt-2 h-5">
+            <HashRepairChip progress={store.repairProgress} />
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {!selectMode ? (

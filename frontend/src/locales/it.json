@@ -153,7 +153,15 @@
     "saveFailuresBody": "Questi capi non sono stati salvati nel tuo guardaroba. Prova a caricarli di nuovo.",
     "saveFailuresUnnamed": "Capo senza titolo",
     "completeListingCta": "Completa l'annuncio",
-    "clearSearch": "Cancella ricerca"
+    "clearSearch": "Cancella ricerca",
+    "repair": {
+      "running": "Affinamento del rilevatore di duplicati… {{n}}/{{total}}",
+      "repaired": "{{n}} aggiornati",
+      "cleared": "{{n}} azzerati",
+      "doneEmpty": "Tutto pronto",
+      "failed": "Impossibile aggiornare le impronte",
+      "failedCount": "{{n}} non riusciti"
+    }
   },
   "addItem": {
     "title": "Aggiungi capi",

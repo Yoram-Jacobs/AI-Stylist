@@ -153,7 +153,15 @@
     "saveFailuresBody": "Ces articles n'ont pas pu être enregistrés dans votre garde-robe. Veuillez réessayer de les télécharger.",
     "saveFailuresUnnamed": "Article sans titre",
     "completeListingCta": "Compléter l'annonce",
-    "clearSearch": "Effacer la recherche"
+    "clearSearch": "Effacer la recherche",
+    "repair": {
+      "running": "Ajustement du détecteur de doublons… {{n}}/{{total}}",
+      "repaired": "{{n}} actualisés",
+      "cleared": "{{n}} effacés",
+      "doneEmpty": "Tout est prêt",
+      "failed": "Impossible d’actualiser les empreintes",
+      "failedCount": "{{n}} échec(s)"
+    }
   },
   "addItem": {
     "title": "Ajouter des pièces",

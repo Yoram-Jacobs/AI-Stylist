@@ -153,7 +153,15 @@
     "intent": "Intent",
     "anyCategory": "Any category",
     "completeListingCta": "Complete listing",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "repair": {
+      "running": "Tuning duplicate detector… {{n}}/{{total}}",
+      "repaired": "{{n}} refreshed",
+      "cleared": "{{n}} cleared",
+      "doneEmpty": "All set",
+      "failed": "Couldn’t refresh fingerprints",
+      "failedCount": "{{n}} failed"
+    }
   },
   "addItem": {
     "title": "Upload & auto-fill",
