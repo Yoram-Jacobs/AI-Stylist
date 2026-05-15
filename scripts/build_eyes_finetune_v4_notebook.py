@@ -1342,13 +1342,10 @@ HF Transformers, etc.) can load without PEFT in the picture.
 """
 
 CODE_MERGE = """\
-# Workaround for PEFT bug: _unload_and_optionally_merge calls
-#   del self.model.peft_config
-# which crashes because `peft_config` is a read-only property in the
-# current PEFT release. The merge has ALREADY been applied to the
-# underlying weights at that point -- only the cosmetic cleanup fails.
-# Monkey-patch to ignore that one specific AttributeError.
-# See https://github.com/huggingface/peft/issues/3025
+# Workaround for PEFT bug #3025: _unload_and_optionally_merge crashes
+# in cleanup with `del self.model.peft_config` because peft_config is
+# a read-only property in current PEFT releases. The merge has ALREADY
+# been applied to the underlying weights at that point.
 import peft.tuners.tuners_utils as _ptu
 
 if not getattr(_ptu.BaseTuner, '_neo_patched', False):
@@ -1367,15 +1364,59 @@ if not getattr(_ptu.BaseTuner, '_neo_patched', False):
     _ptu.BaseTuner._unload_and_optionally_merge = _patched
     _ptu.BaseTuner._neo_patched = True
 
-merged = model.merge_and_unload()
-print('Merge complete. type:', type(merged).__name__)
-
-# CRITICAL: save to local /content/ first, rsync to Drive at the end.
-# Drive's FUSE mount serializes metadata writes through a single API
-# client, and during sharded save_pretrained() small files like
-# config.json can get committed to a buffer that gets overwritten by
-# the index-file commit at the end. Local SSD has no such race.
+# In-place merge via merge_adapter() -- avoids the unload-side cleanup
+# entirely. After this, the LoRA deltas are baked into the base linear
+# layers; we then walk the wrapper chain to find the actual non-PEFT
+# Gemma-4 PreTrainedModel and save THAT.
 import shutil, pathlib
+from transformers import PreTrainedModel
+from peft import PeftModel
+
+if isinstance(model, PeftModel):
+    print('Merging adapters in place via merge_adapter()...')
+    model.base_model.merge_adapter()
+
+
+def find_real_base(root, max_depth=15):
+    \"\"\"Descend through .base_model / .model until we hit a
+    transformers PreTrainedModel that is NOT a PeftModel. Handles the
+    nested-wrap pathology that the partial merge_and_unload patch can
+    leave behind.\"\"\"
+    obj, visited = root, set()
+    for d in range(max_depth):
+        if id(obj) in visited:
+            print(f'  depth {d}: CIRCULAR'); break
+        visited.add(id(obj))
+        cls   = type(obj).__name__
+        is_pt = isinstance(obj, PreTrainedModel)
+        is_pf = isinstance(obj, PeftModel)
+        mt    = getattr(getattr(obj, 'config', None), 'model_type', None)
+        print(f'  depth {d}: {cls:40s} pretrained={is_pt} peft={is_pf} model_type={mt!r}')
+        if is_pt and not is_pf and mt:
+            return obj
+        nxt = None
+        for attr in ('base_model', 'model'):
+            if hasattr(obj, attr):
+                cand = getattr(obj, attr)
+                if cand is not obj and cand is not None:
+                    nxt = cand; break
+        if nxt is None:
+            print('  (cannot descend further)'); break
+        obj = nxt
+    return obj
+
+
+print('Walking wrapper chain:')
+base = find_real_base(model)
+print(f'=> selected: {type(base).__name__}')
+assert isinstance(base, PreTrainedModel) and not isinstance(base, PeftModel), \\
+    f'No non-PEFT PreTrainedModel found; got {type(base).__name__}'
+assert getattr(base.config, 'model_type', None), 'base.config.model_type is empty!'
+
+# Save to local /content/ first. Drive's FUSE mount serializes metadata
+# writes through one API client; small early files (config.json) can
+# get clobbered by the index-file commit at the end of multi-shard
+# save_pretrained. Local SSD has no such race.
 LOCAL_BASE   = pathlib.Path('/content/eyes_v4_local')
 LOCAL_MERGED = LOCAL_BASE / 'merged'
 LOCAL_BASE.mkdir(parents=True, exist_ok=True)
@@ -1383,18 +1424,22 @@ if LOCAL_MERGED.exists():
     shutil.rmtree(LOCAL_MERGED)
 LOCAL_MERGED.mkdir(parents=True, exist_ok=True)
 
-merged.save_pretrained(
+base.save_pretrained(
     str(LOCAL_MERGED),
     safe_serialization=True,
     max_shard_size='4GB',
 )
 processor.save_pretrained(str(LOCAL_MERGED))
 
-assert (LOCAL_MERGED / 'config.json').exists(), \\
-    'config.json missing in local save -- underlying object lacks .config?'
+cfg_path = LOCAL_MERGED / 'config.json'
+assert cfg_path.exists(),                          'config.json missing!'
+assert any(LOCAL_MERGED.glob('*.safetensors')),    'safetensors shards missing!'
 
-# Repoint downstream paths to local. Drive paths preserved for the
-# final rsync cell at the end of section 13.
+print(f'\\nconfig.json size : {cfg_path.stat().st_size} bytes')
+total_gb = sum(p.stat().st_size for p in LOCAL_MERGED.rglob('*')) / (1024**3)
+print(f'Saved merged bf16 to {LOCAL_MERGED} ({total_gb:.2f} GB)')
+
+# Repoint downstream paths to local. Stash Drive paths for final rsync.
 OUT_MERGED_DRIVE = OUT_MERGED
 OUT_GGUF_DRIVE   = OUT_GGUF
 OUT_MMPROJ_DRIVE = OUT_MMPROJ
@@ -1404,11 +1449,8 @@ F16_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-f16.gguf'
 OUT_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-Q4_K_M.gguf'
 OUT_MMPROJ = LOCAL_BASE / 'mmproj-Eyes_v4_Gemma4-f16.gguf'
 
-total_gb = sum(p.stat().st_size for p in LOCAL_MERGED.rglob('*')) / (1024**3)
-print(f'Saved merged bf16 to {LOCAL_MERGED} ({total_gb:.2f} GB)')
-print(f'config.json size: {(LOCAL_MERGED / \"config.json\").stat().st_size} bytes')
-print(f'Working dir for GGUF outputs: {LOCAL_BASE}')
-print(f'Drive targets (rsync at end): {OUT_GGUF_DRIVE.parent}')
+print(f'OUT_MERGED -> {OUT_MERGED}')
+print(f'(Drive targets preserved as OUT_*_DRIVE for final rsync.)')
 """
 
 
