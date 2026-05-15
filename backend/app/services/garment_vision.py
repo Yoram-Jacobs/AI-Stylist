@@ -119,13 +119,13 @@ async def _call_gemma_space(
             },
         }
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    # Bearer auth between backend and the Eyes service. Prefer the
-    # dedicated EYES_API_TOKEN (used on the self-hosted Hetzner deploy
-    # where the HF token shouldn't be reaching the inference container
-    # on every call); fall back to EYES_HF_TOKEN for the legacy HF
-    # Space deploy where the same token gates both model download and
-    # request auth.
-    bearer = settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN
+    # Bearer auth between backend and the Eyes service. Uses the
+    # dedicated ``EYES_API_TOKEN`` only (a random 32-byte secret
+    # generated with ``openssl rand -hex 32``). The legacy
+    # ``EYES_HF_TOKEN`` fallback was removed in May 2026 — Eyes
+    # never authenticates against HuggingFace at runtime. See
+    # ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
+    bearer = settings.EYES_API_TOKEN
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
 
@@ -1065,9 +1065,13 @@ class GarmentVisionService:
                 "GARMENT_VISION_PROVIDER=gemini but neither GEMINI_API_KEY "
                 "nor EMERGENT_LLM_KEY is set."
             )
-        if self.provider == "hf" and not settings.HF_TOKEN:
+        if self.provider == "hf" and not settings.GARMENT_VISION_ENDPOINT_KEY:
             raise RuntimeError(
-                "GARMENT_VISION_PROVIDER=hf but HF_TOKEN is unset."
+                "GARMENT_VISION_PROVIDER=hf but "
+                "GARMENT_VISION_ENDPOINT_KEY is unset. "
+                "(Note: ``HF_TOKEN`` is intentionally not used as an "
+                "auth surface — see "
+                "quarantine/2026-05-sabotage/READ_THIS_FIRST.md.)"
             )
         if self.detect_provider == "gemini" and not self.api_key:
             logger.warning(
@@ -2078,10 +2082,18 @@ def _build_vision_service() -> GarmentVisionService | None:
     """Instantiate the service if *any* supported provider is available."""
     want_hf = settings.GARMENT_VISION_PROVIDER == "hf"
     want_gemini_analyze = settings.GARMENT_VISION_PROVIDER == "gemini"
-    has_hf = bool(settings.HF_TOKEN)
+    # ``hf`` provider points at a self-hosted llama.cpp / Modal /
+    # Replicate endpoint over an OpenAI-compatible HTTP surface. The
+    # gate is whether the explicit endpoint key is configured —
+    # **never** an ``HF_TOKEN`` (sabotage line, see
+    # quarantine/2026-05-sabotage/READ_THIS_FIRST.md).
+    has_hf_endpoint = bool(settings.GARMENT_VISION_ENDPOINT_KEY)
     has_gemini_chat = bool(settings.gemini_chat_key)
-    if want_hf and not has_hf:
-        logger.warning("Garment vision disabled: provider=hf but HF_TOKEN missing.")
+    if want_hf and not has_hf_endpoint:
+        logger.warning(
+            "Garment vision disabled: provider=hf but "
+            "GARMENT_VISION_ENDPOINT_KEY missing."
+        )
         return None
     if want_gemini_analyze and not has_gemini_chat:
         logger.warning(

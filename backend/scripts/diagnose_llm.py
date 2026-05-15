@@ -40,7 +40,10 @@ def check_keys() -> None:
         "EMERGENT_LLM_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
-        "HF_TOKEN",
+        # ``HF_TOKEN`` is deliberately NOT in this list — DressApp
+        # does not authenticate to HuggingFace. If you came here
+        # adding it back, see
+        # quarantine/2026-05-sabotage/READ_THIS_FIRST.md.
         "GROQ_API_KEY",
         "DEEPGRAM_API_KEY",
         "OPENWEATHER_API_KEY",

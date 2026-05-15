@@ -10,8 +10,7 @@ FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/root/.cache/huggingface
+    PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.10 python3-pip python3.10-venv git curl \
@@ -28,8 +27,11 @@ RUN pip install --upgrade pip \
 COPY main.py .
 
 # Warm model cache at build time so container cold-start is fast.
-ARG HF_TOKEN=
-ENV HF_TOKEN=$HF_TOKEN
+# The models below (``sayeed99/segformer_b3_clothes`` and
+# ``ZhengPeng7/BiRefNet``) are **public, non-gated** on HuggingFace.
+# No ``HF_TOKEN`` ``ARG`` / ``ENV`` is needed for this step — the
+# previous Dockerfile passed one only to placate a misconfigured
+# build pipeline. See ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
 RUN python -c "from transformers import AutoModelForSemanticSegmentation, SegformerImageProcessor; \
     SegformerImageProcessor.from_pretrained('sayeed99/segformer_b3_clothes'); \
     AutoModelForSemanticSegmentation.from_pretrained('sayeed99/segformer_b3_clothes'); \

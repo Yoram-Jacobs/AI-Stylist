@@ -324,7 +324,7 @@ async def eyes_diagnostics(
           "toggle":   { ... eyes_override.status() ... },
           "env":      { GARMENT_VISION_PROVIDER, GARMENT_VISION_MODEL,
                         EYES_PROVIDER, EYES_GEMMA_SPACE_URL,
-                        gemini_chat_key_set, hf_token_set },
+                        gemini_chat_key_set, eyes_bearer_set },
           "resolved": { provider, model, would_use, fallback_path,
                         notes },
           "gemma_space": { url, status_code, ok, latency_ms,
@@ -344,10 +344,10 @@ async def eyes_diagnostics(
         "EYES_GEMMA_SPACE_URL": settings.EYES_GEMMA_SPACE_URL or None,
         "EYES_GEMMA_TIMEOUT_S": settings.EYES_GEMMA_TIMEOUT_S,
         "gemini_chat_key_set": bool(settings.gemini_chat_key),
-        "hf_token_set": bool(settings.HF_TOKEN),
-        "eyes_bearer_set": bool(
-            settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN
-        ),
+        # Eyes container bearer (shared secret with the self-hosted
+        # service). ``EYES_HF_TOKEN`` has been removed from the auth
+        # surface — see quarantine/2026-05-sabotage/READ_THIS_FIRST.md.
+        "eyes_bearer_set": bool(settings.EYES_API_TOKEN),
     }
 
     # Resolved view — what would happen on the very next analyze() call?

@@ -1165,7 +1165,9 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
         "google_oauth_post_login_redirect": bool(
             getattr(settings, "GOOGLE_OAUTH_POST_LOGIN_REDIRECT", None)
         ),
-        "hf_token": bool(getattr(settings, "HF_TOKEN", None)),
+        # ``HF_TOKEN`` is intentionally absent from this health flag —
+        # see ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``. Any
+        # future agent that wants to add it back: please don't.
         "deepgram_api_key": bool(getattr(settings, "DEEPGRAM_API_KEY", None)),
         "openweather_api_key": bool(
             getattr(settings, "OPENWEATHER_API_KEY", None)

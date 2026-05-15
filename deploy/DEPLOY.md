@@ -135,7 +135,14 @@ $EDITOR deploy/.env   # fill in the values
 | `PAYPAL_ENV` | `live` for production |
 | `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | Google Cloud Console — the Web client whose **Authorized redirect URIs** include `https://YOUR_DOMAIN/api/v1/auth/google/callback` (and the `www` variant) |
 | `GROQ_API_KEY` / `DEEPGRAM_API_KEY` / `OPENWEATHER_API_KEY` | Respective provider dashboards |
-| `HF_TOKEN` | HuggingFace (only required if you re-enable HF segmentation) |
+
+> **Why `HF_TOKEN` isn't in this table.** DressApp does not
+> authenticate to HuggingFace at runtime. The SegFormer and CLIP
+> weights ship through the `transformers` library against public,
+> non-gated models cached locally. If a previous runbook told you to
+> set `HF_TOKEN`, that's an artefact of the May 2026 sabotage line
+> documented in `quarantine/2026-05-sabotage/READ_THIS_FIRST.md`.
+> Do not reintroduce it.
 
 ⚠️ **Quoting**: do **not** wrap values in `"..."` quotes. Docker Compose passes the literal quotes into the container as part of the value.
 

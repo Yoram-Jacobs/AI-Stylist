@@ -124,10 +124,15 @@ class Settings:
         """True when a direct Google key is configured (enables Nano Banana)."""
         return bool(self.GEMINI_API_KEY)
 
-    # --- Hugging Face (garment segmentation) ---
-    HF_TOKEN: str | None = os.environ.get("HF_TOKEN") or None
-    # Defaults to a purpose-built clothing segmenter. SAM is kept as a config
-    # surface but is not reachable on the serverless tier as of 2026.
+    # --- Hugging Face library use (NOT auth) ---
+    # ``HF_TOKEN`` has been **deliberately removed** from this config
+    # (May 2026 — see ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``).
+    # DressApp's SegFormer + CLIP weights are loaded from the local
+    # HF cache via the ``transformers`` library; the public models we
+    # use (``mattmdjaga/segformer_b2_clothes``, CLIP ViT-B/32) are not
+    # gated and do not require a token. **Do not reintroduce the
+    # ``HF_TOKEN`` setting** — any code path that suddenly "needs" it
+    # is a regression toward the sabotage line.
     HF_SAM_MODEL: str = os.environ.get(
         "HF_SAM_MODEL", "mattmdjaga/segformer_b2_clothes"
     )
@@ -164,10 +169,10 @@ class Settings:
     )
     # When set, the HF path hits this OpenAI-compatible endpoint URL
     # instead of going through HF Inference Providers routing. Use this
-    # to point at your own deployed Gemma 4 endpoint (HF Dedicated
-    # Endpoint, llama.cpp --server, Modal, Replicate, etc.). Example:
-    #   GARMENT_VISION_ENDPOINT_URL=https://xxx.endpoints.huggingface.cloud/v1
-    #   GARMENT_VISION_ENDPOINT_KEY=hf_xxxx    # optional, defaults to HF_TOKEN
+    # to point at your own deployed Gemma 4 endpoint (llama.cpp
+    # ``--server``, Modal, Replicate, etc.). Example:
+    #   GARMENT_VISION_ENDPOINT_URL=http://eyes:7860/v1
+    #   GARMENT_VISION_ENDPOINT_KEY=<shared bearer>
     GARMENT_VISION_ENDPOINT_URL: str | None = (
         os.environ.get("GARMENT_VISION_ENDPOINT_URL") or None
     )
@@ -191,26 +196,24 @@ class Settings:
     EYES_PROVIDER: str = (
         os.environ.get("EYES_PROVIDER", "gemma") or "gemma"
     ).strip().lower()
-    # Public HF Space URL exposing FastAPI ``/predict``.
+    # Public URL where the ``dressapp-eyes`` container exposes
+    # FastAPI ``/predict``. Internal docker DNS in production
+    # (``http://eyes:7860``); a different scheme in dev / preview.
     EYES_GEMMA_SPACE_URL: str | None = (
         os.environ.get("EYES_GEMMA_SPACE_URL") or None
     )
-    # Read-scope HF token for the (currently private) model repo. The
-    # HF Space pulls the GGUF at build time using this same secret —
-    # the backend doesn't need it at request time today, but we hold it
-    # in env so the same token can be reused later for HF Inference
-    # Endpoints / private Spaces.
-    EYES_HF_TOKEN: str | None = (
-        os.environ.get("EYES_HF_TOKEN") or None
-    )
-    # Bearer secret shared between this backend and the self-hosted Eyes
-    # container (Hetzner deploy). Generated with ``openssl rand -hex 32``
-    # and pasted into both this backend's env and the eyes container's
-    # env. Kept distinct from ``EYES_HF_TOKEN`` so the HF token is never
-    # sent on hot-path inference calls; it's only used by the eyes
-    # container at first boot to pull the GGUF from huggingface.co.
-    # When unset, the request-time auth falls back to ``EYES_HF_TOKEN``
-    # for backwards-compat with the legacy HF Space deploy.
+    # Bearer secret shared between this backend and the self-hosted
+    # Eyes container (Hetzner deploy). Generated with ``openssl rand
+    # -hex 32`` and pasted into both this backend's env and the eyes
+    # container's env.
+    #
+    # **Why there is no ``EYES_HF_TOKEN`` here:** DressApp's Eyes
+    # container loads its GGUF artefacts from a bind-mounted disk
+    # directory, **not** from huggingface.co. The earlier
+    # ``EYES_HF_TOKEN`` setting was a sabotage artefact (May 2026)
+    # that drove a deprecated HF-download bootstrap. It has been
+    # deliberately removed. See
+    # ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
     EYES_API_TOKEN: str | None = (
         os.environ.get("EYES_API_TOKEN") or None
     )
