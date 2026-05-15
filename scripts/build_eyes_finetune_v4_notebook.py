@@ -1460,19 +1460,41 @@ print(f'  mmproj : {MMPROJ_GGUF.name}  ({MMPROJ_GGUF.stat().st_size / 1024**2:.0
 """
 
 CODE_GGUF_MMPROJ = """\
-# Convert the LoRA adapter to GGUF. This is the ONLY conversion we
-# do ourselves -- much narrower than full convert_hf_to_gguf.py and
-# works for Gemma-4 today (only needs the base architecture's tensor
-# names, which llama.cpp does know).
-LORA_GGUF = LOCAL_BASE / 'eyes_v4_lora.gguf'
+# Convert the LoRA adapter to GGUF.
+#
+# convert_lora_to_gguf.py's --base argument expects a LOCAL directory
+# (not an HF Hub repo ID). And on current Colab, the script's
+# AutoConfig fallback path crashes due to a torchvision::nms ABI
+# mismatch (transitively imported via transformers.models.gemma4).
+# So we pre-download just the base config + tokenizer files locally
+# and point --base at that directory; the script's
+# open(dir/config.json) fallback succeeds without ever needing
+# torchvision.
+from huggingface_hub import snapshot_download
 
+LOCAL_BASE_CFG = LOCAL_BASE / 'gemma-4-E2B-it-cfg'
+print(f'Downloading base config files to {LOCAL_BASE_CFG}...')
+snapshot_download(
+    repo_id=BASE_MODEL,
+    local_dir=str(LOCAL_BASE_CFG),
+    allow_patterns=[
+        'config.json',
+        'generation_config.json',
+        'tokenizer*',
+        'special_tokens*',
+        'preprocessor_config.json',
+        'chat_template.*',
+    ],
+)
+
+LORA_GGUF = LOCAL_BASE / 'eyes_v4_lora.gguf'
 !python /content/llama.cpp/convert_lora_to_gguf.py \\
-    --base {BASE_MODEL} \\
+    --base {LOCAL_BASE_CFG} \\
     --outfile {LORA_GGUF} \\
     {ADAPTER_DIR}
 
 assert LORA_GGUF.exists(), 'LoRA GGUF conversion failed'
-print(f'LoRA delta GGUF: {LORA_GGUF}  ({LORA_GGUF.stat().st_size / 1024**2:.1f} MB)')
+print(f'LoRA delta GGUF: {LORA_GGUF.name}  ({LORA_GGUF.stat().st_size / 1024**2:.1f} MB)')
 """
 
 CODE_GGUF_QUANT = """\
