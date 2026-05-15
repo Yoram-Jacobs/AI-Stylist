@@ -365,6 +365,90 @@ print(f"\\nPicked adapter: {ADAPTER_DIR}")
 """
 
 # ─────────────────────────────────────────────────────────────────────
+# Section 4.5 — auto-repair over-wrapped adapter keys
+# ─────────────────────────────────────────────────────────────────────
+MD_FIX_OVERWRAP = """\
+## 4.5 · Auto-repair over-wrapped adapter keys
+
+> Skip this section only if you re-trained on a fully-fixed training
+> notebook (`build_eyes_finetune_v4_notebook.py` ≥ 2026-05). The
+> public May-2026 build of that notebook accidentally calls
+> `get_peft_model()` six times on the same base model when cells are
+> re-executed without restarting the kernel — a real, observed
+> training-side bug.
+
+Every saved adapter key from a broken run looks like:
+
+```text
+base_model.model.base_model.model.base_model.model.base_model.model.base_model.model.base_model.model.model.audio_tower.layers.0.self_attn.v_proj.linear.lora_B.eyes_v4.weight
+```
+
+`base_model.model.` is repeated **6×** when it should appear exactly
+**1×**. PEFT's loader strips only one prefix per key when matching
+against the target model, so the five extras cause every adapter
+weight to miss — Step 5 prints a load report with all keys in
+UNEXPECTED + MISSING and "0 weights loaded". Silently saving GGUF on
+top of that produces a useless base-model artefact.
+
+This cell:
+
+1. Backs up the original `adapter_model.safetensors` to
+   `*.over_wrapped.bak` once (re-runs are idempotent).
+2. Loads the safetensors file, collapses any number of
+   `base_model.model.` prefixes to exactly one, and saves back.
+3. Reports the number of keys rewritten + an example before/after.
+
+After running this cell, **re-run Step 5** — the load report should
+come back with 0 MISSING / 0 UNEXPECTED.
+"""
+
+CODE_FIX_OVERWRAP = """\
+import os
+import re
+import shutil
+from safetensors.torch import load_file, save_file
+
+src = os.path.join(ADAPTER_DIR, "adapter_model.safetensors")
+bak = src + ".over_wrapped.bak"
+
+# Step 1 — back up the original, once.
+if not os.path.exists(bak):
+    shutil.copy2(src, bak)
+    print(f"Backed up original to {bak}")
+else:
+    print(f"Backup already exists at {bak} (re-run is idempotent)")
+
+# Step 2 — load + rewrite keys.
+state = load_file(src)
+new_state = {}
+n_fixed = 0
+sample_before = None
+sample_after = None
+for k, v in state.items():
+    new_k = re.sub(r"^(?:base_model\\.model\\.)+", "base_model.model.", k)
+    if new_k != k:
+        n_fixed += 1
+        if sample_before is None:
+            sample_before = k
+            sample_after = new_k
+    new_state[new_k] = v
+
+# Step 3 — report.
+print(f"Rewrote {n_fixed}/{len(state)} keys")
+if sample_before:
+    print(f"  before : {sample_before[:120]}…")
+    print(f"  after  : {sample_after[:120]}…")
+else:
+    print("  no over-wrapped keys found — adapter was already clean.")
+
+# Step 4 — save back to the same path; PEFT's loader will now match.
+save_file(new_state, src)
+print(f"\\n✅ Adapter checkpoint cleaned in place at {src}")
+print("   Next: re-run Step 5 (the load cell). The new LOAD REPORT")
+print("   should show 0 MISSING / 0 UNEXPECTED if the fix worked.")
+"""
+
+# ─────────────────────────────────────────────────────────────────────
 # Section 5 — load base + adapter via Unsloth
 # ─────────────────────────────────────────────────────────────────────
 MD_LOAD = """\
@@ -743,6 +827,9 @@ cells = [
 
     md(MD_PICK),
     code(CODE_PICK),
+
+    md(MD_FIX_OVERWRAP),
+    code(CODE_FIX_OVERWRAP),
 
     md(MD_LOAD),
     code(CODE_LOAD),

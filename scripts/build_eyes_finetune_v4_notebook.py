@@ -1105,10 +1105,19 @@ suffix match — the discovery is restricted to the parameters that
 The `model.print_trainable_parameters()` call right after should
 print something like "0.6 % trainable" — sanity-check that figure
 before kicking off training.
+
+> **Idempotency.** Re-executing this cell without restarting the
+> kernel (common while tweaking hparams) MUST NOT wrap the model in
+> `get_peft_model()` a second time. Doing so adds an extra
+> `base_model.model.` prefix to every saved adapter key and silently
+> corrupts every downstream checkpoint — PEFT's loader strips only
+> one prefix when matching, so the second wrap's checkpoints fail to
+> match any target slot. We guard with an `isinstance(model, PeftModel)`
+> check below.
 """
 
 CODE_LORA = """\
-from peft import LoraConfig, get_peft_model, TaskType
+from peft import LoraConfig, get_peft_model, TaskType, PeftModel
 
 lora_cfg = LoraConfig(
     r=16,
@@ -1122,7 +1131,19 @@ lora_cfg = LoraConfig(
     ],
 )
 
-model = get_peft_model(model, lora_cfg)
+# Idempotency guard. Without this, re-running this cell during an
+# interactive Colab session wraps the model in get_peft_model()
+# AGAIN, doubling the `base_model.model.` prefix on every saved key.
+# Six re-runs → 6× prefix → PEFT loader matches 0 weights on the
+# downstream Unsloth GGUF notebook. The Unsloth notebook ships a
+# repair cell (Section 4.5) that collapses redundant prefixes, but
+# preventing the bug at source is strictly better than repairing
+# the output.
+if isinstance(model, PeftModel):
+    print('⚠️  Model is already a PeftModel — skipping re-wrap. '
+          'If you want a clean adapter, restart the kernel.')
+else:
+    model = get_peft_model(model, lora_cfg)
 model.print_trainable_parameters()           # expect < 1 %
 """
 
