@@ -506,8 +506,15 @@ export default function ItemDetail() {
         // ``autoSegment`` is false.
         language: (i18n.language || '').split('-')[0] || 'en',
       });
+      // Phase Z2.6 — same fix as Clean Background. Only refresh the
+      // baseline ``item`` so the image preview picks up the new
+      // ``original_image_url``; do NOT call ``setForm(toFormState(...))``,
+      // which would wipe the user's pending edits to other fields.
+      // With ``autoSegment=false`` the backend only mutates image
+      // URLs (no editable-field touches), so ``diffPatch`` against
+      // the new baseline correctly reflects only the user's
+      // editable-field drafts.
       setItem(res.item);
-      setForm(toFormState(res.item, user));
       toast.dismiss(loadingId);
       toast.success(t('itemDetail.photo.success'));
     } catch (err) {
@@ -684,8 +691,16 @@ export default function ItemDetail() {
     try {
       const res = await api.repairItemImage(id);
       if (res?.applied && res.item) {
+        // Phase Z2.6 — same fix as Clean Background. Only refresh
+        // the baseline ``item`` so the image preview swaps to the
+        // new ``reconstructed_image_url``; do NOT clobber the
+        // form-state with ``setForm(toFormState(...))`` (would wipe
+        // pending edits). The /repair endpoint only mutates image
+        // fields (reconstructed_image_url + reconstruction_metadata
+        // + updated_at + $unset thumbnail_data_url), so ``diffPatch``
+        // against the new baseline correctly reflects only the
+        // user's editable-field drafts.
         setItem(res.item);
-        setForm(toFormState(res.item, user));
         toast.success(
           t('item.reshootSuccess', { defaultValue: 'Photo restored.' }),
         );

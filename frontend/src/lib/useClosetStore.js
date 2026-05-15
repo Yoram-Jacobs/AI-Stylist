@@ -36,6 +36,12 @@ export function useClosetStore({ prewarm = false } = {}) {
     // (e.g. the Closet header chip) render directly from this; it
     // updates on every NDJSON line the server streams.
     repairProgress: snap.repairProgress,
+    // Phase Z2.6 — streaming thumbnail-repair progress snapshot.
+    // Same shape semantics as ``repairProgress``; consumers render
+    // an independent chip from this so the two passes can be
+    // distinguished visually when they fire back-to-back after
+    // prewarm.
+    thumbProgress: snap.thumbProgress,
     // Imperative passthroughs so consumers don't need to import the
     // store separately.
     prewarm: closetStore.prewarm.bind(closetStore),
@@ -45,5 +51,6 @@ export function useClosetStore({ prewarm = false } = {}) {
     replaceAll: closetStore.replaceAll.bind(closetStore),
     reset: closetStore.reset.bind(closetStore),
     repairHashes: closetStore.repairHashes.bind(closetStore),
+    repairThumbnails: closetStore.repairThumbnails.bind(closetStore),
   };
 }

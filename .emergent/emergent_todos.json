@@ -1,34 +1,22 @@
 [
   {
-    "content": "Extract generic StreamingProgressChip from HashRepairChip; rewire closet chip to use it (no behaviour change)",
+    "content": "Fix onPhotoFileChosen + onReshootPhoto in ItemDetail.jsx (drop setForm reset) — same vein as Bug 2",
     "status": "completed"
   },
   {
-    "content": "Backend M.1 — new POST /api/v1/closet/marketplace/backfill/stream (NDJSON, sibling endpoint for back-compat)",
+    "content": "Swap _run_background_matte: matte_crop → remove_background (adds CLIP faithfulness guard, parity with Edit Item Clean Background)",
     "status": "completed"
   },
   {
-    "content": "Backend M.2 — new GET /api/v1/listings/stream (NDJSON)",
+    "content": "Add POST /api/v1/closet/repair-thumbnails — NDJSON streaming, mirrors /repair-hashes",
     "status": "completed"
   },
   {
-    "content": "Frontend M.3 — api.streamMarketplaceBackfill() + api.streamListings() helpers",
+    "content": "Frontend hook: closetStore.repairThumbnails() + chip; auto-trigger on prewarm (throttled)",
     "status": "completed"
   },
   {
-    "content": "Frontend M.4 — marketplaceStore gains backfillProgress + browseProgress snapshots + drive methods",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend M.5 — wire Marketplace 'Sync from closet' button to streaming + show chip; opt-in stream for browse",
-    "status": "completed"
-  },
-  {
-    "content": "i18n + lint sweep + smoke test (curl backend, screenshot frontend)",
-    "status": "completed"
-  },
-  {
-    "content": "Bug fix: abort-clears-slot race on rapid location/filter changes — dropped upfront invalidate, added seen-IDs prune-on-done",
+    "content": "Lint, restart, smoke test (curl on both endpoints; frontend screenshot of chip)",
     "status": "completed"
   }
 ]

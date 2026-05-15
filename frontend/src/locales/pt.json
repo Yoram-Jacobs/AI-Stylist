@@ -161,6 +161,11 @@
       "doneEmpty": "Tudo pronto",
       "failed": "Não foi possível atualizar as impressões",
       "failedCount": "{{n}} falharam"
+    },
+    "thumbRepair": {
+      "running": "Atualizando miniaturas… {{n}}/{{total}}",
+      "regenerated": "{{n}} atualizadas",
+      "failed": "Não foi possível atualizar as miniaturas"
     }
   },
   "addItem": {

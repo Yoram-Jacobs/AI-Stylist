@@ -240,6 +240,36 @@ export const api = {
       onLine: onEvent,
       signal,
     }),
+  /**
+   * Phase Z2.6 — streaming thumbnail-repair pass.
+   *
+   * Re-derives ``thumbnail_data_url`` for closet items whose cached
+   * thumb is stale relative to the best available source (typically:
+   * cached JPEG while the source is now a PNG cutout, because the
+   * thumbnail was baked before Phase Z2.6 fixed
+   * ``pick_source_data_url``'s priority chain). Idempotent — re-runs
+   * report every row as ``unchanged``.
+   *
+   * Events:
+   *   * ``{type:'start', total, only_stale}``
+   *   * ``{type:'item', id, status, reason, thumb_mime, error}``
+   *     where ``status ∈ {regenerated, unchanged, skipped, failed}``
+   *   * ``{type:'done', scanned, regenerated, unchanged, skipped,
+   *        failed, wrote_db}``
+   *
+   * Set ``onlyStale=false`` to force-regenerate every thumbnail
+   * unconditionally (useful after a thumbnail-format bug ships).
+   */
+  repairClosetThumbnails: ({ onlyStale = true, limit = 2000, onEvent, signal } = {}) =>
+    streamNdjson('/closet/repair-thumbnails', {
+      method: 'POST',
+      params: {
+        only_stale: onlyStale ? 'true' : 'false',
+        limit,
+      },
+      onLine: onEvent,
+      signal,
+    }),
   analyzeItemImage: (body) =>
     client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
   searchCloset: (body) =>

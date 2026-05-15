@@ -198,28 +198,45 @@ class UpdateItemIn(BaseModel):
 
 
 async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
-    """Phase O.6 — Background rembg matte runner.
+    """Phase O.6 (revised Z2.6) — Background matte runner.
 
     Fired by :func:`create_item` for items that arrived through the
-    single-pass ``/analyze`` pipeline (``from_one_pass=True``). Runs
-    rembg here in the BackgroundTask so it doesn't block the HTTP
-    response that triggered it, and writes the alpha-channelled PNG
-    back to the item as a data URL under ``clean_image_url`` once it
-    finishes. The user's next ``GET /closet/{id}`` sees
-    ``clean_image_status="ready"`` and the populated URL — the
-    closet thumbnail then swaps from the JPEG bbox-crop to the clean
-    cutout in place.
+    single-pass ``/analyze`` pipeline (``from_one_pass=True``).
 
-    Failure is intentionally soft: rembg occasionally returns ``None``
-    on tricky inputs (very dark photos, JPEG noise). In that case we
-    set ``clean_image_status="failed"`` so the UI can stop polling
-    without surfacing an error to the user.
+    History
+    -------
+    Originally this called ``background_matting.matte_crop`` —
+    rembg-only, no faithfulness guard. Z2.6 swaps that for the full
+    ``remove_background`` pipeline (rembg + CLIP faithfulness check)
+    so the deferred add-item path produces the **same quality** of
+    cutout as the foreground "Clean background" button on the Edit
+    Item page. Latency cost is +200–500 ms per item for the CLIP
+    guard, which is invisible to the user because the task already
+    runs after the HTTP response.
+
+    Result is written under ``clean_image_url`` and surfaces via the
+    next ``GET /closet`` once the user revisits — the closet
+    thumbnail then swaps from the JPEG bbox-crop to the clean
+    cutout in place (priority chain in ``thumbnails.pick_source_data_url``).
+
+    Failure modes
+    -------------
+    Soft. Three reasons we may end up writing
+    ``clean_image_status="failed"`` instead of ``"ready"``:
+
+      * rembg crashed (rare; mostly ``Image.open`` decoding errors)
+      * rembg returned an empty/None matte (very dark or noisy inputs)
+      * the CLIP faithfulness guard rejected the cutout because it
+        diverged too far from the original (model hallucinated /
+        chopped off a sleeve / dropped to a hand). In that case we
+        keep the original bbox JPEG as the displayed thumbnail
+        rather than show a worse cutout.
     """
     from app.services import background_matting
 
     db = get_db()
     try:
-        result = await background_matting.matte_crop(raw_bytes)
+        out = await background_matting.remove_background(raw_bytes)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Background rembg matte FAILED for item %s: %s", item_id, exc,
@@ -233,11 +250,26 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
         )
         return
 
+    # ``remove_background`` returns a dict — ``image_png`` is the
+    # raw PNG bytes (or None if rembg failed/rejected); ``provider``
+    # tells us which backend served the matte (self-hosted vs local
+    # rembg); ``faithful`` is the CLIP guard verdict.
+    result = out.get("image_png") if isinstance(out, dict) else None
+    provider = out.get("provider") if isinstance(out, dict) else None
+    faithful = out.get("faithful", True) if isinstance(out, dict) else True
+
     if not result:
+        # Distinguish "rembg produced nothing" from "rembg produced
+        # something but CLIP rejected it" in the log so we can tell
+        # the failure mode apart when triaging.
+        reason = (
+            "CLIP faithfulness rejected"
+            if isinstance(out, dict) and out.get("rejected_reason")
+            else "rembg returned no bytes"
+        )
         logger.info(
-            "Background rembg matte returned None for item %s "
-            "(clean cutout skipped)",
-            item_id,
+            "Background matte SKIPPED for item %s (%s; provider=%s)",
+            item_id, reason, provider,
         )
         await db.closet_items.update_one(
             {"id": item_id},
@@ -272,8 +304,9 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
         },
     )
     logger.info(
-        "Background rembg matte READY for item %s (%d bytes png)",
-        item_id, len(result),
+        "Background matte READY for item %s "
+        "(provider=%s faithful=%s %d bytes png)",
+        item_id, provider, faithful, len(result),
     )
 
 
@@ -1830,6 +1863,307 @@ async def repair_hashes_stream(
             "Cache-Control": "no-cache, no-transform",
         },
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Phase Z2.6 — server → client streaming thumbnail repair
+# ─────────────────────────────────────────────────────────────────────
+@router.post("/repair-thumbnails")
+async def repair_thumbnails_stream(
+    user: dict = Depends(get_current_user),
+    only_stale: bool = Query(
+        default=True,
+        description=(
+            "When true (default), only items whose cached "
+            "``thumbnail_data_url`` is *stale* relative to the best "
+            "authoritative source are repaired. Staleness is detected "
+            "by mime-type drift (e.g. cached JPEG while the source is "
+            "a PNG cutout, which is the canonical Z2.6 regression "
+            "signature) AND by the absence of a cached thumbnail "
+            "when an authoritative source exists. Set false to force-"
+            "regenerate every thumbnail unconditionally."
+        ),
+    ),
+    limit: int = Query(default=2000, le=2000, ge=1),
+):
+    """**NDJSON-streaming** closet-thumbnail repair.
+
+    Why this exists
+    ===============
+    Before Phase Z2.6, ``pick_source_data_url`` omitted
+    ``clean_image_url`` from its priority chain. Items that went
+    through the deferred-rembg pipeline (Phase O.6 onwards) had
+    their cached ``thumbnail_data_url`` baked from
+    ``original_image_url`` — the full-background JPEG bbox-crop —
+    even though rembg later produced a transparent PNG cutout in
+    ``clean_image_url``. Z2.6 fixed the priority chain AND added
+    ``$unset thumbnail_data_url`` to ``_run_background_matte``, but
+    items that completed rembg BEFORE Z2.6 landed still carry the
+    poisoned JPEG thumbnail.
+
+    The lazy ``_thumbs.backfill_thumbnails`` pass that runs inside
+    every ``GET /closet`` regenerates these on-the-fly the next time
+    a user opens the closet, so eventually every item self-heals.
+    This endpoint exists for two reasons the lazy pass can't cover:
+
+      1. *Proactive*: surface a Closet-header progress chip
+         ("Refreshing thumbnails… 47/300") so the user knows the
+         repair is happening rather than wondering why their first
+         load is slow. The lazy backfill is silent.
+      2. *Forceful*: ``only_stale=false`` regenerates every
+         thumbnail unconditionally — handy after a thumbnail-format
+         bug shipped, when even "non-stale-looking" cached thumbs
+         are wrong (e.g. PNG-but-wrong-PNG case we hit during
+         Z2.6 dev).
+
+    Wire format
+    ===========
+    ``application/x-ndjson``. One JSON object per line:
+
+      * ``{"type":"start","total":N,"only_stale":bool}``
+      * ``{"type":"item","id":"...","status":"regenerated"
+              |"unchanged"|"skipped"|"failed",
+              "reason": "stale-mime"|"no-cached"|"forced"|null,
+              "thumb_mime":"image/png"|"image/jpeg"|null,
+              "error":"..." | null}``
+      * ``{"type":"done","scanned":N,"regenerated":N,"unchanged":N,
+              "skipped":N,"failed":N,"wrote_db":bool}``
+
+    Idempotent. The lazy pass and this endpoint are safe to run
+    concurrently — each item update is a single ``$set`` so a race
+    just means one of them wins; both produce the same bytes.
+    """
+    from app.services import thumbnails as _thumbs
+    db = get_db()
+
+    # Only pull the fields ``pick_source_data_url`` looks at + the
+    # cached thumb itself + the id. Keeps memory bounded on a 2k-item
+    # closet and avoids streaming heavy embeddings / crop_base64 just
+    # to drop them on the floor.
+    proj = {
+        "_id": 0,
+        "id": 1,
+        "thumbnail_data_url": 1,
+        "reconstructed_image_url": 1,
+        "clean_image_url": 1,
+        "segmented_image_url": 1,
+        "original_image_url": 1,
+    }
+    rows: list[dict[str, Any]] = []
+    async for r in db.closet_items.find(
+        {"user_id": user["id"]}, proj
+    ).limit(limit):
+        rows.append(r)
+
+    def _classify(row: dict[str, Any]) -> tuple[str, str | None, str | None]:
+        """Return ``(status, reason, thumb_mime_hint)`` *without* doing
+        the regeneration. Pure analysis so we can stream a quick
+        "skipped" line without paying the PIL decode cost.
+        """
+        src = _thumbs.pick_source_data_url(row)
+        if not src:
+            return ("skipped", "no-source", None)
+        cached = row.get("thumbnail_data_url")
+        # Source mime hint: parse the data URL prefix once.
+        src_mime = src.split(";", 1)[0].replace("data:", "")
+        if not isinstance(cached, str) or not cached.startswith("data:image"):
+            return ("regenerate", "no-cached", src_mime)
+        cached_mime = cached.split(";", 1)[0].replace("data:", "")
+        # The classic Z2.6 signature: source is PNG (rembg cutout),
+        # cached thumb is JPEG (baked before the priority chain was
+        # fixed). Force regen.
+        if src_mime != cached_mime:
+            return ("regenerate", "stale-mime", src_mime)
+        return ("unchanged", None, cached_mime)
+
+    async def gen():
+        yield (
+            json.dumps(
+                {
+                    "type": "start",
+                    "total": len(rows),
+                    "only_stale": only_stale,
+                }
+            )
+            + "\n"
+        )
+
+        regenerated = unchanged = skipped = failed = 0
+        wrote_db = False
+        loop = asyncio.get_running_loop()
+
+        for row in rows:
+            rid = row.get("id")
+            if not rid:
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": None,
+                            "status": "failed",
+                            "reason": None,
+                            "thumb_mime": None,
+                            "error": "missing-id",
+                        }
+                    )
+                    + "\n"
+                )
+                continue
+
+            status, reason, mime_hint = _classify(row)
+
+            # Honour ``only_stale`` — when true, an ``unchanged``
+            # classification means there's nothing to do.
+            if only_stale and status == "unchanged":
+                unchanged += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "unchanged",
+                            "reason": None,
+                            "thumb_mime": mime_hint,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            if status == "skipped":
+                skipped += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "skipped",
+                            "reason": reason,
+                            "thumb_mime": None,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            # ``status`` is either "regenerate" (stale) or "unchanged"
+            # under ``only_stale=false`` (forced). Either way, do it.
+            if status == "unchanged" and not only_stale:
+                # Treat as forced regeneration.
+                reason = "forced"
+
+            try:
+                # PIL decode + downscale on the thread pool so the
+                # NDJSON stream keeps flushing. ``make_thumb_from_data_url``
+                # is the canonical synchronous encoder used by the
+                # lazy backfill pass, so thumbnails this endpoint
+                # emits are bit-identical to what the lazy pass would
+                # produce — no second-pass divergence.
+                def _regen() -> tuple[str, str]:
+                    src = _thumbs.pick_source_data_url(row)
+                    if not src:
+                        raise RuntimeError("no-source")
+                    new_data_url = _thumbs.make_thumb_from_data_url(src)
+                    if not new_data_url:
+                        raise RuntimeError("encode-failed")
+                    new_mime = (
+                        new_data_url.split(";", 1)[0].replace("data:", "")
+                    )
+                    return (new_data_url, new_mime)
+                new_data_url, thumb_mime = await loop.run_in_executor(
+                    None, _regen,
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "failed",
+                            "reason": reason,
+                            "thumb_mime": None,
+                            "error": exc.__class__.__name__,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            try:
+                await db.closet_items.update_one(
+                    {"id": rid, "user_id": user["id"]},
+                    {"$set": {
+                        "thumbnail_data_url": new_data_url,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                )
+                wrote_db = True
+                regenerated += 1
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "failed",
+                            "reason": reason,
+                            "thumb_mime": thumb_mime,
+                            "error": f"db:{exc.__class__.__name__}",
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            yield (
+                json.dumps(
+                    {
+                        "type": "item",
+                        "id": rid,
+                        "status": "regenerated",
+                        "reason": reason,
+                        "thumb_mime": thumb_mime,
+                        "error": None,
+                    }
+                )
+                + "\n"
+            )
+            await asyncio.sleep(0)
+
+        yield (
+            json.dumps(
+                {
+                    "type": "done",
+                    "scanned": len(rows),
+                    "regenerated": regenerated,
+                    "unchanged": unchanged,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "wrote_db": wrote_db,
+                }
+            )
+            + "\n"
+        )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache, no-transform",
+        },
+    )
+
+
 
 
 

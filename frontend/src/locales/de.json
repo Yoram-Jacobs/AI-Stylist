@@ -161,6 +161,11 @@
       "doneEmpty": "Alles bereit",
       "failed": "Fingerabdrücke konnten nicht aktualisiert werden",
       "failedCount": "{{n}} fehlgeschlagen"
+    },
+    "thumbRepair": {
+      "running": "Vorschaubilder werden aktualisiert… {{n}}/{{total}}",
+      "regenerated": "{{n}} aktualisiert",
+      "failed": "Vorschaubilder konnten nicht aktualisiert werden"
     }
   },
   "addItem": {

@@ -161,6 +161,11 @@
       "doneEmpty": "הכול מוכן",
       "failed": "לא ניתן לרענן את הטביעות",
       "failedCount": "{{n}} נכשלו"
+    },
+    "thumbRepair": {
+      "running": "מרענן תמונות ממוזערות… {{n}}/{{total}}",
+      "regenerated": "{{n}} עודכנו",
+      "failed": "לא ניתן לרענן את התמונות הממוזערות"
     }
   },
   "addItem": {
