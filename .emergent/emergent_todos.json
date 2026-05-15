@@ -1,26 +1,22 @@
 [
   {
-    "content": "Rewrite generator: model_id google/gemma-4-E2B-it, AutoModelForMultimodalLM, gemma-4 chat template",
+    "content": "Explore /app/backend/app/services/ and closet.py to understand existing analyze flow",
     "status": "completed"
   },
   {
-    "content": "Switch HF + Kaggle auth to Colab Secrets (userdata.get)",
+    "content": "Write local_eyes_runtime.py with PEFT-based Gemma-4 + Eyes-LoRA inference",
     "status": "completed"
   },
   {
-    "content": "Update freeze pass for Gemma-4 architecture (language_model.* allowlist + diagnostic print)",
+    "content": "Wire closet.py: under EYES_LOCAL=true, route ONE-PASS branch through local_eyes_runtime",
     "status": "completed"
   },
   {
-    "content": "Update GGUF/quantize section with llama.cpp master + defensive mmproj fallback for issue #21775",
+    "content": "Add EYES_LOCAL to config.py / .env.example, lazy-import the runtime module",
     "status": "completed"
   },
   {
-    "content": "Rename output notebook to Eyes_FineTune_v4_Gemma4.ipynb; delete stale Gemma3n.ipynb",
-    "status": "completed"
-  },
-  {
-    "content": "Regenerate notebook, verify JSON + content anchors",
+    "content": "Verify backend lints + starts cleanly with EYES_LOCAL unset",
     "status": "completed"
   }
 ]

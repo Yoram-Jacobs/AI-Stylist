@@ -849,22 +849,46 @@ async def analyze_item_image(
     if payload.multi:
         # Production analyze pipeline: SegFormer crops the photo into
         # per-garment regions, then N parallel Eyes calls analyse each
-        # crop. This is the only production path as of May 2026 --
-        # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
-        # benchmark showed it could not reliably emit multi-garment
-        # arrays (Gemini-2.5-Flash returned a single object for every
-        # image regardless of prompt phrasing). The single-pass
-        # function still exists for benchmark scripts; the production
-        # ``EYES_ONE_PASS`` flag was removed.
-        try:
-            async with _ANALYZE_LOCK:
-                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %r", exc)
-            raise HTTPException(
-                503,
-                "Garment analyzer is temporarily unavailable. Please try again.",
-            ) from exc
+        # crop. ``analyze_outfit_one_pass`` was retired in May 2026
+        # because Gemini-2.5-Flash failed multi-garment recall.
+        #
+        # When ``EYES_LOCAL=true`` the user's locally-trained Eyes v4
+        # LoRA is used as a one-pass alternative path. Any soft
+        # failure (model load, OOM, JSON parse, missing adapter dir on
+        # the lightweight Emergent pod) returns ``[]`` and we fall
+        # through to the SegFormer pipeline transparently — the user
+        # never sees a hard failure from the local route.
+        detections: list[dict[str, Any]] = []
+        if settings.EYES_LOCAL:
+            try:
+                from app.services import local_eyes_runtime
+                async with _ANALYZE_LOCK:
+                    detections = await local_eyes_runtime.analyze(
+                        raw, language=user_lang,
+                    )
+                if detections:
+                    logger.info(
+                        "/analyze: routed via local Eyes v4 (n=%d)",
+                        len(detections),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "EYES_LOCAL routing raised %r — falling back to "
+                    "SegFormer + per-crop pipeline.",
+                    exc,
+                )
+                detections = []
+
+        if not detections:
+            try:
+                async with _ANALYZE_LOCK:
+                    detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
         items_out: list[dict[str, Any]] = []
         dropped_unidentifiable = 0
         from app.services.garment_vision import _is_unidentifiable
@@ -899,10 +923,14 @@ async def analyze_item_image(
                     ),
                     # Patch 9a (May 2026) — the ``one_pass`` field used
                     # to signal that the response came from the retired
-                    # single-call path. With one-pass retired this is
-                    # always False; kept in the response shape so older
-                    # frontend bundles that read it don't choke.
-                    "one_pass": False,
+                    # single-call path. With one-pass retired in the
+                    # *Gemini* sense it's hardcoded False here for the
+                    # SegFormer path; when ``EYES_LOCAL=true`` and the
+                    # local Eyes-v4 route fired, the per-detection
+                    # ``one_pass`` flag is True so this echoes back
+                    # honestly. Either way the field stays present so
+                    # older frontend bundles that read it don't choke.
+                    "one_pass": bool(det.get("one_pass", False)),
                     # Patch 8 (May 2026) — flag for the legacy multi-crop
                     # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
                     # The frontend echoes this back on /closet save and

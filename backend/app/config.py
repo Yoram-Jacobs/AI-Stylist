@@ -214,6 +214,17 @@ class Settings:
     EYES_API_TOKEN: str | None = (
         os.environ.get("EYES_API_TOKEN") or None
     )
+    # When ``true``, the closet ``/analyze`` route uses the local
+    # Eyes v4 runtime — base ``google/gemma-4-E2B-it`` + the LoRA
+    # trained in ``docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb``,
+    # both loaded in-process via transformers + peft. Falls back to
+    # the SegFormer + per-crop pipeline on any error (model load,
+    # OOM, JSON parse, missing adapter dir on the Emergent pod where
+    # torch isn't installed). See ``services/local_eyes_runtime.py``.
+    EYES_LOCAL: bool = (
+        os.environ.get("EYES_LOCAL", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
     # vision is added). Match the timeout to the worst case and let the
     # circuit breaker fall back to Gemini instead of stalling AddItem.
