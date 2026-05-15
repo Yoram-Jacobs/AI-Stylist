@@ -1,18 +1,6 @@
 [
   {
-    "content": "Phase S1: image-aware addendum patch + tests + restart",
-    "status": "completed"
-  },
-  {
-    "content": "Phase S2: AttachmentPicker.jsx + wire into Stylist composer",
-    "status": "completed"
-  },
-  {
-    "content": "Phase S3: ItemFloater + wiring across Stylist + OutfitCompletionSheet",
-    "status": "completed"
-  },
-  {
-    "content": "Phase S4: testing_agent smoke (backend 100% + frontend 95%) + manual S3 e2e verification on Casual Dinner Outfit session",
+    "content": "Phase V4.4: build_eyes_unsloth_gguf_notebook.py generator + emitted ipynb — 23 cells, nbformat-valid, import-order-safe (unsloth first), ruff clean",
     "status": "completed"
   }
 ]
