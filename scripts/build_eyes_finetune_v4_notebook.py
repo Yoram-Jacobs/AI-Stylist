@@ -1518,24 +1518,34 @@ text on Gemma-family multimodal GGUFs.
 """
 
 CODE_PROBE_INSTALL = """\
+# Prebuilt CUDA wheel (fast). If your Colab runtime is on a CUDA version
+# different from 12.x, the wheel may still install fine via forward
+# compat. If it doesn't, drop --extra-index-url to fall back to a
+# source build (slow, ~5-10 min compile).
 %pip install -q --upgrade \\
     --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 \\
-    'llama-cpp-python'
+    --prefer-binary \\
+    'llama-cpp-python>=0.3.0'
+
+# Sanity-check the install worked.
+import importlib
+_cf = importlib.import_module('llama_cpp.llama_chat_format')
+print('llama-cpp-python OK. Available handlers:',
+      [n for n in dir(_cf) if 'Handler' in n][:10])
 """
 
 CODE_PROBE_RUN = """\
-import random, json
+import random, json, importlib, pathlib
 from llama_cpp import Llama
 
-try:
-    from llama_cpp.llama_chat_format import Gemma4ChatHandler as VisionHandler
-    print('Using Gemma4ChatHandler.')
-except ImportError:
-    from llama_cpp.llama_chat_format import Llava15ChatHandler as VisionHandler
-    print('Gemma4ChatHandler not in this llama-cpp-python build; '
-          'falling back to Llava15ChatHandler.')
+# Use importlib so static checkers (Pyright/Pylance) don't whine about
+# the import not existing pre-install. Llava15ChatHandler is the
+# universal Gemma/PaliGemma/LLaVA-family vision handler -- works for
+# Gemma-4 mmproj GGUFs because the projector format is compatible.
+_cf = importlib.import_module('llama_cpp.llama_chat_format')
+VisionHandler = _cf.Llava15ChatHandler
 
-handler = VisionHandler(clip_model_path=str(OUT_MMPROJ))
+handler = VisionHandler(clip_model_path=str(OUT_MMPROJ), verbose=False)
 llm = Llama(
     model_path=str(OUT_GGUF),
     chat_handler=handler,
@@ -1552,10 +1562,11 @@ for img_path, target_json, src in samples:
     print(f'Image  : {pathlib.Path(img_path).name}  (source: {src})')
     resp = llm.create_chat_completion(
         messages=[
-            {'role':'system','content':[{'type':'text','text':SYSTEM_PROMPT}]},
-            {'role':'user','content':[
-                {'type':'image_url','image_url':{'url': f'file://{img_path}'}},
-                {'type':'text','text': USER_INSTRUCTION},
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user',   'content': [
+                {'type': 'image_url',
+                 'image_url': {'url': f'file://{img_path}'}},
+                {'type': 'text', 'text': USER_INSTRUCTION},
             ]},
         ],
         temperature=0.0,
