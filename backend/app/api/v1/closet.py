@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
@@ -637,9 +638,24 @@ async def preflight_duplicates(
             backfill_remaining += 1
             continue
         src = (
-            row.get("thumbnail_data_url")
+            # Phase Z2.3 — ground-truth-first source priority.
+            # The lazy backfill used to prefer ``thumbnail_data_url``
+            # because it's the cheapest to decode, but that thumbnail
+            # is a ~15 KB downscaled centre-crop produced by
+            # ``_thumbs.backfill_thumbnails``. Phash + colour-sig
+            # computed from THAT image describe "a downscaled blob of
+            # a white-ish thing", not the user's actual upload, and
+            # collide trivially for any two white garments. The
+            # in-store duplicate detector then trusts those poisoned
+            # hashes as ground truth and hallucinates duplicates.
+            #
+            # We now require an authoritative source (original or
+            # full-resolution segmented cutout) and **skip** items
+            # that only have a thumbnail. A None phash is safe
+            # (``is_duplicate_match`` returns False on None); a
+            # thumbnail-derived phash is not.
+            row.get("original_image_url")
             or row.get("segmented_image_url")
-            or row.get("original_image_url")
         )
         if not src:
             continue
@@ -1509,6 +1525,304 @@ async def list_items(
     return {"items": items, "total": total, "limit": limit, "skip": skip}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Phase Z2.3 — server → client streaming hash-repair
+# ─────────────────────────────────────────────────────────────────────
+@router.post("/repair-hashes")
+async def repair_hashes_stream(
+    user: dict = Depends(get_current_user),
+    dry_run: bool = Query(
+        default=False,
+        description=(
+            "When true, run the diff pass but do NOT write anything "
+            "back to Mongo. Useful from a debug console; the streaming "
+            "log still surfaces every item that would be touched."
+        ),
+    ),
+    only_missing: bool = Query(
+        default=False,
+        description=(
+            "When true, ONLY items with a null/empty source_phash or "
+            "source_color_sig are processed; rows that already have "
+            "non-null hashes (even if poisoned by a prior thumbnail "
+            "backfill) are skipped. Default is False so the repair "
+            "actually fixes the poisoned rows — the whole reason this "
+            "endpoint exists."
+        ),
+    ),
+    limit: int = Query(default=2000, le=2000, ge=1),
+):
+    """**NDJSON-streaming** closet-hash repair.
+
+    Why this exists
+    ===============
+    The lazy phash + colour-sig backfill at ``/preflight`` historically
+    used the cheapest available image source (``thumbnail_data_url``,
+    a ~15 KB downscaled centre-crop). That choice produced **stable
+    but misleading** hashes: two visually different garments of
+    similar overall colour (e.g. a white polo and a white graphic
+    tee) reduce to indistinguishable thumbnails and therefore to
+    near-identical hashes. The in-store duplicate detector then
+    trusts those hashes and hallucinates duplicates.
+
+    This endpoint recomputes every (or only missing) row's phash and
+    colour-sig from the **authoritative** image source
+    (``original_image_url`` first, ``segmented_image_url`` second —
+    never the thumbnail; see ``image_hash.best_authoritative_source``
+    for the policy). When no authoritative source is available, the
+    row's hashes are **cleared** rather than recomputed from a
+    thumbnail — a ``None`` phash is safe (the matcher returns False
+    on it); a thumbnail-derived phash is not.
+
+    Wire format
+    ===========
+    `application/x-ndjson`. One JSON object per line:
+
+      * ``{"type":"start","total":N,"only_missing":bool,"dry_run":bool}``
+      * ``{"type":"item","id":"...","status":"repaired"
+              |"cleared"|"unchanged"|"skipped"|"failed",
+              "source_field": "original_image_url" | "segmented_image_url" | null,
+              "delta": {phash?:bool, color_sig?:bool},
+              "error": "..." | null}``
+      * ``{"type":"done","scanned":N,"repaired":N,"cleared":N,
+              "unchanged":N,"skipped":N,"failed":N,"wrote_db":bool}``
+
+    Idempotent — re-running it after a successful pass is a no-op
+    (every row reports ``status=unchanged``).
+    """
+    db = get_db()
+
+    # Pull only the fields we need — keeps the per-row payload small
+    # in memory for a 2000-item closet. We do NOT need the heavy
+    # ``thumbnail_data_url`` here because the policy is to **never**
+    # hash from it (see module docstring above).
+    proj = {
+        "_id": 0,
+        "id": 1,
+        "original_image_url": 1,
+        "segmented_image_url": 1,
+        "source_phash": 1,
+        "source_color_sig": 1,
+    }
+    rows: list[dict[str, Any]] = []
+    async for r in db.closet_items.find(
+        {"user_id": user["id"]}, proj
+    ).limit(limit):
+        rows.append(r)
+
+    from app.services.image_hash import (
+        compute_authoritative_signatures,
+        best_authoritative_source,
+    )
+
+    async def gen():
+        # Header line — lets the client size its progress UI before
+        # any item arrives.
+        yield (
+            json.dumps(
+                {
+                    "type": "start",
+                    "total": len(rows),
+                    "only_missing": only_missing,
+                    "dry_run": dry_run,
+                }
+            )
+            + "\n"
+        )
+
+        repaired = cleared = unchanged = skipped = failed = 0
+        wrote_db = False
+        loop = asyncio.get_running_loop()
+
+        for row in rows:
+            rid = row.get("id")
+            if not rid:
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": None,
+                            "status": "failed",
+                            "source_field": None,
+                            "delta": {},
+                            "error": "missing-id",
+                        }
+                    )
+                    + "\n"
+                )
+                continue
+
+            old_ph = row.get("source_phash") or None
+            old_cs = row.get("source_color_sig") or None
+
+            if only_missing and old_ph and old_cs:
+                skipped += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "skipped",
+                            "source_field": None,
+                            "delta": {},
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            try:
+                # CPU-bound (PIL decode + numpy) — push onto the
+                # thread pool so the event loop can keep flushing
+                # the NDJSON stream while we work.
+                new_ph, new_cs, used = await loop.run_in_executor(
+                    None, compute_authoritative_signatures, row
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "id": rid,
+                            "status": "failed",
+                            "source_field": None,
+                            "delta": {},
+                            "error": exc.__class__.__name__,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            no_authoritative_source = (
+                used is None and best_authoritative_source(row) is None
+            )
+
+            patch: dict[str, Any] = {}
+            delta: dict[str, bool] = {}
+            status: str
+
+            if no_authoritative_source:
+                # Row only has a thumbnail (or nothing). Clear the
+                # potentially-poisoned hashes so the detector falls
+                # back to "no fingerprint" instead of trusting a
+                # thumbnail-derived value.
+                if old_ph is not None:
+                    patch["source_phash"] = None
+                    delta["phash"] = True
+                if old_cs is not None:
+                    patch["source_color_sig"] = None
+                    delta["color_sig"] = True
+                status = "cleared" if patch else "unchanged"
+                if status == "cleared":
+                    cleared += 1
+                else:
+                    unchanged += 1
+            else:
+                if new_ph and new_ph != old_ph:
+                    patch["source_phash"] = new_ph
+                    delta["phash"] = True
+                if new_cs and new_cs != old_cs:
+                    patch["source_color_sig"] = new_cs
+                    delta["color_sig"] = True
+                if patch:
+                    status = "repaired"
+                    repaired += 1
+                else:
+                    status = "unchanged"
+                    unchanged += 1
+
+            if patch and not dry_run:
+                try:
+                    await db.closet_items.update_one(
+                        {"id": rid, "user_id": user["id"]},
+                        {"$set": patch | {
+                            "updated_at": datetime.now(timezone.utc).isoformat()
+                        }},
+                    )
+                    wrote_db = True
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    if status == "repaired":
+                        repaired -= 1
+                    elif status == "cleared":
+                        cleared -= 1
+                    yield (
+                        json.dumps(
+                            {
+                                "type": "item",
+                                "id": rid,
+                                "status": "failed",
+                                "source_field": used,
+                                "delta": delta,
+                                "error": f"db:{exc.__class__.__name__}",
+                            }
+                        )
+                        + "\n"
+                    )
+                    await asyncio.sleep(0)
+                    continue
+
+            yield (
+                json.dumps(
+                    {
+                        "type": "item",
+                        "id": rid,
+                        "status": status,
+                        "source_field": used,
+                        "delta": delta,
+                        # When the patch went through, send ONLY the
+                        # fields that actually changed so the client
+                        # can do ``store[id] = {...store[id], ...patch}``
+                        # without accidentally nulling untouched
+                        # fields. ``patch`` is omitted entirely (None)
+                        # when nothing changed.
+                        "patch": patch if patch else None,
+                        "error": None,
+                    }
+                )
+                + "\n"
+            )
+            await asyncio.sleep(0)
+
+        # Final summary line — the client uses this to clear its
+        # progress UI and surface a "Refreshed N fingerprints" toast.
+        yield (
+            json.dumps(
+                {
+                    "type": "done",
+                    "scanned": len(rows),
+                    "repaired": repaired,
+                    "cleared": cleared,
+                    "unchanged": unchanged,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "wrote_db": wrote_db and not dry_run,
+                }
+            )
+            + "\n"
+        )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={
+            # Disable proxy buffering (nginx, Cloudflare) so the user
+            # actually sees rows tick in real time instead of one big
+            # response at the end.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache, no-transform",
+        },
+    )
+
+
+
+
 @router.post("/marketplace/backfill")
 async def backfill_marketplace_listings(
     user: dict = Depends(get_current_user),
@@ -1661,6 +1975,302 @@ async def backfill_marketplace_listings(
         "source_synced": updated_source,
         "failed": failed,
     }
+
+
+@router.post("/marketplace/backfill/stream")
+async def backfill_marketplace_listings_stream(
+    user: dict = Depends(get_current_user),
+):
+    """**NDJSON-streaming** counterpart to ``POST /marketplace/backfill``.
+
+    Same semantics — idempotent auto-listing of closet items whose
+    ``marketplace_intent`` is set but never made it onto the
+    marketplace — but emits one JSON line per candidate as it's
+    processed so the frontend can render live progress instead of
+    a "Syncing…" spinner with no feedback for 10+ seconds on a
+    50-item closet.
+
+    Why a sibling endpoint (and not a flag on the existing one)
+    ===========================================================
+    The existing JSON-returning endpoint is consumed by the current
+    Marketplace page button and may be hit by automation / tests. We
+    keep it as the back-compat path and add this sibling so:
+      * the streaming UI opts in by hitting ``/stream``;
+      * the legacy summary endpoint stays stable for anything that
+        depended on its exact response shape;
+      * rollback is trivial — just don't call /stream.
+
+    Wire format
+    ===========
+    ``application/x-ndjson``. One JSON object per line:
+
+      * ``{"type":"start", "total":N}`` — number of candidate closet
+        items the pipeline will visit. Use this to size the progress
+        UI before any item arrives.
+      * ``{"type":"item", "closet_item_id":"...",
+            "status":"created"|"skipped"|"source_synced"|"failed",
+            "listing_id":"..." | null,
+            "title":"...",
+            "error":"..." | null}``
+      * ``{"type":"done", "candidates":N, "created":N, "skipped":N,
+            "source_synced":N, "failed":N}``
+    """
+    from app.models.schemas import FinancialMetadata, Listing
+
+    db = get_db()
+    INTENT_TO_MODE = {"for_sale": "sell", "swap": "swap", "donate": "donate"}
+
+    candidates_cursor = db.closet_items.find(
+        {
+            "user_id": user["id"],
+            "marketplace_intent": {"$in": list(INTENT_TO_MODE.keys())},
+        },
+        {
+            "_id": 0,
+            "id": 1, "title": 1, "description": 1, "category": 1,
+            "size": 1, "condition": 1, "state": 1, "location": 1,
+            "marketplace_intent": 1, "price_cents": 1,
+            "thumbnail_data_url": 1, "segmented_image_url": 1,
+            "reconstructed_image_url": 1, "original_image_url": 1,
+            "auto_listing_id": 1, "source": 1,
+        },
+    )
+    candidates = await candidates_cursor.to_list(length=None)
+
+    # Condition vocabulary mapping — identical to the legacy endpoint.
+    # Kept inside the gen scope as a closure constant so a future
+    # tweak only needs one edit.
+    _COND_MAP = {
+        "excellent": "like_new",
+        "like_new": "like_new",
+        "new": "new",
+        "good": "good",
+        "fair": "fair",
+        "bad": "fair",
+    }
+
+    async def gen():
+        yield (
+            json.dumps({"type": "start", "total": len(candidates)})
+            + "\n"
+        )
+
+        created = 0
+        updated_source = 0
+        skipped_existing = 0
+        failed = 0
+
+        for item in candidates:
+            cid = item.get("id")
+            title = item.get("title") or "Untitled"
+
+            try:
+                existing = await db.listings.find_one(
+                    {
+                        "closet_item_id": cid,
+                        "seller_id": user["id"],
+                        "status": {"$in": ["draft", "active", "reserved"]},
+                    },
+                    {"_id": 0, "id": 1},
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "failed",
+                            "listing_id": None,
+                            "title": title,
+                            "error": f"lookup:{exc.__class__.__name__}",
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            if existing:
+                existing_id = existing["id"]
+                status = "skipped"
+                # Mirror legacy behaviour: keep ``source`` consistent
+                # with the existence of an active listing so the
+                # closet filters keep showing the item under "Shared".
+                if item.get("source") != "Shared":
+                    try:
+                        await db.closet_items.update_one(
+                            {"id": cid, "user_id": user["id"]},
+                            {"$set": {
+                                "source": "Shared",
+                                "auto_listing_id": existing_id,
+                            }},
+                        )
+                        updated_source += 1
+                        status = "source_synced"
+                    except Exception as exc:  # noqa: BLE001
+                        failed += 1
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "item",
+                                    "closet_item_id": cid,
+                                    "status": "failed",
+                                    "listing_id": existing_id,
+                                    "title": title,
+                                    "error": (
+                                        f"source_sync:"
+                                        f"{exc.__class__.__name__}"
+                                    ),
+                                }
+                            )
+                            + "\n"
+                        )
+                        await asyncio.sleep(0)
+                        continue
+                skipped_existing += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": status,
+                            "listing_id": existing_id,
+                            "title": title,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            # No existing listing — create one. The image-source
+            # priority chain mirrors the legacy backfill so the
+            # listing card has the best available picture; the
+            # thumbnail-first ordering is fine HERE because Listings
+            # don't participate in duplicate-fingerprinting (unlike
+            # the closet hashes, which is why /repair-hashes inverted
+            # that chain).
+            try:
+                images: list[str] = []
+                for fld in (
+                    "thumbnail_data_url",
+                    "segmented_image_url",
+                    "reconstructed_image_url",
+                    "original_image_url",
+                ):
+                    url = item.get(fld)
+                    if isinstance(url, str) and url:
+                        images.append(url)
+                        break
+
+                mode = INTENT_TO_MODE[item["marketplace_intent"]]
+                price_cents = (
+                    int(item.get("price_cents") or 0)
+                    if mode == "sell"
+                    else 0
+                )
+                raw_cond = (
+                    item.get("condition") or item.get("state") or "good"
+                )
+                listing_condition = _COND_MAP.get(raw_cond, "good")
+                listing = Listing(
+                    closet_item_id=cid,
+                    seller_id=user["id"],
+                    source="Shared",
+                    mode=mode,
+                    title=title,
+                    description=item.get("description"),
+                    category=item.get("category") or "Top",
+                    size=item.get("size"),
+                    condition=listing_condition,
+                    images=images,
+                    location=item.get("location"),
+                    financial_metadata=FinancialMetadata(
+                        list_price_cents=price_cents,
+                        currency="USD",
+                        platform_fee_percent=0.0,
+                        estimated_seller_net_cents=0,
+                    ),
+                    auto_created=True,
+                    status="active",
+                )
+                await repos.insert(db.listings, listing.model_dump())
+                await db.closet_items.update_one(
+                    {"id": cid, "user_id": user["id"]},
+                    {"$set": {
+                        "source": "Shared",
+                        "auto_listing_id": listing.id,
+                        "auto_listing_needs_completion": True,
+                    }},
+                )
+                created += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "created",
+                            "listing_id": listing.id,
+                            "title": title,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                logger.warning(
+                    "backfill stream: listing creation failed for "
+                    "closet %s: %s",
+                    cid, exc,
+                )
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "failed",
+                            "listing_id": None,
+                            "title": title,
+                            "error": exc.__class__.__name__,
+                        }
+                    )
+                    + "\n"
+                )
+            await asyncio.sleep(0)
+
+        logger.info(
+            "marketplace backfill (stream) user=%s created=%d "
+            "source_synced=%d skipped=%d failed=%d candidates=%d",
+            user["id"], created, updated_source, skipped_existing,
+            failed, len(candidates),
+        )
+        yield (
+            json.dumps(
+                {
+                    "type": "done",
+                    "candidates": len(candidates),
+                    "created": created,
+                    "skipped": skipped_existing,
+                    "source_synced": updated_source,
+                    "failed": failed,
+                }
+            )
+            + "\n"
+        )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache, no-transform",
+        },
+    )
+
+
 
 
 class SearchIn(BaseModel):

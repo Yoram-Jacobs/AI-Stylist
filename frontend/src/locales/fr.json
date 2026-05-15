@@ -153,7 +153,15 @@
     "saveFailuresBody": "Ces articles n'ont pas pu être enregistrés dans votre garde-robe. Veuillez réessayer de les télécharger.",
     "saveFailuresUnnamed": "Article sans titre",
     "completeListingCta": "Compléter l'annonce",
-    "clearSearch": "Effacer la recherche"
+    "clearSearch": "Effacer la recherche",
+    "repair": {
+      "running": "Ajustement du détecteur de doublons… {{n}}/{{total}}",
+      "repaired": "{{n}} actualisés",
+      "cleared": "{{n}} effacés",
+      "doneEmpty": "Tout est prêt",
+      "failed": "Impossible d’actualiser les empreintes",
+      "failedCount": "{{n}} échec(s)"
+    }
   },
   "addItem": {
     "title": "Ajouter des pièces",
@@ -231,7 +239,7 @@
     },
     "preflight": {
       "title": "{{count}} de vos photos sélectionnées semblent être des doublons",
-      "body": "Ces fichiers exacts existent déjà dans votre garde-robe. Ignorez-les — ou cliquez sur l'⭐ rouge pour les ajouter quand même. Le Stylist Brain exclura les doublons marqués des suggestions de tenues pour ne pas recommander le même vêtement deux fois.",
+      "body": "Ces photos ressemblent beaucoup à des articles déjà présents dans ton dressing. Ignore-les — ou clique sur l'étoile rouge ⭐ pour les ajouter quand même. Le Stylist Brain exclura les doublons marqués d'une étoile des suggestions de tenues afin de ne pas te recommander deux fois le même vêtement.",
       "existing": "dans le dressing",
       "incoming": "nouveau téléchargement",
       "noThumb": "pas d'aperçu",
@@ -553,7 +561,14 @@
     "removeListing": "Retirer du marché",
     "listingRemoved": "Retiré du marché",
     "removing": "Retrait…",
-    "syncing": "Synchronisation…"
+    "syncing": "Synchronisation…",
+    "backfill": {
+      "running": "Mise en vente des articles… {{n}}/{{total}}",
+      "created": "{{n}} en vente",
+      "skipped": "{{n}} déjà en ligne",
+      "synced": "{{n}} re-marquées",
+      "failed": "Synchronisation impossible"
+    }
   },
   "createListing": {
     "title": "Créer une annonce",

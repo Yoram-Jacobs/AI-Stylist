@@ -38,9 +38,18 @@
  */
 
 // Match the backend constants exactly. If you change these, change
-// ``DEFAULT_HAMMING_THRESHOLD`` / ``DEFAULT_COLOR_THRESHOLD`` in
-// ``image_hash.py`` to the same values.
+// ``DEFAULT_HAMMING_THRESHOLD`` / ``DEFAULT_HAMMING_THRESHOLD_STRICT`` /
+// ``DEFAULT_COLOR_THRESHOLD`` in ``image_hash.py`` to the same values.
 const HAMMING_THRESHOLD = 6;
+// Stricter threshold used ONLY when the colour gate cannot apply
+// (either side missing ``source_color_sig``). 8×8 aHash on greyscale
+// is essentially "silhouette + brightness pattern": two *different*
+// white garments on contrasting backgrounds reliably land within
+// Hamming 4–6 of each other (the chest graphic averages into the
+// surrounding white at 8×8). Without tightening here, every photo
+// of a white garment uploaded into a closet that contains any
+// pre-Z2.2 white garment ends up flagged as a duplicate.
+const HAMMING_THRESHOLD_STRICT = 3;
 const COLOR_THRESHOLD = 220;
 
 // Sentinel values mirror the Python helper — these effectively mean
@@ -98,18 +107,22 @@ export function colorDistance(a, b) {
  * port of the backend's ``is_duplicate_match``. Decision tree:
  *
  *   1. Exact SHA-256 match → duplicate (re-upload of the same bytes).
- *   2. Shape similar (Hamming ≤ 6) AND
- *      (no colour sig on either side OR colour distance ≤ 220)
+ *   2. Both sides have a colour signature: shape similar
+ *      (Hamming ≤ ``hammingThreshold``) AND colour distance ≤
+ *      ``colorThreshold`` → duplicate.
+ *   3. At least one side lacks a colour signature: require the
+ *      *strict* Hamming threshold (≤ ``hammingThresholdStrict``)
  *      → duplicate.
- *   3. Otherwise → not a duplicate.
+ *   4. Otherwise → not a duplicate.
  *
- * Colour gate prevents "navy shorts flagged as a duplicate of grey
- * shorts of the same cut" — the bug that originally motivated adding
- * the colour sig to the schema.
+ * Rule (3) is the fix for "white polo flagged as a duplicate of a
+ * white graphic tee" — legacy closet items lack ``source_color_sig``
+ * and the old branch fell back to lenient phash-only on those rows.
  */
 export function isDuplicateMatch({
   shaA, shaB, phashA, phashB, colorA, colorB,
   hammingThreshold = HAMMING_THRESHOLD,
+  hammingThresholdStrict = HAMMING_THRESHOLD_STRICT,
   colorThreshold = COLOR_THRESHOLD,
 } = {}) {
   // Pass 1 — exact byte match.
@@ -117,13 +130,16 @@ export function isDuplicateMatch({
   // Pass 2 — shape similarity is the prerequisite; without phashes
   // we can't say anything about visual similarity.
   if (!phashA || !phashB) return false;
-  if (hammingDistance(phashA, phashB) > hammingThreshold) return false;
-  // Shape says "match"; gate on colour if we have it on both sides.
-  if (colorA && colorB) {
+  const haveBothColors = !!(colorA && colorB);
+  const effectiveThreshold = haveBothColors
+    ? hammingThreshold
+    : hammingThresholdStrict;
+  if (hammingDistance(phashA, phashB) > effectiveThreshold) return false;
+  if (haveBothColors) {
     return colorDistance(colorA, colorB) <= colorThreshold;
   }
-  // Phash-only fallback for closet items that pre-date the
-  // colour-sig backfill (mostly pre-Phase-Z2 items).
+  // No colour gate available; the strict Hamming gate above already
+  // enforced a much tighter shape match, so we can declare here.
   return true;
 }
 
@@ -244,6 +260,7 @@ export function findDuplicatesInCloset(fingerprints, closetItems) {
 
 export const __testables = {
   HAMMING_THRESHOLD,
+  HAMMING_THRESHOLD_STRICT,
   COLOR_THRESHOLD,
   HAMMING_SENTINEL,
   COLOR_SENTINEL,

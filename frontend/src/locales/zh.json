@@ -153,7 +153,15 @@
     "saveFailuresBody": "这些单品无法保存到您的衣橱。请尝试重新上传。",
     "saveFailuresUnnamed": "未命名单品",
     "completeListingCta": "完成发布",
-    "clearSearch": "清除搜索"
+    "clearSearch": "清除搜索",
+    "repair": {
+      "running": "正在调校重复检测器… {{n}}/{{total}}",
+      "repaired": "{{n}} 已刷新",
+      "cleared": "{{n}} 已清空",
+      "doneEmpty": "一切就绪",
+      "failed": "无法刷新指纹",
+      "failedCount": "{{n}} 失败"
+    }
   },
   "addItem": {
     "title": "添加单品",
@@ -247,7 +255,7 @@
     },
     "preflight": {
       "title": "您选中的照片中有 {{count}} 张看起来是重复的",
-      "body": "这些完全相同的文件已存在于您的衣橱中。您可以跳过它们 — 或点击红色 ⭐ 仍然添加。“Stylist Brain”会将带星标的重复项排除在穿搭建议之外，因此不会推荐同一件衣服两次。",
+      "body": "这些照片看起来与你衣橱里已有的单品非常相似。跳过它们 —— 或点击红色 ⭐ 仍然添加。造型师大脑(Stylist Brain)会将带星标的重复单品排除在穿搭推荐之外,以免重复推荐同一件衣物。",
       "existing": "已在衣橱",
       "incoming": "新上传",
       "noThumb": "无预览",
@@ -553,7 +561,14 @@
     "removeListing": "从市场移除",
     "listingRemoved": "已从市场移除",
     "removing": "正在移除…",
-    "syncing": "正在同步…"
+    "syncing": "正在同步…",
+    "backfill": {
+      "running": "正在上架衣橱单品… {{n}}/{{total}}",
+      "created": "{{n}} 已上架",
+      "skipped": "{{n}} 已在售",
+      "synced": "{{n}} 重新标记",
+      "failed": "无法同步市场"
+    }
   },
   "createListing": {
     "title": "创建商品",

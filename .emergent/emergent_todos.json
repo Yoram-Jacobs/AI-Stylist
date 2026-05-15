@@ -1,18 +1,34 @@
 [
   {
-    "content": "Phase S1: image-aware addendum patch + tests + restart",
+    "content": "Extract generic StreamingProgressChip from HashRepairChip; rewire closet chip to use it (no behaviour change)",
     "status": "completed"
   },
   {
-    "content": "Phase S2: AttachmentPicker.jsx + wire into Stylist composer",
+    "content": "Backend M.1 — new POST /api/v1/closet/marketplace/backfill/stream (NDJSON, sibling endpoint for back-compat)",
     "status": "completed"
   },
   {
-    "content": "Phase S3: ItemFloater + wiring across Stylist + OutfitCompletionSheet",
+    "content": "Backend M.2 — new GET /api/v1/listings/stream (NDJSON)",
     "status": "completed"
   },
   {
-    "content": "Phase S4: testing_agent smoke (backend 100% + frontend 95%) + manual S3 e2e verification on Casual Dinner Outfit session",
+    "content": "Frontend M.3 — api.streamMarketplaceBackfill() + api.streamListings() helpers",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend M.4 — marketplaceStore gains backfillProgress + browseProgress snapshots + drive methods",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend M.5 — wire Marketplace 'Sync from closet' button to streaming + show chip; opt-in stream for browse",
+    "status": "completed"
+  },
+  {
+    "content": "i18n + lint sweep + smoke test (curl backend, screenshot frontend)",
+    "status": "completed"
+  },
+  {
+    "content": "Bug fix: abort-clears-slot race on rapid location/filter changes — dropped upfront invalidate, added seen-IDs prune-on-done",
     "status": "completed"
   }
 ]

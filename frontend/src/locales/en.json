@@ -153,7 +153,15 @@
     "intent": "Intent",
     "anyCategory": "Any category",
     "completeListingCta": "Complete listing",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "repair": {
+      "running": "Tuning duplicate detector… {{n}}/{{total}}",
+      "repaired": "{{n}} refreshed",
+      "cleared": "{{n}} cleared",
+      "doneEmpty": "All set",
+      "failed": "Couldn’t refresh fingerprints",
+      "failedCount": "{{n}} failed"
+    }
   },
   "addItem": {
     "title": "Upload & auto-fill",
@@ -180,7 +188,7 @@
     },
     "preflight": {
       "title": "{{count}} of your selected photos look like duplicates",
-      "body": "These exact files already exist in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
+      "body": "These photos look very similar to items already in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
       "existing": "in closet",
       "incoming": "new upload",
       "noThumb": "no preview",
@@ -553,7 +561,14 @@
     "removeListing": "Remove from marketplace",
     "listingRemoved": "Removed from marketplace",
     "removing": "Removing…",
-    "syncing": "Syncing…"
+    "syncing": "Syncing…",
+    "backfill": {
+      "running": "Listing closet items… {{n}}/{{total}}",
+      "created": "{{n}} listed",
+      "skipped": "{{n}} already up",
+      "synced": "{{n}} reflagged",
+      "failed": "Couldn’t sync marketplace"
+    }
   },
   "createListing": {
     "title": "Create a listing",

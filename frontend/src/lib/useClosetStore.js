@@ -32,6 +32,10 @@ export function useClosetStore({ prewarm = false } = {}) {
     error: snap.error,
     lastFullSync: snap.lastFullSync,
     lastIncSync: snap.lastIncSync,
+    // Phase Z2.3 — streaming hash-repair progress snapshot. Consumers
+    // (e.g. the Closet header chip) render directly from this; it
+    // updates on every NDJSON line the server streams.
+    repairProgress: snap.repairProgress,
     // Imperative passthroughs so consumers don't need to import the
     // store separately.
     prewarm: closetStore.prewarm.bind(closetStore),
@@ -40,5 +44,6 @@ export function useClosetStore({ prewarm = false } = {}) {
     remove: closetStore.remove.bind(closetStore),
     replaceAll: closetStore.replaceAll.bind(closetStore),
     reset: closetStore.reset.bind(closetStore),
+    repairHashes: closetStore.repairHashes.bind(closetStore),
   };
 }

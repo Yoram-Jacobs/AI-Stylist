@@ -44,6 +44,23 @@ _HASH_SIZE = 8
 # false positives.
 DEFAULT_HAMMING_THRESHOLD = 6
 
+# Stricter threshold used ONLY when the colour gate cannot apply
+# (either side missing ``source_color_sig``). 8×8 aHash on
+# greyscale is essentially "silhouette + brightness pattern": two
+# *different* white garments on contrasting backgrounds reliably
+# land within Hamming 4–6 of each other because both reduce to
+# "bright blob centre, darker corners". The colour gate normally
+# rescues that case, but legacy items predate the Z2.2 colour-sig
+# backfill and ship with ``source_color_sig=None``. Without
+# tightening here, every photo of a white garment uploaded into a
+# closet that contains *any* pre-Z2.2 white garment ends up
+# flagged as a duplicate — which is the
+# ``White polo == White graphic tee`` bug observed in production.
+# 3 bits ≈ 4.7%: empirically separates "re-upload of the same
+# photo with JPEG re-encoding" (≤ 3) from "different garment,
+# similar shape" (≥ 5).
+DEFAULT_HAMMING_THRESHOLD_STRICT = 3
+
 # Colour signature: average RGB per quadrant → 4 quadrants × 3 channels
 # = 12 bytes = 24 hex chars. Manhattan distance is on the raw byte
 # values (0–255). 220 ≈ "noticeably different colour family" empirically:
@@ -183,6 +200,71 @@ def compute_signatures(image_data) -> tuple[str | None, str | None]:
     return (ph, cs)
 
 
+# ── Phase Z2.3 — authoritative source selection ────────────────────
+# ``best_authoritative_source`` and ``compute_authoritative_signatures``
+# are the *correct* way for any backfill / repair / migration code to
+# pull bytes off a closet item: ground truth FIRST, never the
+# downscaled thumbnail. See the long comment in
+# ``app/api/v1/closet.py`` /preflight backfill for why.
+#
+# ``thumbnail_data_url`` is *deliberately* excluded — phashes computed
+# from the lossy thumbnail trivially collide across two visually
+# different garments of similar overall colour (e.g. any two white
+# tops), which is the documented production bug this helper exists to
+# prevent recurrence of.
+
+# Field-priority chain used by the repair pipeline + any future
+# backfill caller. Order matters: the first non-empty wins.
+AUTHORITATIVE_SOURCE_FIELDS: tuple[str, ...] = (
+    "original_image_url",
+    "segmented_image_url",
+)
+
+
+def best_authoritative_source(row: dict) -> str | None:
+    """Return the first authoritative image source on a closet item,
+    or ``None`` if the row only has a (lossy) thumbnail.
+
+    ``row`` is a closet-item Mongo document or any dict that follows
+    the same key names. A ``None`` return is a signal to the repair
+    pipeline that this row *cannot* be safely re-fingerprinted from
+    available data — its hashes should be **cleared** (not
+    recomputed from the thumbnail) so the duplicate detector treats
+    it as un-fingerprinted instead of trusting a hallucinated hash.
+    """
+    if not isinstance(row, dict):
+        return None
+    for field in AUTHORITATIVE_SOURCE_FIELDS:
+        val = row.get(field)
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def compute_authoritative_signatures(
+    row: dict,
+) -> tuple[str | None, str | None, str | None]:
+    """Compute (phash, color_sig, source_field_used) from the best
+    authoritative source on a closet item. Returns ``(None, None, None)``
+    when no authoritative source exists.
+
+    Returning the *field that was used* lets the repair endpoint
+    surface diagnostics ("recomputed from original_image_url" vs
+    "skipped — only thumbnail available") in its streaming log
+    without re-deriving the choice on the caller side.
+    """
+    for field in AUTHORITATIVE_SOURCE_FIELDS:
+        val = row.get(field) if isinstance(row, dict) else None
+        if not isinstance(val, str) or not val:
+            continue
+        ph, cs = compute_signatures(val)
+        if ph or cs:
+            return (ph, cs, field)
+    return (None, None, None)
+
+
+
+
 def hamming_distance(a: str | None, b: str | None) -> int:
     """Hamming bit-distance between two 16-char hex digests. Returns
     a sentinel (65) for any malformed input so callers can treat it
@@ -225,29 +307,45 @@ def is_duplicate_match(
     color_b: str | None,
     *,
     hamming_threshold: int = DEFAULT_HAMMING_THRESHOLD,
+    hamming_threshold_strict: int = DEFAULT_HAMMING_THRESHOLD_STRICT,
     color_threshold: int = DEFAULT_COLOR_THRESHOLD,
 ) -> bool:
     """Single source of truth for "are these two images duplicates?".
 
     Decision tree:
       1. Exact SHA-256 match → duplicate (re-upload of the exact bytes).
-      2. Shape similar (Hamming ≤ threshold) AND
-         (no colour sigs available OR colour distance ≤ threshold) → duplicate.
-      3. Otherwise → not a duplicate.
+      2. Both sides have a colour signature:
+         shape similar (Hamming ≤ ``hamming_threshold``) AND
+         colour distance ≤ ``color_threshold`` → duplicate.
+      3. At least one side lacks a colour signature:
+         shape similar under the **strict** threshold
+         (Hamming ≤ ``hamming_threshold_strict``) → duplicate.
+      4. Otherwise → not a duplicate.
 
     Rule (2)'s colour gate is the fix for "navy shorts flagged as a
-    duplicate of grey shorts of the same cut". When *neither* side has
-    a colour signature we fall back to phash-only behaviour for
-    backwards compatibility with rows that pre-date the colour-sig
-    backfill.
+    duplicate of grey shorts of the same cut".
+
+    Rule (3) is the fix for "white polo flagged as a duplicate of a
+    white graphic tee" — the closet item predates the Z2.2 colour-sig
+    backfill, so ``color_b`` is ``None`` and the old code fell back to
+    rule (2)'s lenient threshold without the gate. Requiring the
+    strict threshold instead means perceptual-only matches must be
+    *much* closer in silhouette/brightness before we declare them a
+    duplicate, which is the only honest thing to do with no colour
+    information.
     """
     if sha_a and sha_b and sha_a == sha_b:
         return True
     if not phash_a or not phash_b:
         return False
-    if hamming_distance(phash_a, phash_b) > hamming_threshold:
+    have_both_colors = bool(color_a) and bool(color_b)
+    effective_threshold = (
+        hamming_threshold if have_both_colors else hamming_threshold_strict
+    )
+    if hamming_distance(phash_a, phash_b) > effective_threshold:
         return False
-    # Shape says "match"; gate on colour if we have it.
-    if color_a and color_b:
+    if have_both_colors:
         return color_distance(color_a, color_b) <= color_threshold
+    # No colour gate available, but we already required the strict
+    # Hamming threshold above, so we can declare a match here.
     return True

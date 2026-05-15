@@ -294,7 +294,7 @@ Delivered previously; unchanged.
 
 ---
 
-## Phase V4.4 — Unsloth → GGUF Colab notebook **(PAUSED)**
+## Phase V4.4 — Unsloth → GGUF Colab notebook **(✅ COMPLETE)**
 
 ---
 

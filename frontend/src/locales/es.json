@@ -153,7 +153,15 @@
     "saveFailuresBody": "Estas prendas no pudieron guardarse en tu armario. Por favor, inténtalo de nuevo.",
     "saveFailuresUnnamed": "Prenda sin título",
     "completeListingCta": "Completar anuncio",
-    "clearSearch": "Limpiar búsqueda"
+    "clearSearch": "Limpiar búsqueda",
+    "repair": {
+      "running": "Afinando detector de duplicados… {{n}}/{{total}}",
+      "repaired": "{{n}} actualizados",
+      "cleared": "{{n}} borrados",
+      "doneEmpty": "Todo listo",
+      "failed": "No se pudieron actualizar las huellas",
+      "failedCount": "{{n}} fallidos"
+    }
   },
   "addItem": {
     "title": "Añadir prendas",
@@ -231,7 +239,7 @@
     },
     "preflight": {
       "title": "{{count}} de tus fotos seleccionadas parecen duplicadas",
-      "body": "Estos archivos exactos ya existen en tu armario. Omítelos — o haz clic en la ⭐ roja para añadirlos de todas formas. The Stylist Brain dejará fuera de las sugerencias de outfit los duplicados marcados para no recomendar la misma prenda dos veces.",
+      "body": "Estas fotos se parecen mucho a prendas que ya están en tu armario. Sáltalas — o haz clic en la estrella roja ⭐ para añadirlas de todos modos. El Stylist Brain dejará los duplicados marcados con estrella fuera de las sugerencias de looks para no recomendar la misma prenda dos veces.",
       "existing": "en el armario",
       "incoming": "nueva subida",
       "noThumb": "sin vista previa",
@@ -553,7 +561,14 @@
     "removeListing": "Eliminar del mercado",
     "listingRemoved": "Eliminado del mercado",
     "removing": "Eliminando…",
-    "syncing": "Sincronizando…"
+    "syncing": "Sincronizando…",
+    "backfill": {
+      "running": "Publicando prendas del armario… {{n}}/{{total}}",
+      "created": "{{n}} publicadas",
+      "skipped": "{{n}} ya activas",
+      "synced": "{{n}} re-etiquetadas",
+      "failed": "No se pudo sincronizar el mercado"
+    }
   },
   "createListing": {
     "title": "Crear anuncio",
