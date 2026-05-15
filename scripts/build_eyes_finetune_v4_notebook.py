@@ -1443,18 +1443,20 @@ CODE_GGUF_BUILD = """\
 """
 
 CODE_GGUF_TEXT = """\
-# Download pre-converted base + mmproj from HF Hub. These are the
-# stock Gemma-4 E2B GGUFs; reusable across all Eyes versions.
+# Download pre-converted base + mmproj from HF Hub. ggml-org ships
+# Q8_0 (4.97 GB) and bf16 (9.3 GB) only; no Q4_K_M as of May 2026.
+# Q8_0 is the right pick: small enough for Hetzner, marginally higher
+# quality than Q4_K_M anyway.
 from huggingface_hub import hf_hub_download
 
 GGUF_REPO = 'ggml-org/gemma-4-E2B-it-GGUF'
 print(f'Downloading pre-converted artifacts from {GGUF_REPO}...')
 BASE_GGUF = pathlib.Path(hf_hub_download(
-    GGUF_REPO, 'gemma-4-E2B-it-Q4_K_M.gguf', local_dir=str(LOCAL_BASE)))
+    GGUF_REPO, 'gemma-4-E2B-it-Q8_0.gguf', local_dir=str(LOCAL_BASE)))
 MMPROJ_GGUF = pathlib.Path(hf_hub_download(
-    GGUF_REPO, 'mmproj-gemma-4-E2B-it-f16.gguf', local_dir=str(LOCAL_BASE)))
-print(f'  base   : {BASE_GGUF}  ({BASE_GGUF.stat().st_size / 1024**3:.2f} GB)')
-print(f'  mmproj : {MMPROJ_GGUF}  ({MMPROJ_GGUF.stat().st_size / 1024**3:.2f} GB)')
+    GGUF_REPO, 'mmproj-gemma-4-E2B-it-Q8_0.gguf', local_dir=str(LOCAL_BASE)))
+print(f'  base   : {BASE_GGUF.name}    ({BASE_GGUF.stat().st_size / 1024**3:.2f} GB)')
+print(f'  mmproj : {MMPROJ_GGUF.name}  ({MMPROJ_GGUF.stat().st_size / 1024**2:.0f} MB)')
 """
 
 CODE_GGUF_MMPROJ = """\
