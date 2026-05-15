@@ -1210,14 +1210,20 @@ per-crop benches we recorded earlier:
 CODE_EVAL = """\
 import re, time, json
 import numpy as np
+from tqdm.auto import tqdm
+
+# Sanity-eval budget. Set to None to evaluate the full test split (slow!).
+EVAL_LIMIT = 100
 
 model.eval()
+
 
 def _safe_parse(s):
     m = re.search(r'\\[.*\\]', s, flags=re.DOTALL)
     if not m: return None
     try:    return json.loads(m.group(0))
     except: return None
+
 
 def _iou(a, b):
     ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
@@ -1227,11 +1233,19 @@ def _iou(a, b):
     union = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
     return inter / union if union else 0.0
 
+
 def _denorm(bb, w, h):
     ymin, xmin, ymax, xmax = bb
     return (int(xmin/1000*w), int(ymin/1000*h), int(xmax/1000*w), int(ymax/1000*h))
 
+
 def _predict(img_path):
+    \"\"\"Two-step pattern (same as build_example): render chat template
+    to text first, then call the processor with text= AND images=
+    explicitly. apply_chat_template(tokenize=True) does not reliably
+    feed inline PIL images into Gemma4ImageProcessor, which means
+    image_position_ids would be missing from the output and the SigLIP
+    vision tower would crash.\"\"\"
     image = _PIL_Image.open(img_path).convert('RGB')
     msgs = [
         {'role': 'system', 'content': SYSTEM_PROMPT},
@@ -1246,46 +1260,70 @@ def _predict(img_path):
     with torch.no_grad():
         out = model.generate(
             **enc,
-            max_new_tokens=512,
+            max_new_tokens=200,            # plenty for a 5-item JSON array
             do_sample=False,
             pad_token_id=processor.tokenizer.pad_token_id,
         )
     return _safe_parse(
-        processor.tokenizer.decode(out[0][enc['input_ids'].shape[1]:],
-                                   skip_special_tokens=True))
+        processor.tokenizer.decode(
+            out[0][enc['input_ids'].shape[1]:],
+            skip_special_tokens=True,
+        )
+    )
 
-ious, n_gt, n_pred, n_match = [], 0, 0, 0
+
+records = test_ds.recs[:EVAL_LIMIT] if EVAL_LIMIT else test_ds.recs
+print(f'Evaluating on {len(records)} / {len(test_ds.recs)} test records '
+      f'(EVAL_LIMIT={EVAL_LIMIT})')
+
+ious, n_gt, n_pred, n_match, n_err = [], 0, 0, 0, 0
 t0 = time.perf_counter()
-for img_path, target_json, _src in test_ds.recs:
-    gts = json.loads(target_json)
-    with _PIL_Image.open(img_path) as im: w, h = im.size
-    gts_px = [_denorm(g['region']['bbox'], w, h) for g in gts]
-    preds = _predict(img_path)
+
+for img_path, target_json, _src in tqdm(records, desc='eval', unit='img'):
+    try:
+        gts = json.loads(target_json)
+        with _PIL_Image.open(img_path) as im:
+            w, h = im.size
+        gts_px = [_denorm(g['region']['bbox'], w, h) for g in gts]
+        preds = _predict(img_path)
+    except Exception:
+        n_err += 1
+        continue
+
     if not isinstance(preds, list):
-        n_gt += len(gts_px); continue
+        n_gt += len(gts_px)
+        continue
+
     preds_px = []
     for p in preds:
+        if not isinstance(p, dict): continue
         bb = (p.get('region') or {}).get('bbox')
         if isinstance(bb, list) and len(bb) == 4:
             preds_px.append(_denorm(bb, w, h))
+
     triples = sorted(
         [(_iou(p, g), pi, gi)
          for pi, p in enumerate(preds_px)
          for gi, g in enumerate(gts_px)],
-        reverse=True)
+        reverse=True,
+    )
     up, ug = set(), set()
     for iou, pi, gi in triples:
         if pi in up or gi in ug: continue
         up.add(pi); ug.add(gi); ious.append(iou)
         if iou >= 0.5: n_match += 1
-    n_gt += len(gts_px); n_pred += len(preds_px)
+
+    n_gt   += len(gts_px)
+    n_pred += len(preds_px)
 
 el = time.perf_counter() - t0
-print(f'tested {len(test_ds.recs)} in {el:.1f}s')
-print(f'  mean IoU            : {np.mean(ious):.3f}' if ious else '  no preds')
-print(f'  recall @ IoU=0.5    : {n_match/n_gt:.3f}' if n_gt else '')
-print(f'  precision @ IoU=0.5 : {n_match/n_pred:.3f}' if n_pred else '')
-print(f'  avg preds / image   : {n_pred/len(test_ds.recs):.2f}')
+print()
+print(f'tested              : {len(records)} in {el:.1f}s ({el/max(len(records),1):.2f}s/img)')
+print(f'errors              : {n_err}')
+print(f'mean IoU            : {np.mean(ious):.3f}' if ious else 'mean IoU            : --')
+print(f'recall @ IoU=0.5    : {n_match/n_gt:.3f}' if n_gt   else 'recall              : --')
+print(f'precision @ IoU=0.5 : {n_match/n_pred:.3f}' if n_pred else 'precision           : --')
+print(f'avg preds / image   : {n_pred/len(records):.2f}')
 """
 
 
