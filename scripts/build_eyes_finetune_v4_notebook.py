@@ -1342,11 +1342,40 @@ HF Transformers, etc.) can load without PEFT in the picture.
 """
 
 CODE_MERGE = """\
+# Workaround for PEFT bug: _unload_and_optionally_merge calls
+#   del self.model.peft_config
+# which crashes because `peft_config` is a read-only property in the
+# current PEFT release. The merge has ALREADY been applied to the
+# underlying weights at that point -- only the cosmetic cleanup fails.
+# Monkey-patch to ignore that one specific AttributeError.
+# See https://github.com/huggingface/peft/issues/3025
+import peft.tuners.tuners_utils as _ptu
+
+if not getattr(_ptu.BaseTuner, '_neo_patched', False):
+    _orig = _ptu.BaseTuner._unload_and_optionally_merge
+
+    def _patched(self, *args, **kwargs):
+        try:
+            return _orig(self, *args, **kwargs)
+        except AttributeError as e:
+            if 'peft_config' not in str(e):
+                raise
+            print('[PEFT bug #3025] cleanup of peft_config failed but merge '
+                  'is already applied -- returning self.model.')
+            return self.model
+
+    _ptu.BaseTuner._unload_and_optionally_merge = _patched
+    _ptu.BaseTuner._neo_patched = True
+
 merged = model.merge_and_unload()
+print('Merge complete. type:', type(merged).__name__)
+
 OUT_MERGED.mkdir(parents=True, exist_ok=True)
-merged.save_pretrained(str(OUT_MERGED),
-                       safe_serialization=True,
-                       max_shard_size='4GB')
+merged.save_pretrained(
+    str(OUT_MERGED),
+    safe_serialization=True,
+    max_shard_size='4GB',
+)
 processor.save_pretrained(str(OUT_MERGED))
 
 total_gb = sum(p.stat().st_size for p in OUT_MERGED.rglob('*')) / (1024**3)
