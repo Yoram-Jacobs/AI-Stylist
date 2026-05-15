@@ -27,6 +27,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useClosetStore } from '@/lib/useClosetStore';
+import { bestImageUrl } from '@/lib/itemImage';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -153,18 +154,22 @@ export function AttachmentPicker({
 
   // ---- Confirm: materialise closet picks into File[] --------------
   const fetchClosetImageAsFile = async (item) => {
-    const url =
-      item.reconstructed_image_url ||
-      item.clean_image_url ||
-      item.segmented_image_url ||
-      item.original_image_url ||
-      item.image_url;
+    // Use the canonical resolver so we honour the same field-priority
+    // chain (incl. ``thumbnail_data_url``) the rest of the closet UI
+    // uses. Without this, items whose only image lives in
+    // ``thumbnail_data_url`` render — and pick up — as empty tiles.
+    const url = bestImageUrl(item);
     if (!url) {
       throw new Error(`No image URL for closet item ${item.id}`);
     }
-    const resp = await fetch(url, { credentials: 'include' });
+    // ``thumbnail_data_url`` is a base64 data URL — ``fetch`` handles
+    // that natively (no network), so the same code path works for both
+    // remote URLs and inline data URLs.
+    const resp = await fetch(url, {
+      credentials: url.startsWith('data:') ? 'omit' : 'include',
+    });
     if (!resp.ok) {
-      throw new Error(`Failed to fetch ${url}: ${resp.status}`);
+      throw new Error(`Failed to fetch ${url.slice(0, 60)}…: ${resp.status}`);
     }
     const blob = await resp.blob();
     // Pick an extension that matches the Content-Type when possible.
@@ -418,13 +423,12 @@ export function AttachmentPicker({
                   >
                     {filteredCloset.map((it) => {
                       const isSel = selectedIds.has(it.id);
-                      const src =
-                        it.reconstructed_image_url ||
-                        it.clean_image_url ||
-                        it.segmented_image_url ||
-                        it.original_image_url ||
-                        it.image_url ||
-                        null;
+                      // Canonical resolver — matches the priority chain
+                      // used by every other closet surface, including
+                      // ``thumbnail_data_url`` which the inline chain
+                      // here previously missed and which manifested as
+                      // empty tiles showing only the category label.
+                      const src = bestImageUrl(it);
                       return (
                         <button
                           type="button"
