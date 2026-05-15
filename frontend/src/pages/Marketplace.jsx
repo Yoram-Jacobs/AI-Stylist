@@ -10,11 +10,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SourceTagBadge } from '@/components/SourceTagBadge';
 import { Plus, MapPin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { StreamingProgressChip } from '@/components/StreamingProgressChip';
 import { api } from '@/lib/api';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useLocation as useAppLocation } from '@/lib/location';
 import { useAuth } from '@/lib/auth';
 import { browseStore, myListingsStore } from '@/lib/marketplaceStore';
+import { useMarketplaceProgress } from '@/lib/useMarketplaceProgress';
 import { useCachedList } from '@/lib/createCachedStore';
 import { toast } from 'sonner';
 
@@ -64,11 +66,52 @@ export default function Marketplace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.source, filters.category, filters.radius, loc?.coords?.lat, loc?.coords?.lng]);
 
-  const { items, loading, refreshing } = useCachedList(browseStore, browseParams);
+  const { items, loading, refreshing } = useCachedList(browseStore, browseParams, {
+    // Phase Z2.4 — opt out of the cached store's JSON revalidation
+    // because the streaming useEffect below populates the same slot
+    // via ``upsertItem`` as items arrive. If we let ``useCachedList``
+    // fire its own ``ensure(filters)``, we'd race the JSON fetcher
+    // against the NDJSON stream into the same slot.
+    revalidateOnMount: false,
+  });
   // ``refreshing`` lets us hint that a stale-while-revalidate refresh
   // is in flight without blanking the grid; we don't render a spinner
   // for it today but the value is exposed for future polish.
   void refreshing;
+
+  // Phase Z2.4 — progressive browse via NDJSON stream. Items appear
+  // as the server emits them, instead of all-at-once at the end of
+  // a JSON round-trip. The store handles abort-on-filter-change for
+  // us; we just kick a new stream every time ``browseParams`` flips.
+  // The grid stays subscribed via ``useCachedList`` above, so each
+  // ``upsertItem`` call inside the stream triggers a paint of one
+  // more card.
+  const { browse: browseProgress, streamBrowse } = useMarketplaceProgress();
+  useEffect(() => {
+    let cancelled = false;
+    const ac = new AbortController();
+    (async () => {
+      try {
+        await streamBrowse(browseParams, { signal: ac.signal });
+      } catch (err) {
+        if (!cancelled) {
+          // Surface only non-abort errors. Aborts are expected when
+          // the user changes filters quickly.
+          if (err?.name !== 'AbortError') {
+            // eslint-disable-next-line no-console
+            console.warn('Marketplace browse stream failed', err);
+          }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+    // ``streamBrowse`` is stable across renders (bound singleton).
+    // Re-run when the stable filter key changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(browseParams)]);
 
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10">
@@ -137,7 +180,11 @@ export default function Marketplace() {
             )}
           </div>
 
-          {loading && (
+          {/* Phase Z2.4 — show skeletons while the stream is in
+              flight AND we haven't received any item yet. Once the
+              first card lands, we paint the grid progressively so
+              the user feels the stream working. */}
+          {(loading || (browseProgress.running && items.length === 0)) && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i}><Skeleton className="aspect-[3/4] w-full rounded-[calc(var(--radius)+6px)]" /></div>
@@ -145,7 +192,11 @@ export default function Marketplace() {
             </div>
           )}
 
-          {!loading && items.length === 0 && (
+          {/* Empty-state guard now also excludes "stream hasn't
+              finished yet" so the user doesn't see a flash of
+              "No matching listings" while the first card is still
+              en-route. */}
+          {!loading && !browseProgress.running && items.length === 0 && (
             <div className="text-center py-16" data-testid="marketplace-empty-state">
               <h2 className="font-display text-2xl">{t('market.noMatching')}</h2>
               <p className="text-sm text-muted-foreground mt-2">{t('market.noMatchingSub')}</p>
@@ -216,7 +267,11 @@ function MyListings() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const [removingId, setRemovingId] = useState(null);
-  const [syncing, setSyncing] = useState(false);
+  // Phase Z2.4 — backfill now streams. ``syncing`` derives from the
+  // shared progress snapshot so multi-tab / repeated clicks behave
+  // consistently.
+  const { backfill: backfillProgress, streamBackfill } = useMarketplaceProgress();
+  const syncing = !!backfillProgress.running;
 
   // Filter object that drives the cached store. The same shape was
   // used in the prewarm at AppLayout boot — passing the exact same
@@ -257,36 +312,62 @@ function MyListings() {
   // One-shot rescue for users whose closet items have a
   // marketplace_intent set (swap/donate/for_sale) but never made it
   // to the marketplace — typically because they pre-date the
-  // auto-list pipeline. Idempotent on the server, so re-running is
-  // safe.
+  // auto-list pipeline.
+  //
+  // Phase Z2.4 — streams per-candidate progress so the chip ticks
+  // "Listed 12/47 · Skipped 2" live instead of showing a blank
+  // "Syncing…" spinner for a multi-second batch. Idempotent on the
+  // server, so re-running is safe; the new streaming endpoint
+  // invalidates both caches itself on completion (see
+  // ``marketplaceStore.streamBackfill``), so the page sees fresh
+  // data on the next render without an explicit refetch here.
   const syncMarketplace = async () => {
-    setSyncing(true);
+    // Track failures so we can surface a per-item toast at the end
+    // without making the chip itself responsible for error noise.
+    const failureMessages = [];
     try {
-      const res = await api.backfillMarketplaceListings();
-      const created = res?.created || 0;
-      const skipped = res?.skipped_existing || 0;
-      const synced = res?.source_synced || 0;
-      const candidates = res?.candidates || 0;
+      const done = await streamBackfill({
+        onItem: (ev) => {
+          if (ev?.status === 'failed' && ev?.title) {
+            failureMessages.push(`${ev.title}: ${ev.error || 'failed'}`);
+          }
+        },
+      });
+      if (!done) return; // already running — no-op
+      const candidates = done.candidates || 0;
+      const created = done.created || 0;
+      const skipped = done.skipped || 0;
+      const synced = done.source_synced || 0;
       if (candidates === 0) {
         toast.info(t('market.syncNoCandidates', {
           defaultValue: 'Nothing to sync — no closet items have a marketplace intent set.',
+        }));
+      } else if (created === 0 && synced === 0 && skipped === candidates) {
+        // Pure no-op rerun — keep the UX quiet.
+        toast.info(t('market.syncAlreadyDone', {
+          defaultValue: 'Already synced — every candidate is on the marketplace.',
         }));
       } else {
         toast.success(t('market.syncDone', {
           defaultValue: `Synced ${candidates} item(s): ${created} listed, ${skipped} already on marketplace${synced ? `, ${synced} re-flagged Shared` : ''}.`,
         }));
       }
-      // Sync may have created new listings server-side; bust both
-      // caches so the next render shows the fresh state.
+      if (failureMessages.length) {
+        toast.error(
+          t('market.syncSomeFailed', {
+            defaultValue: `${failureMessages.length} item(s) couldn't be listed: ${failureMessages[0]}`,
+            count: failureMessages.length,
+          }),
+        );
+      }
+      // The store's streamBackfill already invalidated both caches,
+      // but we force a refetch on the seller view so the new
+      // listings appear immediately rather than on the next visit.
       if (sellerFilters) {
-        myListingsStore.invalidate(sellerFilters);
         await myListingsStore.ensure(sellerFilters, { force: true });
       }
-      browseStore.invalidate();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || t('market.syncFailed', { defaultValue: 'Could not sync marketplace' }));
-    } finally {
-      setSyncing(false);
+      toast.error(err?.message || t('market.syncFailed', { defaultValue: 'Could not sync marketplace' }));
     }
   };
 
@@ -296,8 +377,42 @@ function MyListings() {
     <div className="space-y-4">
       {/* Top bar: sync rescue button + count */}
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-muted-foreground" data-testid="my-listings-count">
-          {t('market.myListingsCount', { count: items.length, defaultValue: `${items.length} listing${items.length === 1 ? '' : 's'}` })}
+        <div className="text-sm text-muted-foreground flex items-center gap-3" data-testid="my-listings-count">
+          <span>
+            {t('market.myListingsCount', { count: items.length, defaultValue: `${items.length} listing${items.length === 1 ? '' : 's'}` })}
+          </span>
+          {/* Phase Z2.4 — ambient streaming chip for the backfill
+              flow. Lives next to the count so it doesn't compete
+              with the primary "Sync" CTA on the right. Renders
+              nothing while idle and fades out automatically a few
+              seconds after completion. */}
+          <StreamingProgressChip
+            progress={backfillProgress}
+            runningLabel={t(
+              'market.backfill.running',
+              'Listing closet items… {{n}}/{{total}}',
+              { n: backfillProgress.scanned || 0, total: backfillProgress.total || '?' },
+            )}
+            successLabel={(() => {
+              const parts = [];
+              if (backfillProgress.created > 0) {
+                parts.push(t('market.backfill.created', '{{n}} listed', { n: backfillProgress.created }));
+              }
+              if (backfillProgress.skipped > 0) {
+                parts.push(t('market.backfill.skipped', '{{n}} already up', { n: backfillProgress.skipped }));
+              }
+              if (backfillProgress.source_synced > 0) {
+                parts.push(t('market.backfill.synced', '{{n}} reflagged', { n: backfillProgress.source_synced }));
+              }
+              return parts.join(' · ');
+            })()}
+            failureLabel={t('market.backfill.failed', 'Couldn’t sync marketplace')}
+            hasSuccessChanges={(p) =>
+              (p?.created || 0) + (p?.source_synced || 0) > 0 ||
+              ((p?.scanned || 0) > 0 && (p?.skipped || 0) > 0)
+            }
+            testId="market-backfill-chip"
+          />
         </div>
         <Button
           variant="outline"

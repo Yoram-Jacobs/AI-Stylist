@@ -561,7 +561,14 @@
     "removeListing": "Remove from marketplace",
     "listingRemoved": "Removed from marketplace",
     "removing": "Removing…",
-    "syncing": "Syncing…"
+    "syncing": "Syncing…",
+    "backfill": {
+      "running": "Listing closet items… {{n}}/{{total}}",
+      "created": "{{n}} listed",
+      "skipped": "{{n}} already up",
+      "synced": "{{n}} reflagged",
+      "failed": "Couldn’t sync marketplace"
+    }
   },
   "createListing": {
     "title": "Create a listing",

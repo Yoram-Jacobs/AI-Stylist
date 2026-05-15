@@ -561,7 +561,14 @@
     "removeListing": "Remover do marketplace",
     "listingRemoved": "Removido do marketplace",
     "removing": "A remover…",
-    "syncing": "A sincronizar…"
+    "syncing": "A sincronizar…",
+    "backfill": {
+      "running": "Anunciando itens do guarda-roupa… {{n}}/{{total}}",
+      "created": "{{n}} anunciados",
+      "skipped": "{{n}} já no ar",
+      "synced": "{{n}} reetiquetados",
+      "failed": "Não foi possível sincronizar o mercado"
+    }
   },
   "createListing": {
     "title": "Criar anúncio",

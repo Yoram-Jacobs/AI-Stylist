@@ -561,7 +561,14 @@
     "removeListing": "Vom Marktplatz entfernen",
     "listingRemoved": "Vom Marktplatz entfernt",
     "removing": "Wird entfernt…",
-    "syncing": "Synchronisierung…"
+    "syncing": "Synchronisierung…",
+    "backfill": {
+      "running": "Kleiderschrank-Artikel werden eingestellt… {{n}}/{{total}}",
+      "created": "{{n}} eingestellt",
+      "skipped": "{{n}} bereits aktiv",
+      "synced": "{{n}} neu markiert",
+      "failed": "Marktplatz-Sync fehlgeschlagen"
+    }
   },
   "createListing": {
     "title": "Inserat erstellen",

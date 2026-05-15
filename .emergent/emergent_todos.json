@@ -1,38 +1,34 @@
 [
   {
-    "content": "Read api.js & closet route registration to understand HTTP client + endpoint mount path",
+    "content": "Extract generic StreamingProgressChip from HashRepairChip; rewire closet chip to use it (no behaviour change)",
     "status": "completed"
   },
   {
-    "content": "Fix A — invert backfill priority in /preflight (server, server-side only)",
+    "content": "Backend M.1 — new POST /api/v1/closet/marketplace/backfill/stream (NDJSON, sibling endpoint for back-compat)",
     "status": "completed"
   },
   {
-    "content": "Backend B.1 — add image_hash.recompute_from_image helper that prefers original_image_url",
+    "content": "Backend M.2 — new GET /api/v1/listings/stream (NDJSON)",
     "status": "completed"
   },
   {
-    "content": "Backend B.2 — new POST /api/v1/closet/repair-hashes streaming endpoint (NDJSON)",
+    "content": "Frontend M.3 — api.streamMarketplaceBackfill() + api.streamListings() helpers",
     "status": "completed"
   },
   {
-    "content": "Frontend streaming infra — add streamNdjson helper in api.js",
+    "content": "Frontend M.4 — marketplaceStore gains backfillProgress + browseProgress snapshots + drive methods",
     "status": "completed"
   },
   {
-    "content": "Frontend B.3 — closetStore.repairHashes() consumes stream + updates repairProgress",
+    "content": "Frontend M.5 — wire Marketplace 'Sync from closet' button to streaming + show chip; opt-in stream for browse",
     "status": "completed"
   },
   {
-    "content": "Frontend B.4 — auto-trigger repair after prewarm (once per session, idempotent)",
+    "content": "i18n + lint sweep + smoke test (curl backend, screenshot frontend)",
     "status": "completed"
   },
   {
-    "content": "Frontend B.5 — non-blocking progress chip in Closet header",
-    "status": "completed"
-  },
-  {
-    "content": "i18n strings + lint sweep + smoke test (curl backend, screenshot frontend)",
+    "content": "Bug fix: abort-clears-slot race on rapid location/filter changes — dropped upfront invalidate, added seen-IDs prune-on-done",
     "status": "completed"
   }
 ]

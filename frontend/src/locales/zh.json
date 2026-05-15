@@ -561,7 +561,14 @@
     "removeListing": "从市场移除",
     "listingRemoved": "已从市场移除",
     "removing": "正在移除…",
-    "syncing": "正在同步…"
+    "syncing": "正在同步…",
+    "backfill": {
+      "running": "正在上架衣橱单品… {{n}}/{{total}}",
+      "created": "{{n}} 已上架",
+      "skipped": "{{n}} 已在售",
+      "synced": "{{n}} 重新标记",
+      "failed": "无法同步市场"
+    }
   },
   "createListing": {
     "title": "创建商品",

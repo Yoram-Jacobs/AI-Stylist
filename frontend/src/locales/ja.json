@@ -561,7 +561,14 @@
     "removeListing": "マーケットプレイスから削除",
     "listingRemoved": "マーケットプレイスから削除されました",
     "removing": "削除中…",
-    "syncing": "同期中…"
+    "syncing": "同期中…",
+    "backfill": {
+      "running": "クローゼットを出品中… {{n}}/{{total}}",
+      "created": "{{n}} 件出品",
+      "skipped": "{{n}} 件は既に出品中",
+      "synced": "{{n}} 件再タグ付け",
+      "failed": "マーケットの同期に失敗しました"
+    }
   },
   "createListing": {
     "title": "出品を作成",

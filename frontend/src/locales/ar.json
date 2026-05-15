@@ -561,7 +561,14 @@
     "removeListing": "إزالة من السوق",
     "listingRemoved": "تمت الإزالة من السوق",
     "removing": "جارٍ الإزالة…",
-    "syncing": "جارٍ المزامنة…"
+    "syncing": "جارٍ المزامنة…",
+    "backfill": {
+      "running": "إدراج عناصر الخزانة… {{n}}/{{total}}",
+      "created": "{{n}} مُدرج",
+      "skipped": "{{n}} موجود مسبقًا",
+      "synced": "{{n}} أعيد وسمه",
+      "failed": "تعذّر مزامنة السوق"
+    }
   },
   "createListing": {
     "title": "إنشاء إعلان",

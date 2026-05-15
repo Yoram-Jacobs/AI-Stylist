@@ -561,7 +561,14 @@
     "removeListing": "הסרה מהמרקטפלייס",
     "listingRemoved": "הוסר מהמרקטפלייס",
     "removing": "מסיר…",
-    "syncing": "מסנכרן…"
+    "syncing": "מסנכרן…",
+    "backfill": {
+      "running": "מעלה פריטים לארון לשוק… {{n}}/{{total}}",
+      "created": "{{n}} פורסמו",
+      "skipped": "{{n}} כבר באוויר",
+      "synced": "{{n}} סומנו מחדש",
+      "failed": "סנכרון השוק נכשל"
+    }
   },
   "createListing": {
     "title": "צור מודעה",

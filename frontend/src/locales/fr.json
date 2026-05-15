@@ -561,7 +561,14 @@
     "removeListing": "Retirer du marché",
     "listingRemoved": "Retiré du marché",
     "removing": "Retrait…",
-    "syncing": "Synchronisation…"
+    "syncing": "Synchronisation…",
+    "backfill": {
+      "running": "Mise en vente des articles… {{n}}/{{total}}",
+      "created": "{{n}} en vente",
+      "skipped": "{{n}} déjà en ligne",
+      "synced": "{{n}} re-marquées",
+      "failed": "Synchronisation impossible"
+    }
   },
   "createListing": {
     "title": "Créer une annonce",

@@ -1977,6 +1977,302 @@ async def backfill_marketplace_listings(
     }
 
 
+@router.post("/marketplace/backfill/stream")
+async def backfill_marketplace_listings_stream(
+    user: dict = Depends(get_current_user),
+):
+    """**NDJSON-streaming** counterpart to ``POST /marketplace/backfill``.
+
+    Same semantics — idempotent auto-listing of closet items whose
+    ``marketplace_intent`` is set but never made it onto the
+    marketplace — but emits one JSON line per candidate as it's
+    processed so the frontend can render live progress instead of
+    a "Syncing…" spinner with no feedback for 10+ seconds on a
+    50-item closet.
+
+    Why a sibling endpoint (and not a flag on the existing one)
+    ===========================================================
+    The existing JSON-returning endpoint is consumed by the current
+    Marketplace page button and may be hit by automation / tests. We
+    keep it as the back-compat path and add this sibling so:
+      * the streaming UI opts in by hitting ``/stream``;
+      * the legacy summary endpoint stays stable for anything that
+        depended on its exact response shape;
+      * rollback is trivial — just don't call /stream.
+
+    Wire format
+    ===========
+    ``application/x-ndjson``. One JSON object per line:
+
+      * ``{"type":"start", "total":N}`` — number of candidate closet
+        items the pipeline will visit. Use this to size the progress
+        UI before any item arrives.
+      * ``{"type":"item", "closet_item_id":"...",
+            "status":"created"|"skipped"|"source_synced"|"failed",
+            "listing_id":"..." | null,
+            "title":"...",
+            "error":"..." | null}``
+      * ``{"type":"done", "candidates":N, "created":N, "skipped":N,
+            "source_synced":N, "failed":N}``
+    """
+    from app.models.schemas import FinancialMetadata, Listing
+
+    db = get_db()
+    INTENT_TO_MODE = {"for_sale": "sell", "swap": "swap", "donate": "donate"}
+
+    candidates_cursor = db.closet_items.find(
+        {
+            "user_id": user["id"],
+            "marketplace_intent": {"$in": list(INTENT_TO_MODE.keys())},
+        },
+        {
+            "_id": 0,
+            "id": 1, "title": 1, "description": 1, "category": 1,
+            "size": 1, "condition": 1, "state": 1, "location": 1,
+            "marketplace_intent": 1, "price_cents": 1,
+            "thumbnail_data_url": 1, "segmented_image_url": 1,
+            "reconstructed_image_url": 1, "original_image_url": 1,
+            "auto_listing_id": 1, "source": 1,
+        },
+    )
+    candidates = await candidates_cursor.to_list(length=None)
+
+    # Condition vocabulary mapping — identical to the legacy endpoint.
+    # Kept inside the gen scope as a closure constant so a future
+    # tweak only needs one edit.
+    _COND_MAP = {
+        "excellent": "like_new",
+        "like_new": "like_new",
+        "new": "new",
+        "good": "good",
+        "fair": "fair",
+        "bad": "fair",
+    }
+
+    async def gen():
+        yield (
+            json.dumps({"type": "start", "total": len(candidates)})
+            + "\n"
+        )
+
+        created = 0
+        updated_source = 0
+        skipped_existing = 0
+        failed = 0
+
+        for item in candidates:
+            cid = item.get("id")
+            title = item.get("title") or "Untitled"
+
+            try:
+                existing = await db.listings.find_one(
+                    {
+                        "closet_item_id": cid,
+                        "seller_id": user["id"],
+                        "status": {"$in": ["draft", "active", "reserved"]},
+                    },
+                    {"_id": 0, "id": 1},
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "failed",
+                            "listing_id": None,
+                            "title": title,
+                            "error": f"lookup:{exc.__class__.__name__}",
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            if existing:
+                existing_id = existing["id"]
+                status = "skipped"
+                # Mirror legacy behaviour: keep ``source`` consistent
+                # with the existence of an active listing so the
+                # closet filters keep showing the item under "Shared".
+                if item.get("source") != "Shared":
+                    try:
+                        await db.closet_items.update_one(
+                            {"id": cid, "user_id": user["id"]},
+                            {"$set": {
+                                "source": "Shared",
+                                "auto_listing_id": existing_id,
+                            }},
+                        )
+                        updated_source += 1
+                        status = "source_synced"
+                    except Exception as exc:  # noqa: BLE001
+                        failed += 1
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "item",
+                                    "closet_item_id": cid,
+                                    "status": "failed",
+                                    "listing_id": existing_id,
+                                    "title": title,
+                                    "error": (
+                                        f"source_sync:"
+                                        f"{exc.__class__.__name__}"
+                                    ),
+                                }
+                            )
+                            + "\n"
+                        )
+                        await asyncio.sleep(0)
+                        continue
+                skipped_existing += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": status,
+                            "listing_id": existing_id,
+                            "title": title,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+                await asyncio.sleep(0)
+                continue
+
+            # No existing listing — create one. The image-source
+            # priority chain mirrors the legacy backfill so the
+            # listing card has the best available picture; the
+            # thumbnail-first ordering is fine HERE because Listings
+            # don't participate in duplicate-fingerprinting (unlike
+            # the closet hashes, which is why /repair-hashes inverted
+            # that chain).
+            try:
+                images: list[str] = []
+                for fld in (
+                    "thumbnail_data_url",
+                    "segmented_image_url",
+                    "reconstructed_image_url",
+                    "original_image_url",
+                ):
+                    url = item.get(fld)
+                    if isinstance(url, str) and url:
+                        images.append(url)
+                        break
+
+                mode = INTENT_TO_MODE[item["marketplace_intent"]]
+                price_cents = (
+                    int(item.get("price_cents") or 0)
+                    if mode == "sell"
+                    else 0
+                )
+                raw_cond = (
+                    item.get("condition") or item.get("state") or "good"
+                )
+                listing_condition = _COND_MAP.get(raw_cond, "good")
+                listing = Listing(
+                    closet_item_id=cid,
+                    seller_id=user["id"],
+                    source="Shared",
+                    mode=mode,
+                    title=title,
+                    description=item.get("description"),
+                    category=item.get("category") or "Top",
+                    size=item.get("size"),
+                    condition=listing_condition,
+                    images=images,
+                    location=item.get("location"),
+                    financial_metadata=FinancialMetadata(
+                        list_price_cents=price_cents,
+                        currency="USD",
+                        platform_fee_percent=0.0,
+                        estimated_seller_net_cents=0,
+                    ),
+                    auto_created=True,
+                    status="active",
+                )
+                await repos.insert(db.listings, listing.model_dump())
+                await db.closet_items.update_one(
+                    {"id": cid, "user_id": user["id"]},
+                    {"$set": {
+                        "source": "Shared",
+                        "auto_listing_id": listing.id,
+                        "auto_listing_needs_completion": True,
+                    }},
+                )
+                created += 1
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "created",
+                            "listing_id": listing.id,
+                            "title": title,
+                            "error": None,
+                        }
+                    )
+                    + "\n"
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                logger.warning(
+                    "backfill stream: listing creation failed for "
+                    "closet %s: %s",
+                    cid, exc,
+                )
+                yield (
+                    json.dumps(
+                        {
+                            "type": "item",
+                            "closet_item_id": cid,
+                            "status": "failed",
+                            "listing_id": None,
+                            "title": title,
+                            "error": exc.__class__.__name__,
+                        }
+                    )
+                    + "\n"
+                )
+            await asyncio.sleep(0)
+
+        logger.info(
+            "marketplace backfill (stream) user=%s created=%d "
+            "source_synced=%d skipped=%d failed=%d candidates=%d",
+            user["id"], created, updated_source, skipped_existing,
+            failed, len(candidates),
+        )
+        yield (
+            json.dumps(
+                {
+                    "type": "done",
+                    "candidates": len(candidates),
+                    "created": created,
+                    "skipped": skipped_existing,
+                    "source_synced": updated_source,
+                    "failed": failed,
+                }
+            )
+            + "\n"
+        )
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache, no-transform",
+        },
+    )
+
+
+
+
 class SearchIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str | None = None

@@ -561,7 +561,14 @@
     "removeListing": "Rimuovi dal marketplace",
     "listingRemoved": "Rimosso dal marketplace",
     "removing": "Rimozione in corso…",
-    "syncing": "Sincronizzazione in corso…"
+    "syncing": "Sincronizzazione in corso…",
+    "backfill": {
+      "running": "Pubblicazione articoli dell’armadio… {{n}}/{{total}}",
+      "created": "{{n}} pubblicati",
+      "skipped": "{{n}} già attivi",
+      "synced": "{{n}} ri-contrassegnati",
+      "failed": "Impossibile sincronizzare il mercato"
+    }
   },
   "createListing": {
     "title": "Crea annuncio",
