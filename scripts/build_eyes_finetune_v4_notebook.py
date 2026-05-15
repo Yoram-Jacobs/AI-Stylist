@@ -1355,7 +1355,8 @@ second LoRA and stack it via repeated `--lora` flags.
 
 CODE_MERGE = """\
 # Save the adapter only -- skip the merge entirely.
-import shutil, pathlib
+import re, shutil, pathlib
+from peft import PeftModel
 
 LOCAL_BASE  = pathlib.Path('/content/eyes_v4_local')
 ADAPTER_DIR = LOCAL_BASE / 'adapter'
@@ -1364,26 +1365,71 @@ if ADAPTER_DIR.exists():
     shutil.rmtree(ADAPTER_DIR)
 ADAPTER_DIR.mkdir(parents=True)
 
-# model.save_pretrained() on a PeftModel saves ONLY the adapter
-# (adapter_config.json + adapter_model.safetensors). That's exactly
-# what we need for convert_lora_to_gguf.py.
-model.save_pretrained(str(ADAPTER_DIR))
 
-print('Adapter files:')
-for p in sorted(ADAPTER_DIR.iterdir()):
-    print(f'  {p.name}  {p.stat().st_size // 1024} KB')
+def _try_inmem_save():
+    \"\"\"First attempt: model.save_pretrained() on a PeftModel saves
+    just the adapter. Returns True if the saved safetensors are
+    non-empty (> 1 KB). False indicates the in-memory adapter has
+    already been merged in place and contains no deltas.\"\"\"
+    if not isinstance(model, PeftModel):
+        return False
+    model.save_pretrained(str(ADAPTER_DIR))
+    sf = ADAPTER_DIR / 'adapter_model.safetensors'
+    return sf.exists() and sf.stat().st_size > 1024
 
-# Sanity: adapter_model.safetensors must be > 0 KB. If it is empty,
-# the LoRA weights were already merged in place by an earlier
-# merge_adapter() call -- the only way to recover is to restart and
-# reload the latest trainer checkpoint.
-adapter_sf = ADAPTER_DIR / 'adapter_model.safetensors'
-if adapter_sf.stat().st_size < 1024:
-    raise RuntimeError(
-        'adapter_model.safetensors is empty -- adapter weights were '
-        'already merged. Restart kernel and reload the latest trainer '
-        f'checkpoint from {OUT_RUN}/checkpoint-* before re-running this cell.'
+
+def _from_disk_checkpoint():
+    \"\"\"Fallback: the in-memory adapter is empty (an earlier
+    merge_adapter() call baked the LoRA deltas into the base
+    linears). Recover by copying the highest-step on-disk checkpoint
+    from {OUT_RUN}/checkpoint-* — those snapshots have un-merged
+    adapters frozen at the step they were saved.\"\"\"
+    ckpts = sorted(
+        pathlib.Path(OUT_RUN).glob('checkpoint-*'),
+        key=lambda p: int(re.search(r'checkpoint-(\\d+)', p.name).group(1)),
     )
+    if not ckpts:
+        raise RuntimeError(
+            f'No checkpoints found in {OUT_RUN}. Re-train.'
+        )
+
+    # Walk newest -> oldest until we find a non-empty adapter.
+    chosen = None
+    for ck in reversed(ckpts):
+        sf = ck / 'adapter_model.safetensors'
+        if sf.exists() and sf.stat().st_size > 1024:
+            chosen = ck
+            break
+    if chosen is None:
+        raise RuntimeError(
+            'All checkpoints have empty adapter files. Re-train.'
+        )
+    print(f'Recovering adapter from on-disk checkpoint: {chosen.name}')
+
+    # Wipe and refill ADAPTER_DIR
+    if ADAPTER_DIR.exists():
+        shutil.rmtree(ADAPTER_DIR)
+    ADAPTER_DIR.mkdir(parents=True)
+    keep = ('adapter_', 'tokenizer', 'special_tokens', 'chat_template', 'README')
+    for p in chosen.iterdir():
+        if p.is_file() and p.name.startswith(keep):
+            shutil.copy2(p, ADAPTER_DIR / p.name)
+
+
+if _try_inmem_save():
+    print('In-memory adapter saved.')
+else:
+    print('In-memory adapter is empty (merged in place); falling back to '
+          'on-disk checkpoint recovery...')
+    _from_disk_checkpoint()
+
+print('\\nFinal adapter files:')
+for p in sorted(ADAPTER_DIR.iterdir()):
+    print(f'  {p.name:40s} {p.stat().st_size // 1024} KB')
+
+sf_final = ADAPTER_DIR / 'adapter_model.safetensors'
+assert sf_final.exists() and sf_final.stat().st_size > 1024, \\
+    f'adapter_model.safetensors empty/missing ({sf_final.stat().st_size} bytes)'
 """
 
 CODE_GGUF_BUILD = """\
