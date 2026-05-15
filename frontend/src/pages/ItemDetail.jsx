@@ -639,8 +639,21 @@ export default function ItemDetail() {
       const res = await api.cleanItemBackground(id);
       if (res.applied) {
         toast.success(t('itemDetail.cleanBackground.success'));
+        // Phase Z2.6 — only refresh the baseline ``item`` so the
+        // image preview picks up the new ``reconstructed_image_url``.
+        // We intentionally DO NOT call ``setForm(toFormState(...))``
+        // here — that would clobber any pending field edits the user
+        // had in flight (title, condition, colour, marketplace
+        // intent…), and would re-align ``form`` with the new baseline
+        // such that ``diffPatch`` returns ``{}`` and the Save button
+        // disables even though the user *did* have unsaved changes.
+        //
+        // The ``patch`` memo below recomputes against the new
+        // ``item`` baseline, so the user's editable-field drafts
+        // remain visible AND still register as dirty. Image URLs are
+        // not part of the form schema, so the swap has no spurious
+        // side-effect on ``isDirty``.
         setItem(res.item);
-        setForm(toFormState(res.item, user));
         setCleanBackgroundHint('');
       } else {
         toast.warning(res.detail || t('itemDetail.cleanBackground.rejected'));

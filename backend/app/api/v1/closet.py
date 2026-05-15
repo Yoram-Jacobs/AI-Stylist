@@ -254,11 +254,22 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
     )
     await db.closet_items.update_one(
         {"id": item_id},
-        {"$set": {
-            "clean_image_url": data_url,
-            "clean_image_status": "ready",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {
+            "$set": {
+                "clean_image_url": data_url,
+                "clean_image_status": "ready",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            # Invalidate the cached thumbnail so the next ``GET
+            # /closet`` regenerates it from the clean rembg PNG via
+            # ``pick_source_data_url`` (which lists ``clean_image_url``
+            # ahead of ``original_image_url``). Without this $unset,
+            # the original-background JPEG thumbnail would persist
+            # forever even though rembg succeeded — the visible
+            # symptom of "items keep their full background after
+            # save" reported as Z2.6 bug 1.
+            "$unset": {"thumbnail_data_url": ""},
+        },
     )
     logger.info(
         "Background rembg matte READY for item %s (%d bytes png)",

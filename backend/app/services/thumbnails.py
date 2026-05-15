@@ -134,14 +134,33 @@ def make_thumb_from_data_url(data_url: str) -> str | None:
 
 
 def pick_source_data_url(item: dict[str, Any]) -> str | None:
-    """Return the best image URL on an item for thumbnail purposes.
+    """Return the highest-fidelity data URL we have for ``item``.
 
-    Priority: reconstructed (cleanest) → segmented → original.
-    Only returns values that look like ``data:image/...`` URLs; anything
-    already pointing at a CDN is passed through untouched elsewhere.
+    Priority (best to worst):
+
+      1. ``reconstructed_image_url`` — Nano-Banana / studio reshoot.
+         Hand-edited, highest quality, opaque PNG.
+      2. ``clean_image_url`` — rembg background matte (Phase O.6
+         deferred BackgroundTask). Transparent PNG, background
+         removed, no semantic refinement. *Added in May 2026 — this
+         entry was previously missing, which caused every item that
+         went through the deferred-rembg pipeline to keep its
+         full-background JPEG bbox thumbnail forever even after
+         rembg succeeded.*
+      3. ``segmented_image_url`` — legacy synchronous SegFormer
+         cutout. Pre-Phase-O.6 path; rare on new items but still
+         valid for older ones.
+      4. ``original_image_url`` — the raw upload / bbox crop with
+         full background. The "we tried our best, here's what we
+         got" fallback.
+
+    Only returns values that look like ``data:image/...`` URLs;
+    anything already pointing at a CDN is passed through untouched
+    elsewhere.
     """
     for key in (
         "reconstructed_image_url",
+        "clean_image_url",
         "segmented_image_url",
         "original_image_url",
     ):
