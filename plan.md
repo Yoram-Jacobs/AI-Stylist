@@ -335,7 +335,7 @@ Delivered previously; unchanged.
 
 ---
 
-## Phase S1 — Stylist sees the photo (P0 / backend)
+## Phase S1 — Stylist sees the photo (P0 / backend) **(✅ COMPLETE)**
 
 ### Implementation
 - Patch `app/backend/app/services/gemini_stylist.py`:
@@ -356,7 +356,7 @@ Delivered previously; unchanged.
 
 ---
 
-## Phase S2 — Unified attachment picker with closet multi-select (P0 / frontend)
+## Phase S2 — Unified attachment picker with closet multi-select (P0 / frontend) **(✅ COMPLETE)**
 
 ### Implementation
 - New component: `/app/frontend/src/components/stylist/AttachmentPicker.jsx`
@@ -389,7 +389,7 @@ Delivered previously; unchanged.
 
 ---
 
-## Phase S3 — Side-sheet item floater on thumbnail click (P1 / frontend)
+## Phase S3 — Side-sheet item floater on thumbnail click (P1 / frontend) **(✅ COMPLETE)**
 
 ### Implementation
 - New component: `/app/frontend/src/components/stylist/ItemFloater.jsx`
@@ -417,7 +417,7 @@ Delivered previously; unchanged.
 
 ---
 
-## Phase S4 — Smoke tests + lint (P0)
+## Phase S4 — Smoke tests + lint (P0) **(✅ COMPLETE)**
 
 - Backend:
   - Ruff lint

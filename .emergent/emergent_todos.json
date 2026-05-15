@@ -4,23 +4,15 @@
     "status": "completed"
   },
   {
-    "content": "Phase S3: ItemFloater + OutfitRecommendationCard wiring + Stylist mount + OutfitCompletionSheet wiring",
+    "content": "Phase S2: AttachmentPicker.jsx + wire into Stylist composer",
     "status": "completed"
   },
   {
-    "content": "Phase S2: AttachmentPicker.jsx component",
+    "content": "Phase S3: ItemFloater + wiring across Stylist + OutfitCompletionSheet",
     "status": "completed"
   },
   {
-    "content": "Phase S2: Wire AttachmentPicker into Stylist.jsx composer (replaces bare <input type=file>)",
+    "content": "Phase S4: testing_agent smoke (backend 100% + frontend 95%) + manual S3 e2e verification on Casual Dinner Outfit session",
     "status": "completed"
-  },
-  {
-    "content": "Phase S2: visual confirmation — picker opens, both tabs render, 66 closet tiles visible, counters live",
-    "status": "completed"
-  },
-  {
-    "content": "Phase S4: testing_agent smoke (Playwright) — full chain",
-    "status": "in_progress"
   }
 ]
