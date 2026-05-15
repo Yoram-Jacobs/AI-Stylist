@@ -1,22 +1,30 @@
 [
   {
-    "content": "Explore /app/backend/app/services/ and closet.py to understand existing analyze flow",
+    "content": "Rewrite /app/inference-server/eyes/main.py — Transformers+PEFT engine, int4, /predict + /transcribe",
     "status": "completed"
   },
   {
-    "content": "Write local_eyes_runtime.py with PEFT-based Gemma-4 + Eyes-LoRA inference",
+    "content": "Pin /app/inference-server/eyes/requirements.txt",
     "status": "completed"
   },
   {
-    "content": "Wire closet.py: under EYES_LOCAL=true, route ONE-PASS branch through local_eyes_runtime",
+    "content": "Rewrite /app/inference-server/eyes/Dockerfile",
     "status": "completed"
   },
   {
-    "content": "Add EYES_LOCAL to config.py / .env.example, lazy-import the runtime module",
+    "content": "Lint inference-server/eyes/main.py with ruff — passed",
     "status": "completed"
   },
   {
-    "content": "Verify backend lints + starts cleanly with EYES_LOCAL unset",
+    "content": "Smoke-test routes via TestClient — / 200, /healthz 503, /predict 503, /transcribe 503",
     "status": "completed"
+  },
+  {
+    "content": "Update /app/inference-server/eyes/V4_DEPLOY.md with deployment runbook",
+    "status": "completed"
+  },
+  {
+    "content": "Phase V4.1 review with user before moving to V4.2 backend STT wiring",
+    "status": "in_progress"
   }
 ]
