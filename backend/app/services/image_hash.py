@@ -44,6 +44,23 @@ _HASH_SIZE = 8
 # false positives.
 DEFAULT_HAMMING_THRESHOLD = 6
 
+# Stricter threshold used ONLY when the colour gate cannot apply
+# (either side missing ``source_color_sig``). 8×8 aHash on
+# greyscale is essentially "silhouette + brightness pattern": two
+# *different* white garments on contrasting backgrounds reliably
+# land within Hamming 4–6 of each other because both reduce to
+# "bright blob centre, darker corners". The colour gate normally
+# rescues that case, but legacy items predate the Z2.2 colour-sig
+# backfill and ship with ``source_color_sig=None``. Without
+# tightening here, every photo of a white garment uploaded into a
+# closet that contains *any* pre-Z2.2 white garment ends up
+# flagged as a duplicate — which is the
+# ``White polo == White graphic tee`` bug observed in production.
+# 3 bits ≈ 4.7%: empirically separates "re-upload of the same
+# photo with JPEG re-encoding" (≤ 3) from "different garment,
+# similar shape" (≥ 5).
+DEFAULT_HAMMING_THRESHOLD_STRICT = 3
+
 # Colour signature: average RGB per quadrant → 4 quadrants × 3 channels
 # = 12 bytes = 24 hex chars. Manhattan distance is on the raw byte
 # values (0–255). 220 ≈ "noticeably different colour family" empirically:
@@ -225,29 +242,45 @@ def is_duplicate_match(
     color_b: str | None,
     *,
     hamming_threshold: int = DEFAULT_HAMMING_THRESHOLD,
+    hamming_threshold_strict: int = DEFAULT_HAMMING_THRESHOLD_STRICT,
     color_threshold: int = DEFAULT_COLOR_THRESHOLD,
 ) -> bool:
     """Single source of truth for "are these two images duplicates?".
 
     Decision tree:
       1. Exact SHA-256 match → duplicate (re-upload of the exact bytes).
-      2. Shape similar (Hamming ≤ threshold) AND
-         (no colour sigs available OR colour distance ≤ threshold) → duplicate.
-      3. Otherwise → not a duplicate.
+      2. Both sides have a colour signature:
+         shape similar (Hamming ≤ ``hamming_threshold``) AND
+         colour distance ≤ ``color_threshold`` → duplicate.
+      3. At least one side lacks a colour signature:
+         shape similar under the **strict** threshold
+         (Hamming ≤ ``hamming_threshold_strict``) → duplicate.
+      4. Otherwise → not a duplicate.
 
     Rule (2)'s colour gate is the fix for "navy shorts flagged as a
-    duplicate of grey shorts of the same cut". When *neither* side has
-    a colour signature we fall back to phash-only behaviour for
-    backwards compatibility with rows that pre-date the colour-sig
-    backfill.
+    duplicate of grey shorts of the same cut".
+
+    Rule (3) is the fix for "white polo flagged as a duplicate of a
+    white graphic tee" — the closet item predates the Z2.2 colour-sig
+    backfill, so ``color_b`` is ``None`` and the old code fell back to
+    rule (2)'s lenient threshold without the gate. Requiring the
+    strict threshold instead means perceptual-only matches must be
+    *much* closer in silhouette/brightness before we declare them a
+    duplicate, which is the only honest thing to do with no colour
+    information.
     """
     if sha_a and sha_b and sha_a == sha_b:
         return True
     if not phash_a or not phash_b:
         return False
-    if hamming_distance(phash_a, phash_b) > hamming_threshold:
+    have_both_colors = bool(color_a) and bool(color_b)
+    effective_threshold = (
+        hamming_threshold if have_both_colors else hamming_threshold_strict
+    )
+    if hamming_distance(phash_a, phash_b) > effective_threshold:
         return False
-    # Shape says "match"; gate on colour if we have it.
-    if color_a and color_b:
+    if have_both_colors:
         return color_distance(color_a, color_b) <= color_threshold
+    # No colour gate available, but we already required the strict
+    # Hamming threshold above, so we can declare a match here.
     return True

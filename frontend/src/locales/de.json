@@ -245,7 +245,7 @@
     },
     "preflight": {
       "title": "{{count}} deiner ausgewählten Fotos scheinen Duplikate zu sein",
-      "body": "Diese exakten Dateien existieren bereits in deinem Closet. Überspringe sie — oder klicke auf den roten ⭐, um sie trotzdem hinzuzufügen. Der „Stylist Brain“ wird markierte Duplikate bei Outfit-Vorschlägen auslassen, damit nicht dasselbe Kleidungsstück zweimal empfohlen wird.",
+      "body": "Diese Fotos sehen Artikeln in deinem Kleiderschrank sehr ähnlich. Überspringe sie — oder klicke auf den roten ⭐, um sie trotzdem hinzuzufügen. Das Stylist Brain lässt mit Stern markierte Duplikate bei Outfit-Vorschlägen aus, damit dasselbe Kleidungsstück nicht zweimal empfohlen wird.",
       "existing": "im Closet",
       "incoming": "neuer Upload",
       "noThumb": "keine Vorschau",

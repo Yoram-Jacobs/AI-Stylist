@@ -231,7 +231,7 @@
     },
     "preflight": {
       "title": "{{count}} das suas fotos selecionadas parecem duplicadas",
-      "body": "Estes ficheiros exatos já existem no seu armário. Ignore-os — ou clique na ⭐ vermelha para adicionar mesmo assim. O Cérebro Estilista deixará os duplicados marcados fora das sugestões de looks para não poder recomendar a mesma peça duas vezes.",
+      "body": "Estas fotos parecem muito com peças que já estão no seu guarda-roupa. Pule-as — ou clique na estrela vermelha ⭐ para adicionar mesmo assim. O Stylist Brain manterá as duplicatas marcadas com estrela fora das sugestões de looks para não recomendar a mesma peça duas vezes.",
       "existing": "no armário",
       "incoming": "novo carregamento",
       "noThumb": "sem pré-visualização",

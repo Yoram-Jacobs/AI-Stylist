@@ -102,7 +102,7 @@ export default function DuplicatePreflightDialog({
           <DialogDescription>
             {t("addItem.preflight.body", {
               defaultValue:
-                "These exact files already exist in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
+                "These photos look very similar to items already in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
             })}
           </DialogDescription>
         </DialogHeader>

@@ -180,7 +180,7 @@
     },
     "preflight": {
       "title": "{{count}} of your selected photos look like duplicates",
-      "body": "These exact files already exist in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
+      "body": "These photos look very similar to items already in your closet. Skip them — or click the red ⭐ to add anyway. The Stylist Brain will leave starred duplicates out of outfit suggestions so it can't recommend the same garment twice.",
       "existing": "in closet",
       "incoming": "new upload",
       "noThumb": "no preview",
