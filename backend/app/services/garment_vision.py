@@ -187,17 +187,16 @@ async def _call_gemma_space(
 
 SYSTEM_PROMPT = (
     "You are The Eyes \u2014 DressApp's visual garment analyst. You look at "
-    "a clothing photograph (which may contain one or more garments) and "
+    "a photograph. If there are garments present in the photograph, analyse the photogaph (which may contain one or more garments) and "
     "describe each item in exhaustive, merchandisable detail. Your output "
     "is used to auto-fill an Add-Item form that a user will review, so be "
     "confident but never invent sensitive claims (e.g. do not guess a "
     "specific brand unless clearly visible; leave brand blank otherwise).\n\n"
     "Return ONLY a JSON value with one of two shapes:\n"
     "  \u2022 a single JSON object when one garment is visible, or\n"
-    "  \u2022 a JSON array of such objects when multiple garments are visible.\n"
-    "Always return at least one garment object \u2014 the photograph is a "
-    "user-uploaded clothing photo, so a garment is present. Never wrap "
-    "the result in extra commentary or markdown.\n\n"
+    "  \u2022 a JSON array of such objects when multiple garments are visible, or\n"
+    "  \u2022 a 'No Garments detected' message\n"
+    " Never wrap the result in extra commentary or markdown.\n"
     "Each garment object has the following shape (all keys optional except "
     "`title`):\n"
     "{\n"
@@ -1815,11 +1814,28 @@ class GarmentVisionService:
             self._bbox_crop_useful, image_bytes, useful,
         )
 
-        # 5) Matte if enabled; otherwise keep raw JPEG crops.
-        if settings.AUTO_MATTE_CROPS and raw_crops:
+        # 5) Matte if enabled. Patch 8 (May 2026): when
+        # ``settings.DEFER_REMBG_ON_ANALYZE`` is True (default), we
+        # skip the synchronous serial rembg pass entirely and return
+        # raw JPEG bbox crops. The /closet save endpoint queues the
+        # matte as a BackgroundTask per item, identical to the
+        # Phase-O.6 single-pass path. This is the dominant win for
+        # the analyze latency budget (saves ~10-30s per crop, serial).
+        defer_matte = (
+            settings.DEFER_REMBG_ON_ANALYZE
+            and settings.AUTO_MATTE_CROPS
+            and bool(raw_crops)
+        )
+        if settings.AUTO_MATTE_CROPS and raw_crops and not defer_matte:
             crops = await self._matte_crops(raw_crops)
         else:
             crops = raw_crops
+            if defer_matte:
+                logger.info(
+                    "analyze_outfit: deferring rembg for %d crop(s) to "
+                    "post-save BackgroundTask (DEFER_REMBG_ON_ANALYZE=true)",
+                    len(raw_crops),
+                )
 
         if not crops:
             # Every crop was rejected (tiny / invalid bbox).
@@ -1835,6 +1851,14 @@ class GarmentVisionService:
         if not items:
             single = await self.analyze(image_bytes, think=think)
             return [self._build_fullframe_item(single, image_bytes)]
+
+        # Patch 8 marker: flag every item so the /closet save endpoint
+        # knows it must queue a rembg BackgroundTask for this crop
+        # (the matte was intentionally skipped here to keep the
+        # /analyze response under the 30s UX budget).
+        if defer_matte:
+            for it in items:
+                it["defer_matte"] = True
 
         logger.info(
             "analyze_outfit OK detected=%d analysed=%d labels=%s",
@@ -1857,6 +1881,18 @@ class GarmentVisionService:
     ) -> list[dict[str, Any]]:
         """End-to-end multi-item pipeline in a SINGLE Eyes call.
 
+        **RETIRED (May 2026) — benchmark / experimentation use only.**
+        The CCP-Ninja benchmark (``/app/scripts/run_eyes_benchmark.py``)
+        showed Gemini-2.5-Flash will not emit multi-garment arrays
+        reliably: on all 30 test images it returned exactly one garment
+        per call, collapsing recall to ~10%. Three prompt rewrites did
+        not move the dial. The function is kept here so the benchmark
+        script and any future fine-tuned-Eyes experiments can still
+        invoke it, but production now always calls :meth:`analyze_outfit`
+        (SegFormer + per-crop Eyes), which scores ~0.71 mean IoU and
+        ~0.41 recall on the same dataset. The closet ``/analyze`` route
+        no longer reads ``EYES_ONE_PASS``.
+
         Sends the original photo straight to ``analyze(one_pass=True)``,
         which returns either a single garment object (already-cropped
         product photo) or an array of garment objects (multi-item
@@ -1864,14 +1900,6 @@ class GarmentVisionService:
         normalised grid; we crop the original image to each bbox to
         produce per-garment JPEGs that the frontend can render
         immediately.
-
-        Replaces, on the hot path:
-          • the SegFormer / Gemini detection step,
-          • the rembg matte-as-precondition step,
-          • the Nano-Banana reconstruction + re-validation step.
-
-        rembg + reconstruction are deferred to user-initiated endpoints
-        downstream of ``/save`` — see ``EYES_ONE_PASS_PROPOSAL.md``.
 
         Output shape matches :meth:`analyze_outfit` exactly so the
         ``/closet/analyze`` endpoint can swap implementations without

@@ -1,14 +1,22 @@
 [
   {
-    "content": "Fix orphan repair*/onRepair refs in ItemDetail.jsx",
+    "content": "Explore /app/backend/app/services/ and closet.py to understand existing analyze flow",
     "status": "completed"
   },
   {
-    "content": "Register EYES_ONE_PASS=false in deploy/.env.example",
+    "content": "Write local_eyes_runtime.py with PEFT-based Gemma-4 + Eyes-LoRA inference",
     "status": "completed"
   },
   {
-    "content": "Run testing agent (backend + frontend) to verify legacy hot path & renamed UI states",
+    "content": "Wire closet.py: under EYES_LOCAL=true, route ONE-PASS branch through local_eyes_runtime",
+    "status": "completed"
+  },
+  {
+    "content": "Add EYES_LOCAL to config.py / .env.example, lazy-import the runtime module",
+    "status": "completed"
+  },
+  {
+    "content": "Verify backend lints + starts cleanly with EYES_LOCAL unset",
     "status": "completed"
   }
 ]

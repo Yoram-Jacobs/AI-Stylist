@@ -138,6 +138,15 @@ class CreateItemIn(BaseModel):
     # omit this field and the synchronous SegFormer path runs as
     # before.
     from_one_pass: bool = False
+    # Patch 8 (May 2026) — legacy ``/analyze`` (multi-crop SegFormer
+    # path) now also defers rembg by default (``settings.DEFER_REMBG_ON_ANALYZE=true``).
+    # Each item in the response carries ``defer_matte=true`` and the
+    # frontend echoes it back on save so we queue the same
+    # ``_run_background_matte`` task that the Phase-O.6 path uses.
+    # Functionally equivalent to ``from_one_pass=True`` for the save
+    # endpoint's purposes; kept as a separate field for clearer logs
+    # and so the two paths can be enabled / disabled independently.
+    defer_matte: bool = False
 
 
 class UpdateItemIn(BaseModel):
@@ -322,6 +331,22 @@ async def create_item(
     )
     doc = item.model_dump()
 
+    # Patch 7 (May 2026) — restore the closet thumbnail for legacy
+    # uploads. ``AddItem.buildCreatePayload`` sends the per-garment crop
+    # in ``image_base64`` (cheaper than re-encoding it twice into a
+    # data URL on the wire), and historically the HF-segmentation
+    # branch populated ``segmented_image_url`` as a side effect so the
+    # missing ``original_image_url`` went unnoticed. After Patch 4
+    # removed HF, every legacy (``from_one_pass=False``) save would
+    # land with NO image URL at all and the Closet card would render
+    # blank. Derive ``original_image_url`` from ``image_base64`` here
+    # whenever the client didn't ship one explicitly.
+    if raw_bytes and not doc.get("original_image_url") and payload.image_base64:
+        _mime = payload.image_mime or "image/jpeg"
+        doc["original_image_url"] = (
+            f"data:{_mime};base64,{payload.image_base64}"
+        )
+
     # Phase Z2.1 — if the client didn't compute a phash (older client,
     # camera capture, etc.) AND we have raw bytes here, compute one
     # server-side so this item is immediately searchable by /preflight
@@ -357,7 +382,14 @@ async def create_item(
     # ``clean_image_url`` a few seconds later. Legacy clients (no
     # ``from_one_pass`` flag) keep the existing synchronous SegFormer
     # path bit-for-bit.
-    if payload.from_one_pass and raw_bytes:
+    #
+    # Patch 8 (May 2026) — the legacy multi-crop ``/analyze`` path now
+    # *also* defers rembg (``settings.DEFER_REMBG_ON_ANALYZE``). The
+    # analyzer marks each item with ``defer_matte=true`` and the
+    # frontend echoes it here so we queue the same background task as
+    # the one-pass path. Either flag triggers the same code.
+    needs_bg_matte = (payload.from_one_pass or payload.defer_matte) and raw_bytes
+    if needs_bg_matte:
         doc["clean_image_status"] = "pending"
         # Snapshot what the background task needs: the item id and the
         # raw bytes. We do NOT capture ``doc`` directly because the
@@ -815,31 +847,39 @@ async def analyze_item_image(
         or "en"
     )
     if payload.multi:
-        # Phase O.6 — single-pass branch (gated by EYES_ONE_PASS).
-        # When enabled the pipeline does ONE Eyes call that returns
-        # both attributes and bboxes per garment, skipping SegFormer,
-        # rembg, and reconstruction re-validation on the hot path.
-        # rembg + reconstruction become deferred endpoints (Phase 2).
-        # When disabled (default), the legacy multi-call path runs
-        # bit-for-bit as before.
-        if settings.EYES_ONE_PASS:
+        # Production analyze pipeline: SegFormer crops the photo into
+        # per-garment regions, then N parallel Eyes calls analyse each
+        # crop. ``analyze_outfit_one_pass`` was retired in May 2026
+        # because Gemini-2.5-Flash failed multi-garment recall.
+        #
+        # When ``EYES_LOCAL=true`` the user's locally-trained Eyes v4
+        # LoRA is used as a one-pass alternative path. Any soft
+        # failure (model load, OOM, JSON parse, missing adapter dir on
+        # the lightweight Emergent pod) returns ``[]`` and we fall
+        # through to the SegFormer pipeline transparently — the user
+        # never sees a hard failure from the local route.
+        detections: list[dict[str, Any]] = []
+        if settings.EYES_LOCAL:
             try:
-                # The legacy ``_ANALYZE_LOCK`` semaphore was a memory-
-                # pressure guard for the SegFormer+rembg+per-crop-LLM
-                # stack. The one-pass path does ONE LLM call and a
-                # PIL crop \u2014 no SegFormer load, no rembg, no
-                # parallel LLM fan-out \u2014 so the lock is unnecessary
-                # here and would just serialise unrelated uploads.
-                detections = await garment_vision_service.analyze_outfit_one_pass(
-                    raw, language=user_lang,
-                )
+                from app.services import local_eyes_runtime
+                async with _ANALYZE_LOCK:
+                    detections = await local_eyes_runtime.analyze(
+                        raw, language=user_lang,
+                    )
+                if detections:
+                    logger.info(
+                        "/analyze: routed via local Eyes v4 (n=%d)",
+                        len(detections),
+                    )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("One-pass outfit analysis failed: %r", exc)
-                raise HTTPException(
-                    503,
-                    "Garment analyzer is temporarily unavailable. Please try again.",
-                ) from exc
-        else:
+                logger.warning(
+                    "EYES_LOCAL routing raised %r — falling back to "
+                    "SegFormer + per-crop pipeline.",
+                    exc,
+                )
+                detections = []
+
+        if not detections:
             try:
                 async with _ANALYZE_LOCK:
                     detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
@@ -874,14 +914,29 @@ async def analyze_item_image(
                     "crop_mime": det.get("crop_mime", "image/jpeg"),
                     "analysis": analysis,
                     "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
-                    # Phase O.6 fields. Present (and useful) only when
-                    # the request was served by ``analyze_outfit_one_pass``.
-                    # The legacy pipeline omits both keys; absence is
-                    # treated as "no CTA" / "legacy path" by the frontend.
+                    # Phase O.6 field. ``reconstruction_advised`` is
+                    # produced by the legacy pipeline as a heuristic
+                    # output of ``should_reconstruct`` per crop; absence
+                    # / False means "no CTA needed".
                     "reconstruction_advised": det.get(
                         "reconstruction_advised", False,
                     ),
-                    "one_pass": det.get("one_pass", False),
+                    # Patch 9a (May 2026) — the ``one_pass`` field used
+                    # to signal that the response came from the retired
+                    # single-call path. With one-pass retired in the
+                    # *Gemini* sense it's hardcoded False here for the
+                    # SegFormer path; when ``EYES_LOCAL=true`` and the
+                    # local Eyes-v4 route fired, the per-detection
+                    # ``one_pass`` flag is True so this echoes back
+                    # honestly. Either way the field stays present so
+                    # older frontend bundles that read it don't choke.
+                    "one_pass": bool(det.get("one_pass", False)),
+                    # Patch 8 (May 2026) — flag for the legacy multi-crop
+                    # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
+                    # The frontend echoes this back on /closet save and
+                    # the backend queues ``_run_background_matte`` per
+                    # item, identical to the one-pass path.
+                    "defer_matte": det.get("defer_matte", False),
                 }
             )
         if dropped_unidentifiable:

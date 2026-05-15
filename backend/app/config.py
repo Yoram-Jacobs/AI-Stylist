@@ -214,31 +214,35 @@ class Settings:
     EYES_API_TOKEN: str | None = (
         os.environ.get("EYES_API_TOKEN") or None
     )
+    # When ``true``, the closet ``/analyze`` route uses the local
+    # Eyes v4 runtime — base ``google/gemma-4-E2B-it`` + the LoRA
+    # trained in ``docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb``,
+    # both loaded in-process via transformers + peft. Falls back to
+    # the SegFormer + per-crop pipeline on any error (model load,
+    # OOM, JSON parse, missing adapter dir on the Emergent pod where
+    # torch isn't installed). See ``services/local_eyes_runtime.py``.
+    EYES_LOCAL: bool = (
+        os.environ.get("EYES_LOCAL", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     # Free CPU Basic inference is slow (5-15s text-only, 30-90s if/when
     # vision is added). Match the timeout to the worst case and let the
     # circuit breaker fall back to Gemini instead of stalling AddItem.
     EYES_GEMMA_TIMEOUT_S: float = float(
         os.environ.get("EYES_GEMMA_TIMEOUT_S", "60") or "60"
     )
-    # --- Phase O.6 — Single-pass Eyes (proposal) ---
-    # Master kill-switch for the experimental "one call per upload"
-    # AddItem pipeline. When ``True`` the closet ``/analyze`` route
-    # calls ``GarmentVisionService.analyze_outfit_one_pass()`` which
-    # asks Eyes (Gemma-4 E2B) for both garment attributes AND a
-    # ``region.bbox`` in a single JSON response — skipping SegFormer,
-    # the rembg pre-condition matte, and the reconstruction
-    # re-validation Eyes call. rembg + reconstruction become deferred
-    # / user-initiated jobs run from later endpoints.
-    #
-    # **Default ``False`` everywhere** — preview, prod, ``.env.example`` —
-    # until the benchmark gate at ``docs/EYES_ONE_PASS_PROPOSAL.md``
-    # (IoU >= 0.7 on 90% of CCP photos) is verified. Set to ``True``
-    # via env in any environment that wants the new path:
-    #     EYES_ONE_PASS=true
-    # See ``/app/docs/EYES_ONE_PASS_PROPOSAL.md`` for the migration plan.
-    EYES_ONE_PASS: bool = (
-        os.environ.get("EYES_ONE_PASS", "false") or "false"
-    ).strip().lower() in ("1", "true", "yes", "on")
+    # --- Phase O.6 — Single-pass Eyes (RETIRED May 2026) ---
+    # The experimental "one Eyes call per upload" path was retired
+    # after the CCP-Ninja benchmark (/app/scripts/run_eyes_benchmark.py)
+    # showed Gemini-2.5-Flash will not reliably emit multi-garment
+    # arrays regardless of prompt phrasing: on all 30 test images it
+    # returned exactly one garment, collapsing recall to ~10%. The
+    # legacy SegFormer+per-crop pipeline (``analyze_outfit``) hit mean
+    # IoU 0.71 / recall 0.41 on the same set and remains the only
+    # production analyzer. The ``analyze_outfit_one_pass`` function
+    # is kept for benchmark scripts only. The env var ``EYES_ONE_PASS``
+    # is intentionally not read anywhere — leaving it set in a .env
+    # file has no effect.
     # Per-crop analyzer used inside the multi-item outfit pipeline.
     GARMENT_VISION_CROP_MODEL: str = os.environ.get(
         "GARMENT_VISION_CROP_MODEL", "gemini-2.5-flash"
@@ -396,6 +400,27 @@ class Settings:
     # full-resolution RGB so input photos keep their sharpness.
     BACKGROUND_MATTING_MAX_EDGE: int = int(
         os.environ.get("BACKGROUND_MATTING_MAX_EDGE", "1024")
+    )
+
+    # Patch 8 (May 2026) — defer rembg matting to a FastAPI BackgroundTask
+    # on the **legacy** multi-crop /analyze path. The pre-Phase-O.6
+    # ``analyze_outfit`` flow used to serialise rembg on the hot path
+    # (each call holds the onnxruntime session, so parallel invocations
+    # OOM in 3GB pods). For a typical 2-5 garment outfit that adds
+    # 30-90s of wall time before the user sees any analysis result —
+    # far over the 30s UX budget. With this flag ``True`` (default),
+    # ``analyze_outfit`` returns raw JPEG bbox crops immediately and
+    # the rembg matte runs after the user saves, in the same
+    # ``_run_background_matte`` task that the Phase-O.6 single-pass
+    # path already uses. The closet thumbnail upgrades in place once
+    # the matte finishes (the frontend polling for ``clean_image_url``
+    # was already wired in Phase 3).
+    #
+    # Set to ``False`` to restore the old synchronous behavior — useful
+    # if a downstream consumer (e.g. a benchmark notebook) needs the
+    # matted crop in the /analyze response.
+    DEFER_REMBG_ON_ANALYZE: bool = (
+        os.environ.get("DEFER_REMBG_ON_ANALYZE", "true").lower() == "true"
     )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Default tracks torch+transformers availability:
