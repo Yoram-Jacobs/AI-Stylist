@@ -1370,16 +1370,45 @@ if not getattr(_ptu.BaseTuner, '_neo_patched', False):
 merged = model.merge_and_unload()
 print('Merge complete. type:', type(merged).__name__)
 
-OUT_MERGED.mkdir(parents=True, exist_ok=True)
+# CRITICAL: save to local /content/ first, rsync to Drive at the end.
+# Drive's FUSE mount serializes metadata writes through a single API
+# client, and during sharded save_pretrained() small files like
+# config.json can get committed to a buffer that gets overwritten by
+# the index-file commit at the end. Local SSD has no such race.
+import shutil, pathlib
+LOCAL_BASE   = pathlib.Path('/content/eyes_v4_local')
+LOCAL_MERGED = LOCAL_BASE / 'merged'
+LOCAL_BASE.mkdir(parents=True, exist_ok=True)
+if LOCAL_MERGED.exists():
+    shutil.rmtree(LOCAL_MERGED)
+LOCAL_MERGED.mkdir(parents=True, exist_ok=True)
+
 merged.save_pretrained(
-    str(OUT_MERGED),
+    str(LOCAL_MERGED),
     safe_serialization=True,
     max_shard_size='4GB',
 )
-processor.save_pretrained(str(OUT_MERGED))
+processor.save_pretrained(str(LOCAL_MERGED))
 
-total_gb = sum(p.stat().st_size for p in OUT_MERGED.rglob('*')) / (1024**3)
-print(f'Saved merged bf16 to {OUT_MERGED} ({total_gb:.2f} GB)')
+assert (LOCAL_MERGED / 'config.json').exists(), \\
+    'config.json missing in local save -- underlying object lacks .config?'
+
+# Repoint downstream paths to local. Drive paths preserved for the
+# final rsync cell at the end of section 13.
+OUT_MERGED_DRIVE = OUT_MERGED
+OUT_GGUF_DRIVE   = OUT_GGUF
+OUT_MMPROJ_DRIVE = OUT_MMPROJ
+
+OUT_MERGED = LOCAL_MERGED
+F16_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-f16.gguf'
+OUT_GGUF   = LOCAL_BASE / 'Eyes_v4_Gemma4-Q4_K_M.gguf'
+OUT_MMPROJ = LOCAL_BASE / 'mmproj-Eyes_v4_Gemma4-f16.gguf'
+
+total_gb = sum(p.stat().st_size for p in LOCAL_MERGED.rglob('*')) / (1024**3)
+print(f'Saved merged bf16 to {LOCAL_MERGED} ({total_gb:.2f} GB)')
+print(f'config.json size: {(LOCAL_MERGED / \"config.json\").stat().st_size} bytes')
+print(f'Working dir for GGUF outputs: {LOCAL_BASE}')
+print(f'Drive targets (rsync at end): {OUT_GGUF_DRIVE.parent}')
 """
 
 
@@ -1485,10 +1514,23 @@ CODE_GGUF_QUANT = """\
     Q4_K_M
 
 print('text Q4_K_M size:', round(OUT_GGUF.stat().st_size / 1024**3, 2), 'GB')
+"""
+
+CODE_GGUF_RSYNC = """\
+# Final stash: copy Q4_K_M + mmproj to Drive (single sequential write
+# per file, much more reliable than letting save_pretrained shard
+# directly to Drive).
+import shutil
+OUT_GGUF_DRIVE.parent.mkdir(parents=True, exist_ok=True)
+print(f'Copying {OUT_GGUF.stat().st_size / 1024**3:.2f} GB Q4_K_M to Drive...')
+shutil.copy2(OUT_GGUF, OUT_GGUF_DRIVE)
+print(f'Copying {OUT_MMPROJ.stat().st_size / 1024**3:.2f} GB mmproj  to Drive...')
+shutil.copy2(OUT_MMPROJ, OUT_MMPROJ_DRIVE)
+
 print()
 print('=== v4 artifacts on Drive ===')
-print(' ', OUT_GGUF)
-print(' ', OUT_MMPROJ)
+print(' ', OUT_GGUF_DRIVE)
+print(' ', OUT_MMPROJ_DRIVE)
 """
 
 
@@ -1636,6 +1678,7 @@ CELLS = [
     md(MD_MERGE),  code(CODE_MERGE),
     md(MD_QUANT),  code(CODE_GGUF_BUILD), code(CODE_GGUF_TEXT),
                    code(CODE_GGUF_MMPROJ), code(CODE_GGUF_QUANT),
+                   code(CODE_GGUF_RSYNC),
     md(MD_PROBE),  code(CODE_PROBE_INSTALL), code(CODE_PROBE_RUN),
     md(MD_DONE),
 ]
