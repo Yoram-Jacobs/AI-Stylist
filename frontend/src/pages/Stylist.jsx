@@ -36,6 +36,8 @@ import { ConversationSidebar } from '@/components/stylist/ConversationSidebar';
 import { OutfitCanvasMessage } from '@/components/OutfitCanvas';
 import { FashionScoutPanel } from '@/components/stylist/FashionScoutPanel';
 import { OutfitRecommendationCard } from '@/components/stylist/OutfitRecommendationCard';
+import { ItemFloater } from '@/components/stylist/ItemFloater';
+import { AttachmentPicker } from '@/components/stylist/AttachmentPicker';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
@@ -88,6 +90,11 @@ export default function Stylist() {
   // Mobile drawers
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
+
+  // Phase S3: ItemFloater (side-sheet preview for closet items in
+  // outfit recommendations). Single instance per page — any thumbnail
+  // click sets this to the closet item id and the floater slides in.
+  const [floaterItemId, setFloaterItemId] = useState(null);
 
   // Browser capabilities
   const sttSupportedRef = useRef(isSTTSupported());
@@ -562,6 +569,7 @@ export default function Stylist() {
                           rec={rec}
                           index={i}
                           sessionId={activeSessionId}
+                          onItemClick={setFloaterItemId}
                         />
                       ))}
                       {m.payload.do_dont?.length > 0 && (
@@ -868,40 +876,42 @@ export default function Stylist() {
             className="rounded-xl resize-none"
             data-testid="stylist-composer-textarea"
           />
-          <label
-            className="inline-flex cursor-pointer"
-            aria-label={t('stylist.attachPhoto')}
-            data-testid="stylist-composer-attach-button"
-          >
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                // Phase R: support N attachments. First slot still uses
-                // imageFile so the single-image /stylist path is unchanged
-                // for backwards compatibility; subsequent files spill into
-                // extraImages, which triggers the composer route once
-                // total >= 2.
-                const incoming = Array.from(e.target.files || []);
-                if (!incoming.length) return;
-                if (!imageFile) {
-                  setImageFile(incoming[0]);
-                  if (incoming.length > 1) {
-                    setExtraImages((prev) => [...prev, ...incoming.slice(1)].slice(0, 7));
-                  }
-                } else {
-                  setExtraImages((prev) => [...prev, ...incoming].slice(0, 7));
+          {/* Phase S2: unified attachment picker — replaces the bare
+              <input type="file">. The trigger keeps the original 11x11
+              icon-button silhouette so the composer layout doesn't
+              shift. The picker returns a File[] which is merged into
+              the existing imageFile / extraImages pipeline below; the
+              backend contract is unchanged (single-image /stylist for
+              one attachment, multi-image /stylist/compose-outfit for
+              two or more). */}
+          <AttachmentPicker
+            maxItems={7}
+            currentCount={(imageFile ? 1 : 0) + extraImages.length}
+            onConfirm={(files) => {
+              if (!files?.length) return;
+              if (!imageFile) {
+                setImageFile(files[0]);
+                if (files.length > 1) {
+                  setExtraImages((prev) =>
+                    [...prev, ...files.slice(1)].slice(0, 7),
+                  );
                 }
-                // Reset so re-selecting the same files re-fires onChange
-                e.target.value = '';
-              }}
-            />
-            <span className="inline-flex items-center justify-center h-11 w-11 rounded-xl border border-border bg-card hover:bg-secondary">
-              <ImgIcon className="h-5 w-5" />
-            </span>
-          </label>
+              } else {
+                setExtraImages((prev) =>
+                  [...prev, ...files].slice(0, 7),
+                );
+              }
+            }}
+            trigger={
+              <span
+                className="inline-flex items-center justify-center h-11 w-11 rounded-xl border border-border bg-card hover:bg-secondary cursor-pointer"
+                aria-label={t('stylist.attachPhoto')}
+                data-testid="stylist-composer-attach-button"
+              >
+                <ImgIcon className="h-5 w-5" />
+              </span>
+            }
+          />
           {recording ? (
             <Button
               size="icon"
@@ -995,6 +1005,14 @@ export default function Stylist() {
           <FashionScoutPanel />
         </SheetContent>
       </Sheet>
+
+      {/* Phase S3: item preview floater — opens on thumbnail click in
+          any outfit recommendation. Renders via portal so it overlays
+          the chat without dimming it. */}
+      <ItemFloater
+        itemId={floaterItemId}
+        onClose={() => setFloaterItemId(null)}
+      />
     </div>
   );
 }

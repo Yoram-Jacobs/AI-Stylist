@@ -49,6 +49,37 @@ Hard rules:
 """
 
 
+# ---------------------------------------------------------------------------
+# Image-aware addendum (Phase S1)
+# ---------------------------------------------------------------------------
+# When the caller attaches one or more images via ``file_contents``, Gemini
+# receives the bytes but the SYSTEM_PROMPT above is image-agnostic — it
+# focuses entirely on text, closet, and context. The previous behaviour was
+# that the model would silently ignore the photo and recommend outfits as
+# if the user had asked a text-only question. This addendum is appended to
+# the system message ONLY when image_base64 is present, so:
+#
+#   * text-only flows are unaffected (no prompt pollution).
+#   * image flows get explicit (soft) instructions to consider the picture.
+#
+# Permissive language ("may reference", "do not need to mention") is by
+# design — per the user's UX choice (Phase S, decision 4b), the image is
+# **soft context**, not a hard anchor. The model is free to use or skip it
+# based on what the user actually asked for.
+_IMAGE_CONTEXT_ADDENDUM = """
+
+IMAGE CONTEXT:
+The user has attached one or more images. Treat them as additional context
+about garments they are wearing, considering, or asking about. You MAY
+reference visible elements (garment type, dominant color, fit, fabric,
+silhouette) when it would make the recommendation more useful. Do NOT
+invent details you cannot clearly see — if uncertain, prefer to say so or
+ask. If the user's question is unrelated to the image, you do not need to
+mention it. The image never overrides the closet summary or cultural
+constraints below; it adds context to them.
+"""
+
+
 # Human-readable names for each supported UI language code — sourced from
 # app.services.i18n so the frontend, backend prompts, system emails, and
 # anything else stay in lock-step with a single dictionary.
@@ -95,7 +126,20 @@ class GeminiStylistService:
         # body, region, modesty, style aesthetics, avoid list...) directly
         # to the system message so EVERY recommendation respects them.
         # Falls through gracefully when no preferences are available.
-        sys_msg = SYSTEM_PROMPT + _language_directive(
+        sys_msg = SYSTEM_PROMPT
+        # Phase S1: when an image is attached, splice in the image-aware
+        # addendum BEFORE the language directive so the directive (which
+        # forces output language) stays last and "wins" if there's any
+        # conflict between blocks. This is the fix for the user-reported
+        # bug "stylist totally ignores the uploaded photo" — Gemini was
+        # receiving the bytes but had no instruction to look at them.
+        if image_base64:
+            sys_msg = sys_msg + _IMAGE_CONTEXT_ADDENDUM
+            logger.info(
+                "gemini-stylist: image addendum applied session=%s",
+                session_id,
+            )
+        sys_msg = sys_msg + _language_directive(
             (user_profile or {}).get("preferred_language")
         )
         if user_preferences_block:

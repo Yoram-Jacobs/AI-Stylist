@@ -29,6 +29,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { isTTSSupported, speak, cancelSpeak } from '@/lib/speech';
+import { ItemFloater } from '@/components/stylist/ItemFloater';
 
 /**
  * Outfit Completion bottom sheet.
@@ -38,7 +39,7 @@ import { isTTSSupported, speak, cancelSpeak } from '@/lib/speech';
  * renders them alongside a Stylist-generated rationale. Optionally
  * extends the search to active marketplace listings.
  */
-function ItemThumb({ item, showScore = false, scoreLabel = null, linkTo = null }) {
+function ItemThumb({ item, showScore = false, scoreLabel = null, linkTo = null, onClick = null }) {
   const src =
     item?.reconstructed_image_url ||
     item?.original_image_url ||
@@ -73,6 +74,21 @@ function ItemThumb({ item, showScore = false, scoreLabel = null, linkTo = null }
       {cat && <div className="text-[10px] caps-label text-muted-foreground">{cat}</div>}
     </div>
   );
+  // Phase S3: onClick wins over linkTo so we can open the floater
+  // instead of hard-navigating. Marketplace items keep linkTo so they
+  // still navigate (the floater only knows about closet items).
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="block text-start w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--accent))] rounded-xl"
+        data-testid={`item-thumb-button-${item?.id || 'unknown'}`}
+      >
+        {inner}
+      </button>
+    );
+  }
   if (linkTo) {
     return (
       <Link to={linkTo} className="block">
@@ -91,6 +107,8 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
   const [includeMarketplace, setIncludeMarketplace] = useState(false);
   const [occasion, setOccasion] = useState('');
   const [speaking, setSpeaking] = useState(false);
+  // Phase S3: ItemFloater state for closet thumbnails inside this sheet.
+  const [floaterItemId, setFloaterItemId] = useState(null);
   // Order-aware anchor list (1st = highest centroid weight server-side).
   // Seeded from anchorsHint each time the sheet opens so the user can
   // reshuffle priority without leaving Closet.
@@ -171,7 +189,8 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
   };
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
+    <>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         side="right"
         className="w-full sm:max-w-xl lg:max-w-2xl overflow-hidden p-0 flex flex-col"
@@ -396,7 +415,7 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
                           item={s}
                           showScore
                           scoreLabel={`${Math.round((s._score || 0) * 100)}%`}
-                          linkTo={`/closet/${s.id}`}
+                          onClick={() => setFloaterItemId(s.id)}
                         />
                       ))}
                     </div>
@@ -460,6 +479,14 @@ export function OutfitCompletionSheet({ open, onOpenChange, anchorIds = [], anch
         </div>
       </SheetContent>
     </Sheet>
+      {/* Phase S3: item floater renders via portal — sits over the
+          completion sheet so users can preview a closet match without
+          leaving the rationale view. */}
+      <ItemFloater
+        itemId={floaterItemId}
+        onClose={() => setFloaterItemId(null)}
+      />
+    </>
   );
 }
 

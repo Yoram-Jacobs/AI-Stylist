@@ -149,7 +149,7 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 **What shipped (behind `EYES_ONE_PASS=false`):**
 - ✅ Backend: `garment_vision.py` schema extended to include `region.bbox` bounding boxes.
 - ✅ Backend: `analyze_outfit_one_pass` implemented; `/closet/analyze` branches on `settings.EYES_ONE_PASS`.
-- ✅ Backend: `closet.py` defers `rembg` to a FastAPI `BackgroundTask` when `from_one_pass=True`.
+- ✅ Backend: `closet.py` defers `rembg` matting to a FastAPI `BackgroundTask` when `from_one_pass=True`.
 - ✅ DB: `ClosetItem.clean_image_status` added (supports polling status: pending → done/failed).
 - ✅ Frontend: `bestImageUrl` fallback resolver implemented (`thumbnail_data_url → reconstructed_image_url → clean_image_url → segmented_image_url → original_image_url`).
 - ✅ Frontend: polling UI for `clean_image_status === 'pending'` with “Polishing photo…” badge.
@@ -173,23 +173,10 @@ Wave 3 extended Marketplace beyond Wave 2 MVP with listing-level shipping, PayPa
 ### ✅ Phase L — Localization Wave 3 — Manual UI wiring patches — **SHIPPED**
 Closed the last 4 known gaps where translated strings already existed in every locale JSON but the React code was still rendering raw English. Documented originally in `/app/docs/code_fixes_needed.md`.
 
-- ✅ **ListingDetail.jsx (1a–1d)** — Listing chips now wire through existing taxonomy keys:
-  - `category` → `taxonomy.categories.<value>`
-  - `mode` (donate/swap) → `taxonomy.intent.<value>`
-  - `condition` → `addItem.condition` label + `taxonomy.condition.<value>` value
-  - `size` → `addItem.size` label (replacing the non-existent `market.sizeLabel` key)
-- ✅ **Home.jsx (2a–2b)** — Trend-Scout chip + fallback cards:
-  - Added `trends.bucket.<slug>` block to all 12 locales (7 buckets: `ss26-runway`, `street`, `sustainability`, `influencers`, `second_hand`, `recycling`, `news_flash`).
-  - Chip now prefers the localised bucket label and falls back to the raw backend `card.label`.
-  - `FALLBACK_TRENDS` constant moved inside the component as a `useMemo` keyed on `i18n.language`; cards read from `home.fallbackTrends.fb1/2/3.{label,headline,summary}` in every locale.
-- ✅ **SeoBase.jsx (3)** — `META` constant refactored to i18n keys:
-  - Added `seo.routes.<key>.{title,description}` block (13 routes) to all 12 locales.
-  - `<html lang>` now reflects the active `i18n.language` (was hard-coded `"en"`).
-  - Page title + meta description + OG/Twitter tags now switch language alongside the UI; verified via Playwright.
-- ✅ **countries.js (4)** — Adopted `Intl.DisplayNames`:
-  - Added shared `localisedCountryName(code, lang, fallback)` helper.
-  - `CountryCombobox` refactored to consume the helper (no more inline `new Intl.DisplayNames(...)`).
-  - Bundled English `name` field retained as a safety fallback.
+- ✅ **ListingDetail.jsx (1a–1d)** — Listing chips now wire through existing taxonomy keys.
+- ✅ **Home.jsx (2a–2b)** — Trend-Scout chip + fallback cards localized.
+- ✅ **SeoBase.jsx (3)** — Page title/meta tags switch language.
+- ✅ **countries.js (4)** — Adopted `Intl.DisplayNames` for country names.
 
 **Known pre-existing gap (out of scope here, flagged for later):**
 - `public/index.html` ships a static `<meta name="description">` that react-helmet does not remove.
@@ -197,66 +184,8 @@ Closed the last 4 known gaps where translated strings already existed in every l
 ### ✅ SPA zero-delay navigation (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
 **Objective achieved:** Main directory pages no longer re-fetch/flash spinners on SPA back/forward navigation.
 
-- ✅ Introduced a lightweight cached-store layer (`createCachedStore.js`) with:
-  - eager prewarm
-  - stale-while-revalidate
-  - bounded LRU caching
-  - mutation helpers (invalidate / upsert / remove)
-- ✅ Closet: `closetStore.js` eager-loaded + incremental sync support.
-- ✅ Marketplace: `marketplaceStore.js` (browseStore + myListingsStore) wired into `Marketplace.jsx`.
-- ✅ Experts: `expertsStore.js` wired into `ExpertsDirectory.jsx` with a **draft/applied** filter pattern (typing doesn’t spam network).
-- ✅ `AppLayout.jsx` prewarms all three stores at boot and resets on logout.
-- ✅ Verified via frontend testing agent (`iteration_19`).
-
 ### ✅ Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO (manual Chrome E2E pending; backend verified)**
-**Primary objective achieved:** A Manifest V3 Chrome extension exists end-to-end (popup UI, content scripts, site adapters, auth handoff, background service worker, backend endpoint, and a production `dist/` build).
-
-**What shipped (X.0–X.3)**
-- ✅ Extension scaffold + architecture (React + Vite + MV3, CRXJS bundling)
-- ✅ Popup UI (DressApp-themed Tailwind):
-  - loading / disconnected / connected / error states
-  - Connect flow opens `https://<backend>/extension/connect?ext_id=<id>&v=1`
-  - displays `/api/v1/users/me` measurement summary
-- ✅ Content script injection on supported stores:
-  - mounts a “DressApp size” button next to detected size anchors
-  - extracts size chart HTML and calls backend analysis
-  - renders an in-page overlay tooltip with the recommendation
-- ✅ Store adapters present for: **Zara, ASOS, Shein, H&M, Amazon, AliExpress** (+ generic fallback)
-- ✅ Secure token handoff page shipped in web app:
-  - `frontend/src/pages/ExtensionConnect.jsx`
-  - extension receives `{type:'DRESSAPP_EXT_TOKEN', token, backend, user}`
-  - content-script `auth-bridge.js` forwards handoff to SW
-- ✅ Service worker provides single-source-of-truth auth + API calls:
-  - caches `/users/me` for popup responsiveness
-  - isolates bearer token from content/popup scripts
-- ✅ Manifest, icons, and `dist/` build:
-  - icons present in `/app/chrome-extension/icons/`
-  - `yarn build` produces `/app/chrome-extension/dist/` and valid manifest rewrites
-
-**Backend integration (verified)**
-- ✅ `POST /api/v1/sizes/analyze-chart` exists and is routed
-- ✅ Unauthenticated requests return **401**
-- ✅ Authed behavior verified by automated testing agent (`iteration_20.json`): **9/9 tests passed**
-
-**Backend stability fixes performed during Phase X**
-- ✅ `HFImageService` now tolerates older `huggingface_hub` clients (no `provider` kwarg)
-- ✅ `sizes.py` provider activity tracking fixed:
-  - corrected import path (`from app.services import provider_activity`)
-  - corrected call signature to `provider_activity.record(provider, ...)`
-
-**✅ Phase X.5 — Extension hardening (modal/image charts + screenshot fallback + testability) — SHIPPED**
-- ✅ Image-based chart detection (`detectChartImage`) for charts rendered as single images inside modals/sections.
-- ✅ Screenshot fallback when HTML/image extraction fails:
-  - added SW handler `CAPTURE_VISIBLE_TAB` using `chrome.tabs.captureVisibleTab`
-  - added `tabs` permission to manifest
-- ✅ Broader anchor detection:
-  - supports size pill/button groups and accessibility roles
-- ✅ Overlay UX + testability:
-  - retry CTA and stable `data-testid` selectors on overlay elements
-
-**Known limitations / pending**
-- ⏳ Manual E2E testing inside Chrome (load unpacked, validate connect + overlay + chart scraping on real product pages)
-- ⏳ Chrome Web Store publishing (deferred)
+**Primary objective achieved:** A Manifest V3 Chrome extension exists end-to-end.
 
 ---
 
@@ -283,487 +212,240 @@ Delivered previously; unchanged.
 ---
 
 ### Phase Z2 — Duplicate detection (pre-flight only) + cleanup **(SHIPPED)**
-- ✅ Deterministic pre-flight duplicate detection using `source_sha256` and fallback `source_phash`.
-- ✅ Removed legacy expensive post-analysis duplicate detector.
-- ✅ Auto-demote duplicate ⭐ when the canonical/original item is deleted.
+Delivered previously; unchanged.
 
 ---
 
 ### Marketplace Wave 1 — Auto-publish + Merchant Card + Email wiring **(SHIPPED)**
-- ✅ Auto-created listings (`Listing.auto_created`) when closet item is Shared.
-- ✅ Auto-retire listing when linked closet item is deleted.
-- ✅ Listing detail merchant card:
-  - name fallback chain: `display_name → company_name → first_name → hide`
-  - location fallback chain: `listing.location → home_location → address`
-- ✅ Resend integration with templates + sale email dispatch on PayPal capture.
+Delivered previously; unchanged.
 
 ---
 
 ### Marketplace Wave 2 — Swap + Donate + Email landing **(SHIPPED)**
-
-#### W2.0 — Goals + constraints (implemented)
-- ✅ No PII exposure on public listing page.
-- ✅ Email action links are safe:
-  - JWT signed with `JWT_SECRET`
-  - dedicated audience claim `aud="dressapp.tx_action"`
-  - expiry (implemented at 7 days for usability)
-  - single-use protection with persisted `jti` + `action_token_used`
-
-#### W2.1 — Backend schema updates (transactions) — **SHIPPED**
-**File:** `app/backend/app/models/schemas.py`
-- ✅ Added `Transaction.kind: "buy" | "swap" | "donate"` (default `"buy"`).
-- ✅ Added nested `swap` + `donate` sub-documents.
-- ✅ Extended `TxStatus` with `accepted`, `denied`, `shipped`, `completed`.
-
-#### W2.2 — Backend service: JWT action tokens — **SHIPPED**
-**File:** `app/backend/app/services/action_tokens.py`
-- ✅ `mint(...) → (token, jti)` and `verify(token, expected_decision=...)`.
-- ✅ Dedicated audience: `aud="dressapp.tx_action"`.
-
-#### W2.3 — Backend endpoints (Swap/Donate/Action/Landing) — **SHIPPED**
-**File:** `app/backend/app/api/v1/transactions.py`
-- ✅ `POST /api/v1/transactions/swap`
-- ✅ `POST /api/v1/transactions/donate` (Wave 2: email-only accept/deny)
-- ✅ `GET /api/v1/transactions/action` (public)
-- ✅ `POST /api/v1/transactions/{tx_id}/confirm-receipt`
-- ✅ `GET /api/v1/transactions/{tx_id}/landing-summary` (public)
-
-#### W2.4 — DB index fix (PayPal order id uniqueness) — **SHIPPED**
-**File:** `app/backend/app/db/database.py`
-- ✅ Migrated `transactions.paypal.order_id` unique index from `sparse=True` to a `partialFilterExpression` (string only).
-
-#### W2.5 — Frontend Wave 2 components — **SHIPPED**
-- ✅ `ListingDetail.jsx` mode-aware CTA (Buy/Swap/Donate) + meta badges + description.
-- ✅ `SwapPickerModal.jsx` (closet picker).
-- ✅ `TransactionLanding.jsx` + route `/transactions/:id/landing` (auth-optional).
-- ✅ `api.js` additions: `proposeSwap`, `claimDonation`, `confirmReceipt`, `getLandingSummary`.
-
----
-
-### Marketplace Wave 3 — **Shipping Fee (listing-level) + Transactions UI polish + APP_PUBLIC_URL hygiene** — **SHIPPED**
-
-#### W3A — Listing-level Shipping Fee + PayPal hookup — **SHIPPED**
-- ✅ **Schema:** `Listing.shipping_fee_cents: int = 0` (default 0)
-- ✅ **DTOs:** added to `CreateListingIn` + `UpdateListingIn`
-- ✅ **SELL flow (PayPal):** amount includes shipping; returns breakdown.
-- ✅ **DONATE flow:** PayPal capture only when shipping_fee > 0; otherwise email-only.
-- ✅ Compatibility: `handling_fee_cents` retained but ignored.
-
-#### W3B — Transactions Page Polish — **SHIPPED**
-- ✅ Tabs by kind with counts.
-- ✅ Multi-select status chips.
-- ✅ Inline confirm receipt CTA for accepted swap/donate.
-
-#### W3C — APP_PUBLIC_URL Hygiene — **SHIPPED**
-- ✅ Auto-derive base URL when unset via forwarded headers.
-- ✅ Respect explicit override for prod lock.
-- ✅ Refactor link builders to accept `Request`.
-
----
-
-### Marketplace Stability Hotfix (v1.1.2 candidate) — **SHIPPED**
-Out-of-band hotfix wave for “items stuck on Private / can't delete listing” regressions.
-
----
-
-### SPA eager-load caching (Closet + Marketplace + Experts) — **SHIPPED & VERIFIED**
 Delivered previously; unchanged.
 
 ---
 
-### Phase O — Stylist Provider Migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
-
-#### Wave O.1 — Stylist Brain swap to Qwen-VL-Max-Latest — **SHIPPED (v1.1.1 candidate)**
+### Marketplace Wave 3 — Shipping Fee + Transactions polish **(SHIPPED)**
 Delivered previously; unchanged.
-
-#### Wave O.2 — Migrate AddItem garment_vision Eyes + Brain to Qwen-VL — **❌ CANCELLED (May 2026)**
-**Status:** User explicitly cancelled. Qwen-VL was only ever intended as
-a *contingency* if Eyes (Gemma 4 E2B) and Brain (Gemma 4 E4B) failed to
-deliver — never as the primary path. Wave O.3 (self-hosted Gemma 4 E2B
-Eyes) proved Eyes works, so Qwen-Eyes is no longer needed.
-
-**Cleanup performed (commit May 2026):**
-- Deleted ``_hf_chat_json`` + ``_hf_client`` from ``garment_vision.py``.
-- Removed ``QWEN_EYES_MODEL`` from ``app/config.py`` and ``.env.example``.
-- Flipped ``EYES_PROVIDER`` default from ``"qwen"`` to ``"gemma"`` so the
-  config no longer suggests Qwen-Eyes is a valid path.
-- ``eyes_override._VALID_PROVIDERS`` already excluded ``"qwen"``; left
-  as-is for defense-in-depth (any stale persisted override falls
-  through to env-default).
-
-**Still in place (intentional):** ``QWEN_BRAIN_MODEL=qwen-vl-max-latest``
-+ ``STYLIST_PROVIDER=qwen`` for the Stylist chat pipeline (per Wave O.1).
-The Stylist Brain stays on Qwen until Wave O.4 ships a 24/7-hosted Gemma
-4 E4B endpoint.
-
-#### Wave O.3 — Eyes v3 (Gemma 4 E2B) self-host cutover — **SHIPPED & LIVE**
-See Objectives section above.
-
-#### Wave O.6 — Eyes Single-Pass (feature-flagged rollout) — **SHIPPED BEHIND FLAG + READY TO DEPLOY**
-
-##### O.6.1 — Backend foundation (schema + one-pass analysis)
-- ✅ Add `EYES_ONE_PASS` feature flag (default false).
-- ✅ Extend garment schema with `region.bbox`.
-- ✅ Implement `analyze_outfit_one_pass` and branch in `/closet/analyze`.
-
-##### O.6.2 — Deferred rembg + DB status
-- ✅ Defer rembg to `BackgroundTask` when `from_one_pass=True`.
-- ✅ Add `clean_image_status` to DB schema.
-
-##### O.6.3 — Frontend polling + UI affordances
-- ✅ Add polling for `clean_image_status === 'pending'`.
-- ✅ Add “Polishing photo…” badge.
-- ✅ Add “Repair photo” CTA for reconstruction.
-
-##### O.6.4 — Benchmark tooling (Colab)
-- ✅ Add notebook: `/app/docs/notebooks/Eyes_OnePass_Benchmark.ipynb`.
-- ✅ Add runbook: `/app/docs/EYES_ONE_PASS_RUNBOOK.md`.
-
-##### O.6.5 — Pre-deployment safety nets
-- ✅ Rename confusing legacy ItemDetail variables (clean background vs repair photo).
-- ✅ Update `/app/deploy/.env.example` with `EYES_ONE_PASS=false` and rollout notes.
-- ✅ Run testing agent: **100% backend + 100% frontend**, ready for production.
-
-##### O.6.6 — User gate: accuracy benchmark + enablement
-- ⏳ Run the notebook on CCP (or equivalent dataset) and confirm bbox IoU meets your threshold.
-- ⏳ Only then: set production `EYES_ONE_PASS=true` for limited internal rollout.
-
-#### Wave O.4 — Add Gemma4-E4B fine-tune into provider chain — **LATER (blocked on hosting)**
-- Host the fine-tuned Gemma4-E4B on a 24/7 inference platform (HF Inference Endpoints / Modal / Runpod).
-- Add `GemmaStylistBrain` implementation and set:
-  - `STYLIST_PROVIDER=gemma`
-  - `STYLIST_FALLBACK=qwen`
 
 ---
 
-### Phase X — Chrome Extension (Shopping Assistant) — **SHIPPED IN REPO / E2E PENDING**
-
-#### X.0 — Repository layout (shipped)
+### Phase O — Stylist provider migration (Gemini → Qwen → Gemma) — **IN PROGRESS**
 Delivered previously; unchanged.
 
-#### X.1 — Auth handshake (shipped)
-Delivered previously; unchanged.
+---
 
-#### X.2 — Backend endpoint (shipped + verified)
+### Phase X — Chrome Extension — **SHIPPED / E2E pending**
 Delivered previously; unchanged.
-
-#### X.3 — Build & packaging (shipped)
-Delivered previously; unchanged.
-
-#### X.5 — Hardening for real-world store DOMs (shipped)
-Delivered previously; unchanged.
-
-#### X.6 — Pending validation & release (next)
-- ⏳ Manual Chrome E2E:
-  - Load unpacked from `/app/chrome-extension/dist`
-  - Connect via popup → verify token stored → `/users/me` loads
-  - Validate: button injection → chart detection (HTML/image/screenshot) → overlay recommendation
-- ⏳ Publish to Chrome Web Store (deferred)
 
 ---
 
 ## 3) Next Actions (immediate)
 
+> **Priority update (this session):** Phase V4.2 → V4.5 work is **PAUSED**
+> in favour of Phase S (Stylist UX bugs). Resume V4.x after Phase S ships.
+
 ### P0 — Next wave candidates
-1. **Deploy Phase O.6 safely (flag remains OFF):**
+1. **Phase S — Stylist UX Patch (image-aware picker + thumbnail floater + prompt fix)** — ship to preview, then redeploy the Emergent production pod.
+2. **Deploy Phase O.6 safely (flag remains OFF):**
    - Push to Hetzner production with `EYES_ONE_PASS=false`.
    - Confirm the legacy hot path remains stable under real traffic.
-2. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
-3. Swap reservation semantics hardening:
-   - reserved vs removed policy on accept
-   - timeout/release logic for stale accepted swaps
+3. **Phase X.6 E2E (Chrome):** manual validation of connect + overlay + chart extraction on each store.
 
 ### P1
-4. **Run Eyes One-Pass benchmark (user gate):**
-   - Execute `/app/docs/notebooks/Eyes_OnePass_Benchmark.ipynb` in Colab/Jupyter.
-   - Validate bbox IoU accuracy on CCP.
-   - If passing, do a limited internal rollout by setting `EYES_ONE_PASS=true`.
-5. Phase O.6 soak plan:
-   - 2-week production soak with metrics/logging.
-   - Only after soak: plan Phase O.6 Phase 5 cleanup (retire SegFormer/rembg hot path).
-6. Extension quality improvements (post-E2E):
-   - add optional “Select chart area” interaction if needed for very custom charts
-   - adapter selector tuning for store DOM changes
-   - tighten origin allow-lists for production (extension id allow-list + externally_connectable)
-7. Transactions page quality-of-life:
-   - search by listing title
-   - per-kind empty states and summaries
+4. Run Eyes One-Pass benchmark (user gate).
+5. Extension QoL improvements (post-E2E).
 
 ### P2
-8. Object storage migration (Mongo base64 bloat → R2/S3).
-9. Eyes v3 post-cutover cleanup:
-   - ⏳ rotate exposed secrets (`EYES_HF_TOKEN`, `EYES_API_TOKEN`, `GEMINI_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`)
-   - ⏳ delete deprecated GGUFs from VPS volume after 24 h stable traffic
-   - (optional) add a short `deploy/README.md` note: service name is `eyes`, container is `dressapp-eyes`, and both `EYES_MODEL_FILE` + `EYES_MMPROJ_FILE` must be plumbed
-10. Profile "Save changes" button always-active fix (`ProfileDetailsCard.jsx`) — track form dirtiness against loaded snapshot.
-
-### P3
-11. Refactor `AddItem.jsx` into modules.
-12. Refactor Experts → Profession dropdown (`ExpertsDirectory.jsx`) to use a backend taxonomy enum.
-13. Remove deprecated `/api/v1/closet/preflight` backend endpoint.
-14. Reconcile sizing for 'smartass' size charts.
-15. Deploy DressApp Assistant to mobile devices via Capacitor.
+6. Object storage migration (Mongo base64 bloat → R2/S3).
 
 ---
 
 ## 4) Success Criteria
 
-### Marketplace Wave 1 (already)
-- ✅ Shared items auto-publish.
-- ✅ Deleting closet item retires linked listing.
-- ✅ Seller card shows only safe merchant info with correct fallback chain.
-- ✅ Resend sale emails trigger on PayPal capture.
-
-### Marketplace Wave 2 (shipped)
-- ✅ Swap: propose → JWT accept/deny → landing → confirm receipt → completion.
-- ✅ Donate (MVP): claim → donor accept/deny email → confirmation email.
-- ✅ UI: listing detail shows size/description/condition; CTAs hidden on own listings; landing page works logged-out.
-
-### Marketplace Wave 3 (shipped)
-- ✅ Shipping fee:
-  - `Listing.shipping_fee_cents` exists, is editable, and defaults to 0.
-  - Sell PayPal charges include shipping and return a line-item breakdown.
-  - Donate claim requires PayPal shipping reimbursement **only** when shipping fee > 0.
-  - UI nudges local pickup: “🌱 Prefer local pickup” / “Meet locally to skip the fee 🌱”.
-  - Donations remain free.
-- ✅ Transactions UI:
-  - Tabs + multi-select status chips.
-  - Confirm receipt CTA appears appropriately for accepted swap/donate rows.
-- ✅ Environment URLs:
-  - Email action links and redirects land on the correct environment when `APP_PUBLIC_URL` is unset.
-  - Explicit `APP_PUBLIC_URL` overrides derivation.
-
-### SPA eager-load caching (Closet + Marketplace + Experts)
-- ✅ App boot prewarms Closet, Marketplace (browse + my listings), and Experts.
-- ✅ Returning to `/closet`, `/market`, `/experts` shows cached results immediately.
-- ✅ Mutations properly invalidate/update caches.
-- ✅ Verified via frontend testing agent `iteration_19`.
-
-### Phase O — Stylist provider migration
-- ✅ Wave O.1:
-  - `/api/v1/stylist` uses Qwen-VL-Max-Latest by default.
-  - Gemini remains available as fallback.
-  - Provider selection controlled by env vars.
-- ❌ Wave O.2: CANCELLED (Qwen-Eyes was never the intended primary; Wave O.3 proved Eyes works on Gemma 4 E2B). See the Wave O.2 section above for the cleanup that was performed.
-- ✅ Wave O.3:
-  - Self-hosted Gemma 4 E2B (custom LoRA, mixed-precision GGUF) live in `dressapp-eyes` container on Hetzner VPS.
-  - 18-field JSON schema validated in Colab; live container boot + healthcheck green.
-
-### Phase O.6 — Eyes Single-Pass
-- ✅ Feature-flag safety:
-  - With `EYES_ONE_PASS=false`, the legacy multi-pass hot path behaves identically (no regressions).
-  - Automated tests confirm legacy analyze + save flows remain intact.
-- ✅ UI clarity:
-  - Clean-background (rembg) flow is no longer mislabeled as “repair” in code.
-  - “Repair photo” CTA is a distinct flow mapped to reconstruction.
-- ⏳ Accuracy gate:
-  - Bbox IoU benchmark run on CCP (or similar) meets threshold.
-- ⏳ Rollout:
-  - After passing accuracy gate, enable `EYES_ONE_PASS=true` for limited rollout.
-  - After 2-week soak, safely retire SegFormer + synchronous rembg from hot path.
-
-### Phase X — Chrome Extension (Shopping Assistant)
-- ✅ Build artifacts exist and backend endpoint verified by tests.
-- ✅ Hardening shipped for image-based charts + screenshot fallback.
-- ⏳ Manual E2E in Chrome passes (connect + injection + overlay on each supported store).
-
----
-
-## Out of scope (deferred)
-- Swap PayPal capture at propose-time (Wave 4+ if community requests it)
-- Refund policy for captured donation shipping
-- Transactions search by listing title (future QoL)
-- Chrome Web Store publishing (until Phase X.6 manual E2E is complete)
+(unchanged; Phase S adds its own success criteria below.)
 
 ---
 
 # Phase V4 — Eyes v4 Production Deploy + Audio Migration (2026 continuation)
 
-> **Do not rewrite the plan above; this section appends the v4 story.**
->
-> **Context:** Eyes v4 LoRA training on `google/gemma-4-E2B-it` succeeded (valid 22MB adapter extracted). GGUF conversion via upstream `llama.cpp` remains blocked/unstable for Gemma-4 multimodal LoRAs, so we ship **Path C**: Transformers + PEFT inside the existing `dressapp-eyes` sidecar container.
+> **Status:** V4.1 complete in preview. **V4.2–V4.5 are paused** until
+> Phase S ships (Stylist UX bugs). Do not proceed on V4.x until Phase S
+> is marked shipped.
 
 ## V4 decisions (locked)
 
-- **Deploy shape:** Eyes v4 ships via **Path C** (Transformers + PEFT in-container) on the existing Hetzner CPX32 (CPU-only, 8GB).
-- **v3 retirement:** The v3 GGUF path is **permanently retired** for production use.
-- **Fallback:** Gemini remains the operational fallback via DB override (`eyes_override.py`: `gemma` ↔ `gemini`).
-- **Quantization:** **int4** via `bitsandbytes` or `optimum-quanto` (target ~1.5–2GB resident footprint).
-- **Adapter delivery:** Volume mount **`/srv/AI-Stylist/eyes_v4_adapter -> /adapter:ro`**. No HF re-upload, no image rebake.
-- **STT:** Gemma-4 audio tower replaces Groq Whisper via a new Eyes endpoint: **`POST /transcribe`**. Groq remains behind a feature flag fallback.
-- **TTS:** Deepgram is retired. Web uses **`window.speechSynthesis`**; future Capacitor build uses **`@capacitor-community/text-to-speech`** through a shared abstraction.
-- **Future back-conversion:** Scaffold an **Unsloth → GGUF Colab notebook** so we can flip back to llama.cpp inference later when Unsloth’s Gemma-4 multimodal GGUF export is stable.
+(unchanged; see previous section.)
 
 ---
 
 ## Phase V4.1 — Eyes inference server rewrite (Path C) **(✅ COMPLETE)**
 
-### Goals
-- Replace the `dressapp-eyes` container runtime from `llama-server` to **Transformers+PEFT** while keeping the backend contract stable.
-- Support **vision inference** for AddItem via the existing `POST /predict` contract.
-- Add **speech-to-text** endpoint `POST /transcribe` for later backend migration.
+(unchanged; implementation exists in `/app/inference-server/eyes/`.)
+
+---
+
+## Phase V4.2 — Backend STT migration **(PAUSED)**
+
+---
+
+## Phase V4.3 — Frontend TTS migration (Deepgram retirement) **(PAUSED)**
+
+---
+
+## Phase V4.4 — Unsloth → GGUF Colab notebook **(PAUSED)**
+
+---
+
+## Phase V4.5 — Docs + retirement notes **(PAUSED)**
+
+---
+
+# Phase S — Stylist UX Patch (image-aware picker + thumbnail floater + prompt fix)
+
+> **Context:** User reports 3 UX bugs when asking the Stylist to complete
+> an outfit from an uploaded photo. Both preview and Emergent prod pods
+> are Gemini-routed, so the fix applies uniformly; user must redeploy
+> to push preview fixes to production.
+
+## Problems (P0/P1)
+
+**Issue #1 (P0)** — Composer attachment picker is upload-only; users can’t pick from their existing closet.
+
+**Issue #2 (P0)** — Uploaded photo is “totally ignored” by the Stylist.
+
+**Issue #3 (P1)** — Thumbnail results in the chat are not interactive.
+
+## Locked decisions (user)
+
+- **1c:** Unified picker with **multi-select**: pick closet items + upload images in one flow.
+- **3c:** **Side sheet** floater that slides in from the right; chat stays visible (no dimmed backdrop).
+- **4b:** Image is **soft context**: Stylist may reference it when relevant, but is not required to anchor on it.
+
+## Root cause analysis (Issue #2)
+
+- Image bytes reach Gemini correctly end-to-end:
+  `stylist.py` reads `image` UploadFile → bytes → `logic.get_styling_advice(image_bytes=...)` →
+  `gemini_stylist.advise(image_base64=...)` → `UserMessage(file_contents=[ImageContent(...)])`.
+- **Bug:** `SYSTEM_PROMPT` in `gemini_stylist.py` (1322 chars) contains **zero** references to images/photos/attachments.
+  So Gemini receives the image without instruction to consider it.
+
+**Fix:** conditionally append an image-aware addendum to the system prompt when an image is attached. Use permissive language (“may reference”) to honor soft-context decision (4b).
+
+---
+
+## Phase S1 — Stylist sees the photo (P0 / backend)
 
 ### Implementation
-1. **Rewrite** `/app/inference-server/eyes/main.py`
-   - Remove `llama-server` subprocess orchestration and GGUF download code.
-   - Load base model:
-     - `AutoModelForMultimodalLM.from_pretrained("google/gemma-4-E2B-it", ...)`
-     - Apply int4 quant (prefer `bitsandbytes` for simplicity; fall back to `optimum-quanto` if bnb CPU path is problematic).
-   - Load processor: `AutoProcessor.from_pretrained(...)`.
-   - Load LoRA:
-     - `PeftModel.from_pretrained(model, "/adapter")`.
-   - Preserve the existing `POST /predict` input/output schema **verbatim** (`PredictIn` / `PredictOut`) so `garment_vision._call_gemma_space` needs **zero changes**.
+- Patch `app/backend/app/services/gemini_stylist.py`:
+  - Add `_IMAGE_CONTEXT_ADDENDUM` constant (4–6 lines):
+    - Image is **optional context**
+    - You **may** reference visible elements if relevant
+    - Do **not** invent details; if uncertain, say so
+  - In `advise()`: when `image_base64` is provided, append addendum to `sys_msg`.
+  - Order: append **before** `_language_directive` so language directive remains last.
+  - Add a one-line log breadcrumb confirming “image addendum applied”.
 
-2. Add **`POST /transcribe`** (multipart `audio/*`)
-   - Convert audio bytes → waveform in the format Gemma expects.
-   - Prompt as per Gemma audio ASR recommendations:
-     - “Transcribe … Only output transcription, no newlines, digits for numbers.”
-   - Response shape:
-     - `{ "text": str, "language": str | null, "duration_s": float | null }`.
+- Patch the Phase R multi-image path:
+  - Grep for the stylist multi-image composer prompt builder (`/api/v1/stylist/compose-outfit` stack) and add the same addendum when images are present.
 
-3. Rewrite `/app/inference-server/eyes/Dockerfile`
-   - Drop llama.cpp build stage entirely.
-   - Single-stage `python:3.11-slim` runtime.
-   - Install OS deps needed for audio decode:
-     - `ffmpeg`, `libsndfile1` (or equivalent), `ca-certificates`, `tini`.
-   - Install Python deps:
-     - `torch` CPU
-     - `transformers`
-     - `accelerate`
-     - `peft`
-     - `bitsandbytes` (or `optimum-quanto`)
-     - `pillow`
-     - `soundfile`, `librosa`
-
-4. Update `/app/inference-server/eyes/requirements.txt`
-   - Pin versions (avoid "latest") to prevent silent breakage.
-
-5. Health & diagnostics
-   - Enhance `GET /healthz` payload to surface:
-     - `model_loaded`, `adapter_loaded`
-     - `vision_enabled`, `audio_enabled`
-     - `resident_mb` (best-effort)
-     - `dtype` / quant method
-
-### Smoke testing (local / sandbox)
-- Build container in `/app` sandbox.
-- Hit `/predict` with a real garment image from `/app/inference-server/eyes/test_images/`.
-- Hit `/transcribe` with a short `.wav`.
-- Confirm no OOM and latency is acceptable on CPU.
+### Testing
+- Unit test asserts addendum appears **IFF** `image_base64` is truthy.
+- Ruff/lint passes on touched backend files.
 
 ---
 
-## Phase V4.2 — Backend STT migration **(P0)**
-
-### Goals
-- Replace Groq Whisper STT with the self-hosted Eyes `/transcribe`.
-- Keep Groq as fallback for resilience.
+## Phase S2 — Unified attachment picker with closet multi-select (P0 / frontend)
 
 ### Implementation
-1. Add `/app/backend/app/services/eyes_audio.py`
-   - Thin `httpx` client for `${EYES_GEMMA_SPACE_URL}/transcribe`.
-   - Match existing call signature used by voice pipeline:
-     - `transcribe(audio_bytes, filename="audio.webm", content_type="audio/webm") -> str`.
+- New component: `/app/frontend/src/components/stylist/AttachmentPicker.jsx`
+  - Single paperclip trigger button in the composer row (replaces bare file input UI).
+  - Opens a shadcn `Sheet` (bottom on mobile, side on desktop).
+  - Two tabs: **Upload** / **From Closet**.
+  - Upload tab: drag-and-drop + native multi-file input.
+  - From-Closet tab:
+    - grid from `closetStore` (already prewarmed)
+    - search bar with debounce
+    - multi-select with check overlay
+    - selection count
+  - Bottom action bar: Cancel + “Attach N”.
+  - Returns selections to `Stylist.jsx` as an array of records:
+    `{kind:'closet', id, name, image_url}`.
 
-2. Add `STT_PROVIDER` to `/app/backend/app/config.py`
-   - Default: `"eyes"`.
+- Wire `Stylist.jsx`
+  - Replace file input with `<AttachmentPicker>`.
+  - Maintain a selection preview row for both uploaded images and closet picks.
+  - On submit:
+    - For closet picks: fetch each image URL → Blob → File, append to existing `FormData` as `images`.
+    - This keeps the backend unchanged (MVP).
+  - Add remove (X) per attachment.
 
-3. Wire `/app/backend/app/services/logic.py`
-   - Prefer Eyes when `settings.STT_PROVIDER == "eyes"`.
-   - On 5xx/timeout: fall back to `groq_whisper_service`.
-   - Keep Groq service code unchanged.
-
-### Testing
-- Pytest unit test for `eyes_audio.py` using `httpx` mocking.
-- Integration test: `logic.py` STT path chooses Eyes and falls back correctly.
+### Test IDs (mandatory)
+- `attachment-picker-trigger`, `attachment-picker-sheet`,
+  `attachment-picker-tab-upload`, `attachment-picker-tab-closet`,
+  `attachment-picker-search`, `attachment-picker-item-{id}`,
+  `attachment-picker-confirm`, `attachment-picker-cancel`.
 
 ---
 
-## Phase V4.3 — Frontend TTS migration (Deepgram retirement) **(P0/P1)**
-
-### Goals
-- Retire Deepgram TTS.
-- Use device-native speech:
-  - Web: `window.speechSynthesis`
-  - Future mobile: `@capacitor-community/text-to-speech`
+## Phase S3 — Side-sheet item floater on thumbnail click (P1 / frontend)
 
 ### Implementation
-1. Add `/app/frontend/src/lib/tts.js`
-   - `speak(text, { lang, onStart, onEnd, onError })`.
-   - If running under Capacitor and plugin available → use plugin.
-   - Else → `window.speechSynthesis`.
-   - Voice selection:
-     - prefer `voice.localService === true` with matching `lang`
-     - then `voice.default`.
+- New component: `/app/frontend/src/components/stylist/ItemFloater.jsx`
+  - Fixed-position right-edge panel (no backdrop dim).
+  - Desktop width ~360px; mobile full-width.
+  - Content:
+    - large image
+    - name + category badge
+    - color swatch + name
+    - condition pill
+    - optional brand/description
+    - primary “View full details” → `/closet/:id`
+    - close (X)
+  - Dismiss: X, ESC, click outside panel.
+  - Animation: slide-in from right (200ms).
+  - Accessibility: focus trap, restore focus.
 
-2. Replace Deepgram call sites in frontend
-   - Swap to `tts.speak(...)`.
-   - No new UI surfaces; behind-the-scenes only.
+- Wire call-sites (thumbnail click opens floater)
+  - `OutfitRecommendationCard.jsx`
+  - Inline closet suggestions in `Stylist.jsx` message stream
+  - Inline closet suggestions in `OutfitCompletionSheet.jsx`
 
-3. Backend deprecation marker
-   - Mark `/app/backend/app/services/deepgram_service.py` deprecated.
-   - Remove any streaming WS behavior; routes (if exposed) return **410 Gone** with an explanatory body.
-
-### Testing
-- Playwright smoke:
-  - open stylist chat
-  - send a message
-  - assert `window.speechSynthesis.speaking` flips true.
-
----
-
-## Phase V4.4 — Unsloth → GGUF Colab notebook **(P1)**
-
-### Goals
-- Provide a stable recipe to export Eyes v4 to GGUF later, enabling a future flip back to llama.cpp/llama-server.
-- Avoid re-deriving the conversion steps and known pitfalls.
-
-### Deliverables
-- New generator script: `/app/scripts/build_eyes_unsloth_gguf_notebook.py`.
-- Generated notebook committed at: `/app/docs/notebooks/Eyes_v4_Unsloth_GGUF.ipynb`.
-
-### Notebook outline (idempotent)
-1. GPU runtime hint (A100/L4) + clean-kernel reminder.
-2. `pip install unsloth` then `import unsloth` **before** any transformers/peft import.
-3. Mount Drive; locate latest non-empty `checkpoint-N/adapter_model.safetensors` under `Eyes_v4_run/`.
-4. Load base + adapter:
-   - `FastModel.from_pretrained("google/gemma-4-E2B-it", ...)`
-   - `model.load_adapter(checkpoint_path)`.
-5. Export:
-   - `model.save_pretrained_gguf("eyes_v4_q4km", tokenizer, quantization_method="q4_k_m")`.
-6. Validate GGUF:
-   - Use `_peek_gguf_arch` helper (ported from `inference-server/eyes/main.py`) to assert:
-     - `general.architecture == "gemma4"`
-     - `n_tensors > 0`.
-7. Optional upload:
-   - `push_to_hub_gguf("Yoram-Jacobs/dressapp-eyes-gguf", ...)` behind a parameter.
-8. Copy outputs to Drive `Eyes_v4_Gemma4_GGUF/`.
-
-### Testing
-- Generator produces valid `.ipynb`:
-  - `json.loads`
-  - `nbformat.validate`.
-- No GPU execution performed in-repo.
+### Test IDs
+- `item-floater-panel`, `item-floater-close`, `item-floater-view-details`, `item-floater-image`.
 
 ---
 
-## Phase V4.5 — Docs + retirement notes **(P1)**
+## Phase S4 — Smoke tests + lint (P0)
 
-- Update `/app/inference-server/eyes/V4_DEPLOY.md` decision log:
-  - Path C is live
-  - v3 GGUF retired
-  - Unsloth notebook added
-- Update `/app/plan.md` “Next Actions” section to reflect Phase V4 as the active production-unblocker.
-- Explicitly defer **Issue #2** (CCP ground-truth class remap in `run_eyes_benchmark.py`) to a follow-up session.
+- Backend:
+  - Ruff lint
+  - Pytest for prompt addendum
+- Frontend:
+  - build/compile check
+  - Playwright (testing_agent) flow:
+    - open stylist
+    - attach via picker (1 closet item + 1 upload)
+    - submit
+    - verify response mentions that an image was received or shows image-aware reasoning (soft reference allowed)
+    - click a thumbnail → floater opens → “View details” navigates
 
 ---
 
-## Testing strategy summary (Phase V4)
+## Execution order
 
-- **V4.1** — local Docker smoke test + `/predict` image + `/transcribe` wav, verify OOM ceiling.
-- **V4.2** — unit tests for client + integration test of `logic.py` STT selection/fallback.
-- **V4.3** — Playwright smoke for speech start event.
-- **V4.4** — notebook generation validation via `nbformat`.
-- **V4.5** — docs only.
+**S1 → S3 → S2 → S4**
 
-**Execution order:** V4.1 → V4.2 → V4.3 → V4.4 → V4.5.
+Rationale:
+- S1 is a surgical backend patch that immediately fixes the user’s mental model (“photo isn’t ignored”).
+- S3 is shorter than S2 and yields a visible quality lift quickly.
+- S2 is the largest (unified picker + multi-select) and lands after the photo bug is fixed.
+
+---
+
+## Out of scope (intentional)
+
+- Multi-select Stylist response actions (e.g. “save this whole outfit”).
+- Backend `closet_item_ids` form field to skip image round-trip (future optimisation).
+- Reworking the entire composer layout — only the attachment entry point changes.

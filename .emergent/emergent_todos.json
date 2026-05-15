@@ -1,30 +1,26 @@
 [
   {
-    "content": "Rewrite /app/inference-server/eyes/main.py — Transformers+PEFT engine, int4, /predict + /transcribe",
+    "content": "Phase S1: image-aware addendum patch + tests + restart",
     "status": "completed"
   },
   {
-    "content": "Pin /app/inference-server/eyes/requirements.txt",
+    "content": "Phase S3: ItemFloater + OutfitRecommendationCard wiring + Stylist mount + OutfitCompletionSheet wiring",
     "status": "completed"
   },
   {
-    "content": "Rewrite /app/inference-server/eyes/Dockerfile",
+    "content": "Phase S2: AttachmentPicker.jsx component",
     "status": "completed"
   },
   {
-    "content": "Lint inference-server/eyes/main.py with ruff — passed",
+    "content": "Phase S2: Wire AttachmentPicker into Stylist.jsx composer (replaces bare <input type=file>)",
     "status": "completed"
   },
   {
-    "content": "Smoke-test routes via TestClient — / 200, /healthz 503, /predict 503, /transcribe 503",
+    "content": "Phase S2: visual confirmation — picker opens, both tabs render, 66 closet tiles visible, counters live",
     "status": "completed"
   },
   {
-    "content": "Update /app/inference-server/eyes/V4_DEPLOY.md with deployment runbook",
-    "status": "completed"
-  },
-  {
-    "content": "Phase V4.1 review with user before moving to V4.2 backend STT wiring",
+    "content": "Phase S4: testing_agent smoke (Playwright) — full chain",
     "status": "in_progress"
   }
 ]
