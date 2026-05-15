@@ -1,30 +1,30 @@
 [
   {
-    "content": "Revert closet.py multi-branch wiring + one_pass field",
+    "content": "Rewrite /app/inference-server/eyes/main.py — Transformers+PEFT engine, int4, /predict + /transcribe",
+    "status": "completed"
+  },
+  {
+    "content": "Pin /app/inference-server/eyes/requirements.txt",
+    "status": "completed"
+  },
+  {
+    "content": "Rewrite /app/inference-server/eyes/Dockerfile",
+    "status": "completed"
+  },
+  {
+    "content": "Lint inference-server/eyes/main.py with ruff — passed",
+    "status": "completed"
+  },
+  {
+    "content": "Smoke-test routes via TestClient — / 200, /healthz 503, /predict 503, /transcribe 503",
+    "status": "completed"
+  },
+  {
+    "content": "Update /app/inference-server/eyes/V4_DEPLOY.md with deployment runbook",
+    "status": "completed"
+  },
+  {
+    "content": "Phase V4.1 review with user before moving to V4.2 backend STT wiring",
     "status": "in_progress"
-  },
-  {
-    "content": "Revert config.py EYES_LOCAL setting",
-    "status": "pending"
-  },
-  {
-    "content": "Revert .env.example EYES_LOCAL section",
-    "status": "pending"
-  },
-  {
-    "content": "Delete local_eyes_runtime.py",
-    "status": "pending"
-  },
-  {
-    "content": "Create inference-server/eyes/V4_DEPLOY.md",
-    "status": "pending"
-  },
-  {
-    "content": "Tell user how to switch production to EYES_PROVIDER=gemini",
-    "status": "pending"
-  },
-  {
-    "content": "Lint + smoke-test backend after revert",
-    "status": "pending"
   }
 ]

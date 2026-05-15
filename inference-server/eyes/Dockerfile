@@ -1,130 +1,99 @@
-# DressApp Eyes (Gemma-4 E2B GGUF) — CPU-only Hetzner deploy.
+# DressApp Eyes v4 — Transformers + PEFT container (CPU-only).
 #
-# ARCHITECTURE NOTE — why we don't use llama-cpp-python any more.
-# ===============================================================
-# Your fine-tune base is ``unsloth/gemma-4-e2b-it-unsloth-bnb-4bit``
-# (Google Gemma 4, April 2026). The GGUF metadata pre-flight confirmed
-# ``general.architecture: 'gemma4'``. Gemma 4 support landed in
-# llama.cpp mainline via Unsloth's PR #21343, but ``llama-cpp-python``
-# wheels (latest 0.3.22 at time of writing) bundle a llama.cpp commit
-# from BEFORE that merge — its loader rejects gemma4 GGUFs with the
-# generic "Failed to load model from file".
+# WHY THIS DROPS THE LLAMA.CPP BUILD STAGE
+# =========================================
+# The v3 Dockerfile compiled llama-server from llama.cpp HEAD to serve
+# Gemma-4 GGUFs. Eyes v4 cannot use that pipeline because upstream
+# llama.cpp does not yet support Gemma-4 multimodal LoRA → GGUF export
+# (the converter outputs 0-tensor files). See V4_DEPLOY.md.
 #
-# Rather than wait for a llama-cpp-python release that catches up, we
-# build ``llama-server`` from llama.cpp HEAD ourselves and run it as
-# the actual inference engine. main.py becomes a thin FastAPI proxy
-# that forwards our existing ``/predict`` contract onto llama-server's
-# OpenAI-compatible ``/v1/chat/completions`` endpoint — backend's
-# ``garment_vision._call_gemma_space`` is therefore unchanged.
+# Eyes v4 therefore runs the model directly in PyTorch via
+# transformers + peft, quantized to int4 on CPU through optimum-quanto.
+# That moves the heavy lifting from C++ (llama.cpp) to Python, but
+# also removes the entire build toolchain from the image — no cmake,
+# no gcc/g++, no curl/openssl headers. The runtime image is therefore
+# slimmer than v3 despite carrying torch (~200 MB CPU wheel).
 #
-# Multi-stage build:
-#   Stage 1 (builder)  — full toolchain, compiles llama-server.
-#   Stage 2 (runtime)  — slim Python image, just the binary + proxy.
-#
-# This keeps the runtime image small (~250 MB) while building llama.cpp
-# in isolation. CPX32's 4 dedicated AMD vCPUs compile it in ~5 min;
-# the layer is then cached for subsequent rebuilds.
+# Memory profile on Hetzner CPX32 (4 vCPU AMD, 8 GB RAM):
+#   * int4 quanto weights : ~1.7 GB
+#   * activations / KV    : ~0.6 GB (peak)
+#   * python / FastAPI    : ~0.3 GB
+#   * OS + docker engine  : ~0.5 GB
+#   --------------------------------
+#   Total peak            : ~3.1 GB
+#   Headroom              : ~4.9 GB
+# Matches the user's "runs on Raspberry Pi at Q4" mental model.
 
-# =============================================================
-# Stage 1 — build llama-server from llama.cpp mainline.
-# =============================================================
-FROM debian:bookworm-slim AS builder
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      build-essential cmake git curl ca-certificates \
-      libcurl4-openssl-dev pkg-config \
- && rm -rf /var/lib/apt/lists/*
-
-# Pin to a specific commit so the build is reproducible. Update by
-# bumping LLAMA_CPP_REF and rebuilding. ``master`` is the mainline.
-# We pick master here because gemma4 support is recent (post Apr 2026)
-# and we want to track upstream until it's clearly stable. Once Gemma 4
-# fixes settle, pin to a specific commit hash for reproducibility.
-ARG LLAMA_CPP_REF=master
-
-WORKDIR /src
-RUN git clone --depth=1 --branch ${LLAMA_CPP_REF} \
-      https://github.com/ggml-org/llama.cpp.git
-
-WORKDIR /src/llama.cpp
-
-# Build flags:
-#   GGML_NATIVE=OFF        — portable binary, doesn't pin to host CPU
-#                             features (Hetzner may migrate the host).
-#   GGML_BLAS=OFF          — skip system BLAS, GGML's built-in is fine
-#                             for CPU and avoids the libopenblas dep.
-#   LLAMA_BUILD_TESTS=OFF  — skip test binaries.
-#   LLAMA_BUILD_EXAMPLES=OFF — we only need llama-server.
-#   LLAMA_CURL=ON          — enables ``-hf`` direct HuggingFace pulls
-#                             (we don't use this here — Python proxy
-#                             handles the download — but it's free).
-RUN cmake -B build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DBUILD_SHARED_LIBS=OFF \
-      -DGGML_NATIVE=OFF \
-      -DGGML_BLAS=OFF \
-      -DLLAMA_BUILD_TESTS=OFF \
-      -DLLAMA_BUILD_EXAMPLES=OFF \
-      -DLLAMA_CURL=ON \
- && cmake --build build --config Release \
-      --target llama-server \
-      -j 4
-
-# =============================================================
-# Stage 2 — slim runtime.
-# =============================================================
 FROM python:3.11-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HUB_ENABLE_HF_TRANSFER=0
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=0 \
+    # Hugging Face caches go in a volume so model weights survive
+    # container recreation. compose mounts ``models-cache`` here.
+    HF_HOME=/models \
+    TRANSFORMERS_CACHE=/models \
+    # Pin BLAS threads to the host's vCPU count. CPX32 is 4 vCPU;
+    # over-subscribing here just thrashes the cache.
+    OMP_NUM_THREADS=4 \
+    MKL_NUM_THREADS=4
 
-# Runtime deps:
-#   curl              — HEALTHCHECK + admin smoke tests.
-#   libgomp1          — OpenMP runtime, llama.cpp links against it.
-#   libcurl4          — required by llama-server when built with LLAMA_CURL=ON.
-#   ca-certificates   — HTTPS to huggingface.co for GGUF download.
-#   tini              — proper PID 1, reaps the llama-server child cleanly.
+# --- OS dependencies -------------------------------------------------
+# ffmpeg + libsndfile1 are required by librosa to decode the audio
+# uploads on POST /transcribe. tini provides a real PID 1 so the
+# container shuts down cleanly when supervisord sends SIGTERM.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      curl libgomp1 libcurl4 ca-certificates tini \
+      ffmpeg \
+      libsndfile1 \
+      libgomp1 \
+      curl \
+      ca-certificates \
+      tini \
  && rm -rf /var/lib/apt/lists/*
-
-# Pull the freshly-built binary from the builder stage. We deliberately
-# don't copy the whole /src tree — just the one binary we need.
-COPY --from=builder /src/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
-RUN chmod +x /usr/local/bin/llama-server \
- && /usr/local/bin/llama-server --version || true
 
 WORKDIR /app
 
-# --- Python deps for the proxy ---------------------------------------
-COPY requirements.txt ./requirements.txt
+# --- Python deps: install torch CPU FIRST ----------------------------
+# Doing this in a separate layer keeps the (large, slow) torch download
+# out of the requirements.txt rebuild path during dev. The +cpu wheel is
+# ~180 MB vs. ~2 GB for the CUDA wheel — important on a hosted runner.
 RUN pip install --upgrade pip \
- && pip install --prefer-binary -r requirements.txt
+ && pip install --prefer-binary \
+      --extra-index-url https://download.pytorch.org/whl/cpu \
+      "torch==2.4.1+cpu"
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --prefer-binary -r requirements.txt
 
 # --- App code --------------------------------------------------------
 COPY main.py ./main.py
 
-# --- Runtime defaults -----------------------------------------------
-ENV EYES_MODEL_DIR=/models \
-    EYES_MODEL_REPO=Yoram-Jacobs/dressapp-eyes-gguf \
-    EYES_MODEL_FILE=phase6-Q4_K_M.gguf \
-    LLAMA_THREADS=2 \
-    LLAMA_CTX_SIZE=4096 \
-    LLAMA_N_BATCH=256 \
-    LLAMA_INTERNAL_PORT=8080 \
+# --- Runtime defaults ------------------------------------------------
+ENV EYES_BASE_MODEL=google/gemma-4-E2B-it \
+    EYES_ADAPTER_DIR=/adapter \
+    EYES_QUANT=int4 \
+    EYES_COMPUTE_DTYPE=bfloat16 \
+    EYES_MAX_NEW_TOKENS=1024 \
+    EYES_MAX_AUDIO_SECONDS=30 \
+    EYES_GENERATE_TIMEOUT_S=180 \
+    LOG_LEVEL=INFO \
     PORT=7860
 
 EXPOSE 7860
 
-# Healthcheck waits up to 10 minutes on first boot (GGUF download +
-# llama-server warm-up). After that, restarts are <1 min.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
+# Healthcheck. First-boot is slow because we download Gemma-4 weights
+# (~5 GB) on a cold cache. Once HF_HOME is warm in the mounted volume,
+# subsequent restarts are ~30 s (load weights into RAM + apply LoRA).
+# start-period therefore allows up to 15 min before we start failing.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=900s --retries=3 \
   CMD curl -fsS http://localhost:7860/healthz || exit 1
 
-# tini reaps the llama-server child if uvicorn exits, preventing a
-# zombie process from holding 4 GB of RAM after a crash.
 ENTRYPOINT ["/usr/bin/tini", "--"]
+# Single worker on purpose:
+#  * the model lives in this process; multiple workers would each
+#    duplicate the ~2 GB resident weights and OOM the host.
+#  * concurrent generate() calls are serialised inside main.py via
+#    asyncio.Lock — the FastAPI event loop handles request fan-in.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]

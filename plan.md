@@ -217,7 +217,6 @@ Closed the last 4 known gaps where translated strings already existed in every l
   - loading / disconnected / connected / error states
   - Connect flow opens `https://<backend>/extension/connect?ext_id=<id>&v=1`
   - displays `/api/v1/users/me` measurement summary
-  - sign-out wipes token in `chrome.storage.local`
 - ✅ Content script injection on supported stores:
   - mounts a “DressApp size” button next to detected size anchors
   - extracts size chart HTML and calls backend analysis
@@ -250,7 +249,6 @@ Closed the last 4 known gaps where translated strings already existed in every l
 - ✅ Screenshot fallback when HTML/image extraction fails:
   - added SW handler `CAPTURE_VISIBLE_TAB` using `chrome.tabs.captureVisibleTab`
   - added `tabs` permission to manifest
-  - content script now sends `chart_screenshot_b64` (JPEG base64, no prefix) to backend
 - ✅ Broader anchor detection:
   - supports size pill/button groups and accessibility roles
 - ✅ Overlay UX + testability:
@@ -576,3 +574,196 @@ Delivered previously; unchanged.
 - Refund policy for captured donation shipping
 - Transactions search by listing title (future QoL)
 - Chrome Web Store publishing (until Phase X.6 manual E2E is complete)
+
+---
+
+# Phase V4 — Eyes v4 Production Deploy + Audio Migration (2026 continuation)
+
+> **Do not rewrite the plan above; this section appends the v4 story.**
+>
+> **Context:** Eyes v4 LoRA training on `google/gemma-4-E2B-it` succeeded (valid 22MB adapter extracted). GGUF conversion via upstream `llama.cpp` remains blocked/unstable for Gemma-4 multimodal LoRAs, so we ship **Path C**: Transformers + PEFT inside the existing `dressapp-eyes` sidecar container.
+
+## V4 decisions (locked)
+
+- **Deploy shape:** Eyes v4 ships via **Path C** (Transformers + PEFT in-container) on the existing Hetzner CPX32 (CPU-only, 8GB).
+- **v3 retirement:** The v3 GGUF path is **permanently retired** for production use.
+- **Fallback:** Gemini remains the operational fallback via DB override (`eyes_override.py`: `gemma` ↔ `gemini`).
+- **Quantization:** **int4** via `bitsandbytes` or `optimum-quanto` (target ~1.5–2GB resident footprint).
+- **Adapter delivery:** Volume mount **`/srv/AI-Stylist/eyes_v4_adapter -> /adapter:ro`**. No HF re-upload, no image rebake.
+- **STT:** Gemma-4 audio tower replaces Groq Whisper via a new Eyes endpoint: **`POST /transcribe`**. Groq remains behind a feature flag fallback.
+- **TTS:** Deepgram is retired. Web uses **`window.speechSynthesis`**; future Capacitor build uses **`@capacitor-community/text-to-speech`** through a shared abstraction.
+- **Future back-conversion:** Scaffold an **Unsloth → GGUF Colab notebook** so we can flip back to llama.cpp inference later when Unsloth’s Gemma-4 multimodal GGUF export is stable.
+
+---
+
+## Phase V4.1 — Eyes inference server rewrite (Path C) **(✅ COMPLETE)**
+
+### Goals
+- Replace the `dressapp-eyes` container runtime from `llama-server` to **Transformers+PEFT** while keeping the backend contract stable.
+- Support **vision inference** for AddItem via the existing `POST /predict` contract.
+- Add **speech-to-text** endpoint `POST /transcribe` for later backend migration.
+
+### Implementation
+1. **Rewrite** `/app/inference-server/eyes/main.py`
+   - Remove `llama-server` subprocess orchestration and GGUF download code.
+   - Load base model:
+     - `AutoModelForMultimodalLM.from_pretrained("google/gemma-4-E2B-it", ...)`
+     - Apply int4 quant (prefer `bitsandbytes` for simplicity; fall back to `optimum-quanto` if bnb CPU path is problematic).
+   - Load processor: `AutoProcessor.from_pretrained(...)`.
+   - Load LoRA:
+     - `PeftModel.from_pretrained(model, "/adapter")`.
+   - Preserve the existing `POST /predict` input/output schema **verbatim** (`PredictIn` / `PredictOut`) so `garment_vision._call_gemma_space` needs **zero changes**.
+
+2. Add **`POST /transcribe`** (multipart `audio/*`)
+   - Convert audio bytes → waveform in the format Gemma expects.
+   - Prompt as per Gemma audio ASR recommendations:
+     - “Transcribe … Only output transcription, no newlines, digits for numbers.”
+   - Response shape:
+     - `{ "text": str, "language": str | null, "duration_s": float | null }`.
+
+3. Rewrite `/app/inference-server/eyes/Dockerfile`
+   - Drop llama.cpp build stage entirely.
+   - Single-stage `python:3.11-slim` runtime.
+   - Install OS deps needed for audio decode:
+     - `ffmpeg`, `libsndfile1` (or equivalent), `ca-certificates`, `tini`.
+   - Install Python deps:
+     - `torch` CPU
+     - `transformers`
+     - `accelerate`
+     - `peft`
+     - `bitsandbytes` (or `optimum-quanto`)
+     - `pillow`
+     - `soundfile`, `librosa`
+
+4. Update `/app/inference-server/eyes/requirements.txt`
+   - Pin versions (avoid "latest") to prevent silent breakage.
+
+5. Health & diagnostics
+   - Enhance `GET /healthz` payload to surface:
+     - `model_loaded`, `adapter_loaded`
+     - `vision_enabled`, `audio_enabled`
+     - `resident_mb` (best-effort)
+     - `dtype` / quant method
+
+### Smoke testing (local / sandbox)
+- Build container in `/app` sandbox.
+- Hit `/predict` with a real garment image from `/app/inference-server/eyes/test_images/`.
+- Hit `/transcribe` with a short `.wav`.
+- Confirm no OOM and latency is acceptable on CPU.
+
+---
+
+## Phase V4.2 — Backend STT migration **(P0)**
+
+### Goals
+- Replace Groq Whisper STT with the self-hosted Eyes `/transcribe`.
+- Keep Groq as fallback for resilience.
+
+### Implementation
+1. Add `/app/backend/app/services/eyes_audio.py`
+   - Thin `httpx` client for `${EYES_GEMMA_SPACE_URL}/transcribe`.
+   - Match existing call signature used by voice pipeline:
+     - `transcribe(audio_bytes, filename="audio.webm", content_type="audio/webm") -> str`.
+
+2. Add `STT_PROVIDER` to `/app/backend/app/config.py`
+   - Default: `"eyes"`.
+
+3. Wire `/app/backend/app/services/logic.py`
+   - Prefer Eyes when `settings.STT_PROVIDER == "eyes"`.
+   - On 5xx/timeout: fall back to `groq_whisper_service`.
+   - Keep Groq service code unchanged.
+
+### Testing
+- Pytest unit test for `eyes_audio.py` using `httpx` mocking.
+- Integration test: `logic.py` STT path chooses Eyes and falls back correctly.
+
+---
+
+## Phase V4.3 — Frontend TTS migration (Deepgram retirement) **(P0/P1)**
+
+### Goals
+- Retire Deepgram TTS.
+- Use device-native speech:
+  - Web: `window.speechSynthesis`
+  - Future mobile: `@capacitor-community/text-to-speech`
+
+### Implementation
+1. Add `/app/frontend/src/lib/tts.js`
+   - `speak(text, { lang, onStart, onEnd, onError })`.
+   - If running under Capacitor and plugin available → use plugin.
+   - Else → `window.speechSynthesis`.
+   - Voice selection:
+     - prefer `voice.localService === true` with matching `lang`
+     - then `voice.default`.
+
+2. Replace Deepgram call sites in frontend
+   - Swap to `tts.speak(...)`.
+   - No new UI surfaces; behind-the-scenes only.
+
+3. Backend deprecation marker
+   - Mark `/app/backend/app/services/deepgram_service.py` deprecated.
+   - Remove any streaming WS behavior; routes (if exposed) return **410 Gone** with an explanatory body.
+
+### Testing
+- Playwright smoke:
+  - open stylist chat
+  - send a message
+  - assert `window.speechSynthesis.speaking` flips true.
+
+---
+
+## Phase V4.4 — Unsloth → GGUF Colab notebook **(P1)**
+
+### Goals
+- Provide a stable recipe to export Eyes v4 to GGUF later, enabling a future flip back to llama.cpp/llama-server.
+- Avoid re-deriving the conversion steps and known pitfalls.
+
+### Deliverables
+- New generator script: `/app/scripts/build_eyes_unsloth_gguf_notebook.py`.
+- Generated notebook committed at: `/app/docs/notebooks/Eyes_v4_Unsloth_GGUF.ipynb`.
+
+### Notebook outline (idempotent)
+1. GPU runtime hint (A100/L4) + clean-kernel reminder.
+2. `pip install unsloth` then `import unsloth` **before** any transformers/peft import.
+3. Mount Drive; locate latest non-empty `checkpoint-N/adapter_model.safetensors` under `Eyes_v4_run/`.
+4. Load base + adapter:
+   - `FastModel.from_pretrained("google/gemma-4-E2B-it", ...)`
+   - `model.load_adapter(checkpoint_path)`.
+5. Export:
+   - `model.save_pretrained_gguf("eyes_v4_q4km", tokenizer, quantization_method="q4_k_m")`.
+6. Validate GGUF:
+   - Use `_peek_gguf_arch` helper (ported from `inference-server/eyes/main.py`) to assert:
+     - `general.architecture == "gemma4"`
+     - `n_tensors > 0`.
+7. Optional upload:
+   - `push_to_hub_gguf("Yoram-Jacobs/dressapp-eyes-gguf", ...)` behind a parameter.
+8. Copy outputs to Drive `Eyes_v4_Gemma4_GGUF/`.
+
+### Testing
+- Generator produces valid `.ipynb`:
+  - `json.loads`
+  - `nbformat.validate`.
+- No GPU execution performed in-repo.
+
+---
+
+## Phase V4.5 — Docs + retirement notes **(P1)**
+
+- Update `/app/inference-server/eyes/V4_DEPLOY.md` decision log:
+  - Path C is live
+  - v3 GGUF retired
+  - Unsloth notebook added
+- Update `/app/plan.md` “Next Actions” section to reflect Phase V4 as the active production-unblocker.
+- Explicitly defer **Issue #2** (CCP ground-truth class remap in `run_eyes_benchmark.py`) to a follow-up session.
+
+---
+
+## Testing strategy summary (Phase V4)
+
+- **V4.1** — local Docker smoke test + `/predict` image + `/transcribe` wav, verify OOM ceiling.
+- **V4.2** — unit tests for client + integration test of `logic.py` STT selection/fallback.
+- **V4.3** — Playwright smoke for speech start event.
+- **V4.4** — notebook generation validation via `nbformat`.
+- **V4.5** — docs only.
+
+**Execution order:** V4.1 → V4.2 → V4.3 → V4.4 → V4.5.

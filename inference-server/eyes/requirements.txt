@@ -1,18 +1,54 @@
-# DressApp Eyes — proxy in front of a self-built llama.cpp server.
+# DressApp Eyes v4 — Transformers + PEFT runtime.
 #
-# We dropped llama-cpp-python because its bundled llama.cpp commit is
-# too old to load Gemma-4 GGUFs (arch ``gemma4``, merged into mainline
-# via Unsloth's PR #21343). The Dockerfile now builds ``llama-server``
-# from llama.cpp HEAD; this proxy wraps it.
+# Replaces the v3 llama-server proxy. We load `google/gemma-4-E2B-it`
+# directly via transformers, quantize to int4 on CPU via optimum-quanto,
+# and apply our Eyes v4 LoRA adapter from /adapter via peft.
 #
-# Inference engine        : llama-server  (PID started by lifespan)
-# Wire format internally  : OpenAI /v1/chat/completions on 127.0.0.1
-# Wire format externally  : our existing /predict shape (unchanged so
-#                           backend's ``_call_gemma_space`` keeps working)
+# Pins explained
+# ==============
+#   torch (CPU)       — the +cpu wheel is installed via --extra-index-url
+#                       in the Dockerfile. We pin a 2.4.x line so the
+#                       bf16-on-CPU intrinsics are present (added in 2.1)
+#                       AND the quanto kernels are stable.
+#   transformers      — 4.57+ exposes ``AutoModelForMultimodalLM`` (the
+#                       class Google's audio docs use for Gemma-4) and
+#                       integrates ``QuantoConfig``. main.py also probes
+#                       ``AutoModelForImageTextToText`` for older builds.
+#   peft              — 0.13+ added Gemma-4 LoRA target-module heuristics
+#                       and fixed merge_and_unload for clipped Linears.
+#   optimum-quanto    — int4/int8 weight-only quant that actually works
+#                       on x86 CPU. bitsandbytes' CPU path is still
+#                       experimental as of mid-2026; quanto is the safe
+#                       default.
+#   accelerate        — required by transformers' device_map="cpu"
+#                       and the from_pretrained meta-init pathway.
+#   librosa+soundfile — audio decode + 16 kHz mono float32 resample for
+#                       /transcribe (Gemma-4 audio tower input shape).
+#   python-multipart  — FastAPI's File()/UploadFile() requires this; it's
+#                       NOT a default transitive dep of fastapi[standard].
+#   huggingface_hub   — gated download of google/gemma-4-E2B-it; the
+#                       transformers `from_pretrained(token=...)` call
+#                       routes through this.
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
+python-multipart==0.0.20
 pydantic==2.10.4
-huggingface_hub==0.27.0
-# httpx talks to the local llama-server on the loopback. Sync would
-# work too, but we want to stream-cancel on FastAPI client-disconnect.
 httpx==0.28.1
+huggingface_hub>=0.34.0,<1.0
+
+# --- ML stack -------------------------------------------------------
+# torch is installed in the Dockerfile via the CPU index URL so we DON'T
+# pin it here (avoids pulling the 2 GB CUDA wheel by mistake).
+# transformers 4.57.0 was yanked by HF (install bug); we pin to the
+# patch line so we automatically pick up 4.57.1+. The lower bound is
+# the version that landed AutoModelForMultimodalLM + Gemma-4 support.
+transformers>=4.57.1,<4.59
+accelerate>=1.2.0,<2.0
+peft>=0.14.0,<1.0
+optimum-quanto>=0.2.6,<1.0
+safetensors>=0.4.5,<1.0
+
+# --- Image / Audio --------------------------------------------------
+pillow==11.0.0
+librosa==0.10.2
+soundfile==0.12.1

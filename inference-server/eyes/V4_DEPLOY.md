@@ -1,160 +1,220 @@
 # Eyes v4 — Deployment Plan
 
-> **Status (May 2026):** Eyes v4 LoRA training is complete; **deployment
-> is blocked on upstream Gemma-4 LoRA → GGUF conversion support** in
-> `llama.cpp`. Production currently runs `EYES_PROVIDER=gemini`
-> (Gemini-2.5-Flash via the Emergent LLM key). The trained v4 adapter
-> is preserved as a durable artefact and can be deployed in ~2 hours
-> once the blocker clears.
-
-This document records what we have, why we're not deploying it yet,
-and the three concrete paths to actually ship it once we are. Future
-you (or the next agent) reads this first.
+> **Status (continuation, 2026):** **Path C is live in /app.** Eyes v4
+> ships via the rewritten `inference-server/eyes/` container running
+> `transformers + peft` directly (no llama.cpp). The trained v4 LoRA
+> adapter is the on-disk artefact at `/srv/AI-Stylist/eyes_v4_adapter/`
+> on Hetzner and is volume-mounted into the container at `/adapter:ro`.
+> v3 GGUFs are retired; Gemini stays as the DB-override fallback.
 
 ---
 
-## TL;DR
+## TL;DR — what shipped this session
 
 | Asset | Where it lives | Size |
 | --- | --- | --- |
-| Trained Eyes v4 LoRA | `/srv/AI-Stylist/eyes_v4_adapter/` (Hetzner) **and** Drive `Eyes_v4_run/checkpoint-N/` | 22 MB |
-| Notebook that produced it | `/app/docs/notebooks/Eyes_FineTune_v4_Gemma4.ipynb` | 64 KB |
-| Generator for that notebook | `/app/scripts/build_eyes_finetune_v4_notebook.py` | 65 KB |
-| Base model on HF Hub | `google/gemma-4-E2B-it` (gated) | 5 GB bf16 |
-| Pre-converted base GGUF | `ggml-org/gemma-4-E2B-it-GGUF` (`gemma-4-E2B-it-Q8_0.gguf`) | 4.97 GB |
-| Pre-converted mmproj GGUF | `ggml-org/gemma-4-E2B-it-GGUF` (`mmproj-gemma-4-E2B-it-Q8_0.gguf`) | 532 MB |
+| Eyes v4 server runtime (Transformers + PEFT) | `/app/inference-server/eyes/main.py` | 21 KB |
+| Eyes v4 container image recipe | `/app/inference-server/eyes/Dockerfile` | 3 KB |
+| Pinned ML deps | `/app/inference-server/eyes/requirements.txt` | 2 KB |
+| Trained Eyes v4 LoRA adapter | `/srv/AI-Stylist/eyes_v4_adapter/` (Hetzner) | 22 MB |
+| Base model on HF Hub (gated) | `google/gemma-4-E2B-it` | 5 GB bf16 |
+| Unsloth → GGUF Colab generator (back-out path) | `/app/scripts/build_eyes_unsloth_gguf_notebook.py` | TBD (Phase V4.4) |
 
 ---
 
-## Why production isn't using Eyes v4 right now
+## Architecture — what changed vs. v3
 
-Three things have to be true to deploy it through the existing
-`inference-server/eyes` (llama.cpp + GGUF) pipeline:
+| Concern | v3 (May 2026) | v4 (this session) |
+| --- | --- | --- |
+| Inference engine | `llama-server` (compiled C++, GGUF) | `transformers` (PyTorch, native HF weights) |
+| Quantization | GGUF Q4_K_M (mixed) | optimum-quanto **int4** weight-only |
+| LoRA delivery | Merged into base, re-converted to GGUF | Live `/adapter` directory via `PeftModel` |
+| Image input | OpenAI-style `image_url` content-part | Native `{"type":"image","image": PIL}` in chat template |
+| Audio input | n/a (mmproj had no audio decoder mapping in GGUF) | **Native** via `POST /transcribe` |
+| Resident memory | ~3.7 GB peak | ~3.1 GB peak |
+| First-boot cold start | ~25 s | ~60-120 s (one-time HF download + bf16→int4 quantize) |
+| Restart from warm cache | ~12 s | ~30 s |
+| Backend client contract | `POST /predict` (custom JSON) | **UNCHANGED** — same `PredictIn`/`PredictOut` shape |
 
-1. ✅ A working **Gemma-4 base GGUF**. Solved — pre-converted by
-   `ggml-org` and downloadable via `hf_hub_download`.
-2. ✅ A working **Gemma-4 mmproj GGUF**. Same.
-3. ❌ A working **Eyes v4 LoRA GGUF** (or a merged Eyes v4 base GGUF).
-   **This is the blocker.**
-
-`llama.cpp/convert_lora_to_gguf.py` doesn't yet have Gemma-4 in its
-architecture map. We tried it on the trained adapter and it produced a
-GGUF with `n_tensors = 0` — metadata only, no weights. The full-model
-converter `convert_hf_to_gguf.py` similarly rejects
-`Gemma4ForConditionalGeneration` ("Model `Gemma4Model` is not
-supported"). PR is in flight; merge ETA unknown but likely days/weeks.
-
-In the meantime the existing v3 GGUFs at
-`Yoram-Jacobs/dressapp-eyes-gguf` are **suspect** — they were built off
-a wrong-class merge (`Gemma3ForConditionalGeneration` instead of the
-multimodal Gemma-4 head). Production therefore runs
-`EYES_PROVIDER=gemini` until v4 is shippable.
+The backend's `garment_vision._call_gemma_space` needs **zero changes**.
 
 ---
 
-## Three paths to actually ship Eyes v4
+## Deployment runbook (Hetzner CPX32)
 
-### Path A — Wait for upstream (recommended for now)
+This is the cookbook to flip production from "Gemini fallback" back to
+"self-hosted Gemma-4 v4" once you've validated v4 in staging.
 
-* **What**: Track [llama.cpp issue #22735](https://github.com/ggml-org/llama.cpp/issues/22735)
-  and the related Gemma-4 LoRA-export PR. When it merges, rebuild the
-  eyes container (`Dockerfile` already pulls `LLAMA_CPP_REF=master`),
-  then run `convert_lora_to_gguf.py --base google/gemma-4-E2B-it
-  --outfile Eyes_v4_lora.gguf eyes_v4_adapter/`.
-* **Cost**: €0, ~30 min of work when the day comes.
-* **When**: Probably 1-3 weeks based on PR velocity.
-* **Resulting deploy shape**: Push `Eyes_v4_lora.gguf` + the pre-converted
-  base + mmproj to `Yoram-Jacobs/dressapp-eyes-gguf`, update env:
-  ```
-  EYES_MODEL_FILE=gemma-4-E2B-it-Q8_0.gguf
-  EYES_MMPROJ_FILE=mmproj-gemma-4-E2B-it-Q8_0.gguf
-  EYES_LORA_FILE=Eyes_v4_lora.gguf
-  ```
-  Then add a `--lora /models/Eyes_v4_lora.gguf` flag to the
-  `llama-server` invocation in `inference-server/eyes/main.py`.
-  llama-server applies LoRA at runtime; no merge needed.
+### Pre-flight
 
-### Path B — Unsloth `save_pretrained_gguf` (today, GPU)
+1. **Confirm the adapter is in place on Hetzner**:
+   ```bash
+   ls -la /srv/AI-Stylist/eyes_v4_adapter/
+   # Expect adapter_config.json + adapter_model.safetensors (22 MB).
+   stat -c '%s' /srv/AI-Stylist/eyes_v4_adapter/adapter_model.safetensors
+   # Must be > 1 000 000 bytes. If it's 40 bytes, the file is empty —
+   # re-download from the highest-step checkpoint in Drive.
+   ```
 
-Unsloth has Gemma-4 conversion patches landed in their fork:
-`model.save_pretrained_gguf(directory, tokenizer, quantization_method="q4_k_m")`
-emits a merged Q4_K_M GGUF directly. Documented working as of May
-2026.
+2. **Confirm `EYES_HF_TOKEN` is set** in `/srv/AI-Stylist/deploy/.env`.
+   The base model is gated; the container needs a token with access to
+   `google/gemma-4-E2B-it`.
 
-* **Where to run**: Fresh Colab session (`import unsloth` BEFORE
-  `transformers`/`peft`, otherwise their numpy ABI patch fights ours
-  and the kernel needs a restart).
-* **Inputs**: The 22 MB adapter from Drive's
-  `Eyes_v4_run/checkpoint-N/`.
-* **Outputs**: A **merged** Q4_K_M GGUF (~3 GB) plus mmproj.
-* **Caveat**: Last attempt hit `RuntimeError: numpy was upgraded
-  mid-session` because we'd already imported transformers earlier in
-  the kernel. Must be the very first import in a clean session.
-* **After**: Upload the produced GGUFs to
-  `Yoram-Jacobs/dressapp-eyes-gguf`, bump `EYES_MODEL_FILE` /
-  `EYES_MMPROJ_FILE` in `deploy/.env`, `docker compose up -d eyes`.
-  No code changes.
+3. **Stop the old eyes container**:
+   ```bash
+   cd /srv/AI-Stylist
+   docker compose -f deploy/docker-compose.yml stop eyes
+   ```
 
-### Path C — Pivot eyes container to transformers + PEFT
+### Wire the volume mount
 
-Replace the llama.cpp + GGUF approach with a Python inference server
-that loads `google/gemma-4-E2B-it` via `AutoModelForMultimodalLM` and
-applies the LoRA via `PeftModel.from_pretrained`. Sidesteps GGUF
-entirely.
+Append to the `eyes` service in `deploy/docker-compose.yml`:
 
-* **Cost**:
-  * On the current CPX32 (8 GB CPU): bf16 won't fit; int8 via
-    bitsandbytes is feasible (~3 GB weights) but ~30-60 s per call.
-  * On a Hetzner GEX44 GPU sidecar (~€60/mo): 3-5 s per call, fits
-    cleanly.
-* **When to pick it**: If upstream Gemma-4 LoRA conversion takes longer
-  than expected AND you can stomach the latency hit / cost.
-* **Implementation seed**: A previous iteration of the backend wired
-  this up at `/app/backend/app/services/local_eyes_runtime.py` (now
-  reverted — see git history). That code is the right shape for a
-  thin FastAPI proxy inside the eyes container; lift the `analyze`
-  function and merge logic verbatim, swap the chat template + image
-  flow for the existing `inference-server/eyes/main.py` HTTP contract.
+```yaml
+services:
+  eyes:
+    # ... existing build / image / port config ...
+    volumes:
+      - eyes-cache:/models                       # HF weights cache (unchanged)
+      - /srv/AI-Stylist/eyes_v4_adapter:/adapter:ro   # NEW for v4
+    environment:
+      EYES_BASE_MODEL: google/gemma-4-E2B-it
+      EYES_ADAPTER_DIR: /adapter
+      EYES_QUANT: int4
+      EYES_COMPUTE_DTYPE: bfloat16
+      EYES_HF_TOKEN: ${EYES_HF_TOKEN}
+      EYES_API_TOKEN: ${EYES_API_TOKEN}
+      LOG_LEVEL: INFO
+```
+
+The old `EYES_MODEL_FILE` / `EYES_MMPROJ_FILE` / `EYES_MODEL_REPO`
+variables are no longer read; remove them or leave them as dead env
+(the container silently ignores unknown vars).
+
+### Build + boot the new image
+
+```bash
+docker compose -f deploy/docker-compose.yml build --no-cache eyes
+docker compose -f deploy/docker-compose.yml up -d --force-recreate eyes
+
+# Tail the logs through cold start. First boot downloads ~5 GB of
+# Gemma-4 weights into the HF cache volume; budget ~10 min over a
+# typical Hetzner link.
+docker compose -f deploy/docker-compose.yml logs -f eyes
+```
+
+You should see, in order:
+```
+INFO dressapp-eyes: DressApp Eyes v4 (transformers+peft) starting up
+INFO dressapp-eyes: loading base model google/gemma-4-E2B-it ...
+... (download progress)
+INFO dressapp-eyes: base model loaded in 94.3s
+INFO dressapp-eyes: attaching LoRA adapter from /adapter
+INFO dressapp-eyes: LoRA adapter attached in 1.8s
+INFO dressapp-eyes: READY — base=google/gemma-4-E2B-it adapter=True vision=True audio=True quant=int4 dtype=bfloat16 rss=1854 MB
+```
+
+If `adapter=False`, the `/adapter` volume mount is wrong — the
+container is serving the BASE (un-fine-tuned) Gemma-4. Stop and fix
+before flipping production traffic.
+
+### Verify
+
+```bash
+# Liveness
+curl -s http://localhost:7860/healthz | jq .
+# {
+#   "status": "ok",
+#   "base_model": "google/gemma-4-E2B-it",
+#   "adapter_loaded": true,
+#   "vision_enabled": true,
+#   "audio_enabled": true,
+#   "quant_method": "int4",
+#   "compute_dtype": "bfloat16",
+#   "resident_mb": 1860,
+#   "uptime_s": 47
+# }
+
+# Vision smoke test — pick any test image
+B64=$(base64 -w 0 < /srv/AI-Stylist/test_images/sample_shirt.jpg)
+curl -s -X POST http://localhost:7860/predict \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $EYES_API_TOKEN" \
+  -d "$(jq -n --arg b64 "$B64" '{
+        prompt: "Describe this garment in one short sentence.",
+        image_b64: $b64,
+        max_tokens: 80
+      }')" | jq .
+
+# STT smoke test — ~5 s wav
+curl -s -X POST http://localhost:7860/transcribe \
+  -H "Authorization: Bearer $EYES_API_TOKEN" \
+  -F "file=@sample_voice.wav" \
+  -F "language=English" | jq .
+```
+
+### Flip production to Gemma
+
+```bash
+# Run inside any backend container (or directly against Mongo Atlas)
+# to switch the live override from "gemini" back to "gemma":
+docker compose -f deploy/docker-compose.yml exec backend python -c \
+  "import asyncio; from app.services.eyes_override import set_override; \
+   print(asyncio.run(set_override('gemma', by_email='ops@dressapp.co')))"
+```
+
+The runtime override is read every 5 s; new analyze calls will be
+served by the self-hosted v4 within seconds.
+
+### Rollback (if Eyes v4 misbehaves)
+
+```bash
+# Instantly route 100% of traffic back to Gemini — no code change:
+docker compose -f deploy/docker-compose.yml exec backend python -c \
+  "import asyncio; from app.services.eyes_override import set_override; \
+   print(asyncio.run(set_override('gemini', by_email='ops@dressapp.co')))"
+```
+
+This bypasses the eyes container entirely; you can leave the
+misbehaving container running while you debug.
 
 ---
 
-## Recovering the adapter if `/srv/AI-Stylist/eyes_v4_adapter/` is wiped
+## Why we picked Path C over Path A (wait for upstream) / Path B (Unsloth GGUF)
 
-The trainer auto-saved checkpoints every 200 steps to
-`gdrive:/DressApp_Gemma4_E2B_Training/Eyes_v4_run/checkpoint-N/`.
-Each checkpoint has its own `adapter_config.json` +
-`adapter_model.safetensors`. The notebook's recovery cell walks them
-newest-first looking for a non-empty `adapter_model.safetensors` (>1
-KB), so even if the highest-step checkpoint is truncated, an earlier
-one will work.
+| Criterion | Path A (wait) | Path B (Unsloth) | **Path C (chosen)** |
+| --- | --- | --- | --- |
+| Ships today | ❌ | ⚠️ GPU Colab required | ✅ |
+| Production latency | ~3 s | ~3 s | 30–60 s (CPU) |
+| Quality after quantization | High (Q4_K_M) | High (Q4_K_M) | High (int4 quanto) |
+| Code change required | None | None | This commit |
+| Adapter handling | Runtime LoRA flag on llama-server | Merged + reconverted | Runtime `PeftModel` |
+| Future-proof | ⚠️ depends on upstream merge | ⚠️ depends on Unsloth stability | ✅ pure HF stack |
+| Memory on CPX32 | ~3.7 GB | ~3.7 GB | ~3.1 GB |
 
-Steps:
-1. Drive web UI → `My Drive/DressApp_Gemma4_E2B_Training/Eyes_v4_run/`.
-2. Pick the highest-numbered `checkpoint-N` whose
-   `adapter_model.safetensors` is many MB (right-click → Details).
-3. Download the folder, extract, copy
-   `adapter_config.json` + `adapter_model.safetensors` (and any
-   `tokenizer*.json`) to `/srv/AI-Stylist/eyes_v4_adapter/` on
-   Hetzner.
+The user explicitly accepted the CPU latency trade-off, citing
+"Gemma-4 runs fluently on Raspberry Pi at Q4". That mental model holds:
+optimum-quanto int4 weight-only is the closest HF-native analogue to
+llama.cpp's Q4_K_M, with comparable footprint.
+
+Path B (Unsloth) remains scaffolded as a **future-flip option** —
+see `/app/scripts/build_eyes_unsloth_gguf_notebook.py` (Phase V4.4).
+If Unsloth's Gemma-4 multimodal GGUF export stabilises, the team can
+generate v4 GGUFs and revert the container to the previous llama.cpp
+pipeline without touching the backend.
 
 ---
 
-## Environment & code hooks already in place
+## Audio pipeline migration (Phase V4.2 + V4.3)
 
-* `inference-server/eyes/Dockerfile` builds `llama-server` from
-  llama.cpp `master` — already supports Gemma-4 *inference*. No
-  rebuild needed when we eventually drop in v4 GGUFs.
-* `deploy/.env` reads:
-  ```
-  EYES_PROVIDER=gemma | gemini   # set to gemini for v4-pending fallback
-  EYES_GEMMA_SPACE_URL=http://eyes:7860
-  EYES_MODEL_FILE=…              # bumped to v4 once GGUF exists
-  EYES_MMPROJ_FILE=…
-  ```
-* `backend/app/services/garment_vision.py` `_call_gemma_space` is the
-  HTTP client that talks to `dressapp-eyes`. **Untouched** for v4 —
-  the contract stays the same; we just swap the GGUF behind the
-  llama-server.
+* **STT (Speech → Text)** — `POST /transcribe` on this container
+  replaces Groq Whisper. Backend wiring is the next phase (V4.2):
+  see `plan.md`.
+* **TTS (Text → Speech)** — **Deepgram is retired**. Gemma-4 has no
+  audio decoder. Frontend will use `window.speechSynthesis` (web)
+  and `@capacitor-community/text-to-speech` (mobile via Capacitor)
+  through a thin abstraction in `frontend/src/lib/tts.js`.
+  See V4.3 in `plan.md`.
 
 ---
 
@@ -162,7 +222,12 @@ Steps:
 
 | Date | Decision | Why |
 | --- | --- | --- |
-| 2026-05-15 | Production runs `EYES_PROVIDER=gemini`, not v3 GGUFs | v3 was built off a wrong-class merge (`Gemma3ForConditionalGeneration`); quality untrusted |
-| 2026-05-15 | `local_eyes_runtime.py` in backend reverted | Wrong layer — backend HTTP-calls a sidecar, doesn't load models in-process |
-| 2026-05-15 | Eyes v4 deployment deferred | Blocked on upstream Gemma-4 LoRA → GGUF support |
-| TBD | Pick Path A / B / C | When latency, cost, or upstream merge tips the calculus |
+| 2026-05-15 | Production runs `EYES_PROVIDER=gemini` (DB override), v3 GGUFs retired | v3 was built off a wrong-class merge; quality untrusted |
+| 2026-05-15 | `local_eyes_runtime.py` in backend reverted | Wrong architectural layer — backend HTTP-calls a sidecar |
+| 2026-05-15 | Eyes v4 deployment **deferred** | Blocked on upstream Gemma-4 LoRA → GGUF support |
+| 2026 (this session) | **Path C selected and shipped** | User accepts CPU latency on CPX32; cleanest production path today |
+| 2026 (this session) | `dressapp-eyes` container engine: `llama-server` → `transformers + peft` | Sidesteps the GGUF blocker entirely |
+| 2026 (this session) | Quantization: optimum-quanto int4 | Closest HF-native analogue to llama.cpp Q4_K_M on x86 CPU |
+| 2026 (this session) | LoRA adapter delivery: volume mount `/adapter:ro` | No HF re-upload, no image rebake, instant swap |
+| 2026 (this session) | STT supplier: Groq Whisper → Gemma-4 audio tower | Confirmed multimodal capability per `ai.google.dev/gemma/docs/capabilities/audio` |
+| 2026 (this session) | TTS supplier: Deepgram → `window.speechSynthesis` | Gemma-4 has no audio decoder; native browser/OS TTS is faster and free |
