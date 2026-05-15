@@ -47,13 +47,15 @@ EYES_LOCAL_BASE_MODEL = os.environ.get(
     "EYES_LOCAL_BASE_MODEL", "google/gemma-4-E2B-it"
 )
 EYES_LOCAL_ADAPTER_DIR = os.environ.get(
-    "EYES_LOCAL_ADAPTER_DIR", "/srv/eyes/eyes_v4_adapter"
+    "EYES_LOCAL_ADAPTER_DIR", "/srv/AI-Stylist/eyes_v4_adapter"
 )
 # Optional dir containing SYSTEM_PROMPT.txt + USER_INSTRUCTION.txt
 # (the Colab notebook saves these alongside the adapter). When the
 # files are absent or unreadable we fall back to baked-in defaults so
 # the runtime works even if only the adapter weights got copied over.
-EYES_LOCAL_PROMPTS_DIR = os.environ.get("EYES_LOCAL_PROMPTS_DIR", "/srv/eyes")
+EYES_LOCAL_PROMPTS_DIR = os.environ.get(
+    "EYES_LOCAL_PROMPTS_DIR", "/srv/AI-Stylist/eyes_v4_adapter"
+)
 EYES_LOCAL_MAX_NEW_TOKENS = int(os.environ.get("EYES_LOCAL_MAX_NEW_TOKENS", "256"))
 # ``device_map`` for HF ``from_pretrained``. ``"auto"`` uses every GPU
 # the box has; set to ``{"": 0}`` to pin to GPU 0 if you're sharing
@@ -123,8 +125,8 @@ def _init_sync() -> dict[str, Any]:
     if not adapter_dir.is_dir():
         raise RuntimeError(
             f"Eyes adapter not found at {adapter_dir!s}. Set "
-            "EYES_LOCAL_ADAPTER_DIR or copy the trained adapter from the "
-            "training Drive (it lives at "
+            "EYES_LOCAL_ADAPTER_DIR or copy the trained adapter from "
+            "the training Drive (it lives at "
             "DressApp_Gemma4_E2B_Training/eyes_v4_adapter)."
         )
 
