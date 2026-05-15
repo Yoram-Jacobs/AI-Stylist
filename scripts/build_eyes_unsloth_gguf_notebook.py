@@ -456,35 +456,62 @@ MD_LOAD = """\
 
 `FastVisionModel.from_pretrained` is Unsloth's entry point for the
 **multimodal** Gemma-4 variants (E2B and E4B — the ones with the
-vision tower and the audio tower). For our use case:
+vision tower and the audio tower). For our use case we have to be
+**very specific** about how we load, because Unsloth's GGUF export
+pipeline has two interacting foot-guns we have to dodge:
 
-* We prefer `unsloth/gemma-4-E2B-it` as the base (Unsloth-shipped
-  variant with the bug fixes from
-  https://unsloth.ai/docs/models/gemma-4/train#bug-fixes--tips).
-  Google's gated `google/gemma-4-E2B-it` works too if you have HF
-  auth set up.
-* We load at `load_in_4bit=True` because we're about to merge into a
-  Q4_K_M GGUF anyway — going through 4-bit shaves ~30 s off the merge
-  on T4 and avoids OOM peaks.
-* We attach the adapter with **`PeftModel.from_pretrained`**, NOT
-  `model.load_adapter()`. This is critical — `load_adapter` is the
-  Transformers-native adapter API that injects LoRA modules but
-  leaves the model class unchanged. Unsloth's
-  `save_pretrained_gguf` gates its merge step on
-  `isinstance(model, PeftModel)`; with `load_adapter` that check
-  returns False and Unsloth silently exports the base model with
-  **zero fine-tuning applied**. `PeftModel.from_pretrained` returns
-  a real `PeftModel` wrapper, so the merge runs as expected. We
-  add a hard `assert isinstance(...)` so the next cell can never
-  silently produce an untrained GGUF.
+### Foot-gun #1 — `save_pretrained_gguf` is patched onto the base
 
-`save_pretrained_gguf` auto-merges, so we do NOT need an explicit
-`merge_and_unload()` here.
+`FastVisionModel.from_pretrained` returns a base transformers model
+and **monkey-patches `save_pretrained_gguf` onto that instance**.
+Naively wrapping with `PeftModel.from_pretrained` and then calling
+`save_pretrained_gguf` on the wrapper sounds fine — but Python's
+attribute resolution falls through `PeftModel.__getattr__` to the
+underlying base, finds the method there, and invokes it with
+`self = base`, not `self = wrapper`. Inside the method,
+`isinstance(self, PeftModel)` is now `False` even though we wrapped
+correctly upstream — so Unsloth **silently skips merge_and_unload**
+and tries to export the un-merged base. The "saved" GGUF would have
+zero trained weights.
+
+The fix: call `merge_and_unload()` ourselves, which returns the
+underlying base with the LoRA delta already added in. Then call
+`save_pretrained_gguf` on *that* — same patched method, bound to
+the same instance, and now Unsloth's "no PEFT" branch is *correct*
+(the merge already happened).
+
+### Foot-gun #2 — transformers 5.5's `revert_weight_conversion`
+
+`transformers >= 5.5` added a `revert_weight_conversion` step inside
+`save_pretrained` to undo any weight conversions applied during load
+(e.g. from a sister architecture). For a model loaded with
+`load_in_4bit=True`, that pathway has no implementation for the
+4-bit op and raises `NotImplementedError` — meaning *every* save
+attempt, with or without PEFT, will crash.
+
+The fix: load in **bf16** instead of 4-bit. Unsloth's GGUF converter
+quantizes to Q4_K_M at the *end* anyway (bf16 GGUF → Q4_K_M GGUF),
+so loading bf16 doesn't change the output; it only changes the
+intermediate. Memory cost: ~5-6 GB for Gemma-4 E2B in bf16, fits
+easily on T4 16 GB / L4 24 GB / A100.
+
+### Recipe
+
+1. `FastVisionModel.from_pretrained(BASE, load_in_4bit=False, load_in_16bit=True, dtype=torch.bfloat16)`
+2. `peft_model = PeftModel.from_pretrained(model, ADAPTER_DIR, ...)`
+3. `model = peft_model.merge_and_unload()` — `model` is now the merged base.
+4. The next cell calls `model.save_pretrained_gguf(...)` and Unsloth runs the bf16 → Q4_K_M pipeline cleanly.
+
+We prefer `unsloth/gemma-4-E2B-it` over `google/gemma-4-E2B-it` as
+the base because the Unsloth variant ships with the bug fixes from
+https://unsloth.ai/docs/models/gemma-4/train#bug-fixes--tips.
 """
 
 CODE_LOAD = """\
 import time
 import os
+import gc
+import torch
 
 from unsloth import FastVisionModel
 from peft import PeftModel
@@ -492,53 +519,59 @@ from peft import PeftModel
 BASE_MODEL = "unsloth/gemma-4-E2B-it"
 HF_TOKEN   = os.environ.get("HF_TOKEN") or None
 
+# Step 1 — load BASE in bf16 (NOT 4-bit). See the markdown above for
+# the two foot-guns this dodges:
+#   (a) transformers 5.5 revert_weight_conversion crashes on 4-bit save
+#   (b) lets us deliver a clean (un-quantized) instance to Unsloth's
+#       GGUF converter, which does its own Q4_K_M step at the end.
 t0 = time.time()
-print(f"Loading base {BASE_MODEL} (4-bit) …")
+print(f"Loading base {BASE_MODEL} in bf16 …")
 model, processor = FastVisionModel.from_pretrained(
-    model_name = BASE_MODEL,
-    load_in_4bit = True,
-    use_gradient_checkpointing = "unsloth",
-    token = HF_TOKEN,
+    model_name                 = BASE_MODEL,
+    load_in_4bit               = False,
+    load_in_16bit              = True,
+    dtype                      = torch.bfloat16,
+    use_gradient_checkpointing = False,
+    token                      = HF_TOKEN,
 )
 print(f"  base loaded in {time.time()-t0:.1f}s")
 
+# Step 2 — wrap in PeftModel so the adapter weights actually attach.
 t0 = time.time()
 print(f"Wrapping in PeftModel from {ADAPTER_DIR} …")
-# CRITICAL — use PeftModel.from_pretrained, NOT model.load_adapter.
-#
-# Why: model.load_adapter() is Transformers' NATIVE adapter API
-# (added in transformers 4.40). It injects LoRA modules into the
-# existing module tree but does NOT change the class of `model`.
-#
-# Unsloth's save_pretrained_gguf gates the merge step on
-# `isinstance(model, PeftModel)`. With load_adapter() the class
-# stays as Gemma4ForConditionalGeneration, isinstance returns False,
-# and Unsloth silently takes the "save base without merge" path —
-# the GGUF you get is just the base model, with zero fine-tuning.
-#
-# PeftModel.from_pretrained returns a real PeftModel wrapper, so
-# isinstance succeeds and merge_and_unload runs as expected.
-model = PeftModel.from_pretrained(
+peft_model = PeftModel.from_pretrained(
     model,
     ADAPTER_DIR,
     adapter_name = "eyes_v4",
     is_trainable = False,
 )
-print(f"  wrapped in {time.time()-t0:.1f}s")
-
-# Hard guard — failing here is infinitely better than silently
-# producing an untrained-base GGUF in Step 6.
-assert isinstance(model, PeftModel), (
-    "Wrap failed — Step 6 would export the base without LoRA merge. "
-    "Restart kernel and re-run from Step 1."
+assert isinstance(peft_model, PeftModel), (
+    "Wrap failed — adapter would never apply downstream."
 )
+print(f"  wrapped in {time.time()-t0:.1f}s as {type(peft_model).__name__}")
+
+# Step 3 — *** CRITICAL *** merge_and_unload, then DROP the wrapper.
+#
+# This is the step Unsloth was silently skipping when we previously
+# called save_pretrained_gguf through a still-wrapped model. By doing
+# it ourselves here, we hand Step 6 a plain transformers model with
+# the LoRA already baked in; Unsloth's "no PEFT" branch then runs and
+# is now CORRECT (no merge needed — it's done).
+t0 = time.time()
+print("Merging Eyes v4 LoRA into the base (this is what was missing) …")
+model = peft_model.merge_and_unload()
+del peft_model
+gc.collect()
+torch.cuda.empty_cache()
+print(f"  merged in {time.time()-t0:.1f}s — final class: {type(model).__name__}")
 
 # Sanity print so the next cell doesn't run against the wrong weights.
-total_params    = sum(p.numel() for p in model.parameters())
-adapter_params  = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total_params = sum(p.numel() for p in model.parameters())
 print(f"\\nModel ready  : {type(model).__name__}, "
       f"total {total_params/1e9:.2f} B params, "
-      f"adapter {adapter_params/1e6:.1f} M trainable")
+      f"Eyes v4 LoRA merged in.")
+print("Expected log line in Step 6: 'Saving directly without LoRA merge...'")
+print("That message is now CORRECT — the merge already happened above.")
 """
 
 # ─────────────────────────────────────────────────────────────────────
