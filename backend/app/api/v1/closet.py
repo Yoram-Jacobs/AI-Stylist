@@ -3186,16 +3186,24 @@ async def clean_item_background(
     item_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Phase V Fix 2 — non-generative background matting.
+    """Phase V Fix 2 (revised May 2026, Patch 12h) — Edit Item → "Clean
+    background" CTA. Non-generative alpha matting with full SegFormer
+    refinement triad for parity with the initial-save flow.
+
+    Pipeline (mirrors :func:`_run_background_matte`)
+    ------------------------------------------------
+    SegFormer (best-effort) → rembg + CLIP guard → apply_alpha_intersection.
 
     Replaces the old "Repair image" generative inpainting (which
     hallucinated matching colours, invented collars, etc.) with a pure
-    alpha-matting pipeline powered by BiRefNet (MIT). The matting model
-    decides which pixels are garment vs. background; it never invents
-    pixels.
-
-    A CLIP faithfulness guard in the matting service rejects matte output
-    that drifts too far from the original crop.
+    alpha-matting pipeline. The matting model decides which pixels are
+    garment vs. background; it never invents pixels. A CLIP faithfulness
+    guard in the matting service rejects matte output that drifts too
+    far from the original crop. Failures at any of the three stages are
+    soft — we fall back to rembg-only output when SegFormer is
+    unavailable, returns nothing usable for the item's category, or its
+    mask is too patchy (<40% bbox coverage; see Patch 12g in
+    ``clothing_parser.apply_alpha_intersection``).
     """
     from app.services import background_matting
 
@@ -3255,12 +3263,72 @@ async def clean_item_background(
             ),
         }
 
-    out_b64 = base64.b64encode(result["image_png"]).decode("ascii")
+    # Patch 12h (May 2026) — Parity with ``_run_background_matte`` so the
+    # Edit Item → "Clean background" CTA uses the same triad as the
+    # initial save flow: SegFormer (best-effort) → rembg → alpha
+    # intersection. Before this patch the CTA went straight to rembg
+    # and skipped SegFormer entirely, which is why users saw cleaner
+    # cutouts on first save vs. "Clean background" reruns on the same
+    # crop. All SegFormer / intersection failures are SOFT — they fall
+    # back to the rembg-only output that ``remove_background`` already
+    # returned, so this never regresses the legacy behaviour.
+    from app.services import clothing_parser as _cp
+
+    refined_png: bytes = result["image_png"]
+    intersection_applied = False
+    if settings.USE_LOCAL_CLOTHING_PARSER:
+        seg_mask = None
+        try:
+            garments = await _cp.parse_garments(crop_bytes)
+            seg_mask = _pick_segformer_mask_for_category(
+                garments, item.get("category")
+            )
+            if seg_mask is None and garments:
+                logger.info(
+                    "/clean-background SegFormer parsed %d instance(s) for "
+                    "item %s but none usable for category=%r",
+                    len(garments), item_id, item.get("category"),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "/clean-background SegFormer skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
+            seg_mask = None
+
+        if seg_mask is not None:
+            try:
+                maybe_refined = _cp.apply_alpha_intersection(
+                    result["image_png"], seg_mask
+                )
+                if maybe_refined:
+                    logger.info(
+                        "/clean-background SegFormer-refined item %s "
+                        "(%d → %d bytes)",
+                        item_id, len(result["image_png"]), len(maybe_refined),
+                    )
+                    refined_png = maybe_refined
+                    intersection_applied = True
+                else:
+                    logger.info(
+                        "/clean-background apply_alpha_intersection returned "
+                        "None for item %s — keeping rembg-only output",
+                        item_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "/clean-background alpha intersection skipped for item "
+                    "%s: %s",
+                    item_id, repr(exc)[:160],
+                )
+
+    out_b64 = base64.b64encode(refined_png).decode("ascii")
     data_url = f"data:image/png;base64,{out_b64}"
     meta = {
         "method": "matting",
         "model": settings.BACKGROUND_MATTING_MODEL,
         "provider": result.get("provider"),
+        "segformer_refined": intersection_applied,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.closet_items.update_one(

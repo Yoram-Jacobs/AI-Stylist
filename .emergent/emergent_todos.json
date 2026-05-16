@@ -1,14 +1,18 @@
 [
   {
-    "content": "Add proportional dilation to apply_alpha_intersection before the gaussian blur",
+    "content": "Add mask confidence check (<40% coverage) to apply_alpha_intersection in clothing_parser.py",
     "status": "completed"
   },
   {
-    "content": "Smoke-test that puffy-sleeve blouse + small accessory don't get over-trimmed",
+    "content": "Refactor /clean-background endpoint in closet.py to use SegFormer + rembg + apply_alpha_intersection triad",
     "status": "completed"
   },
   {
-    "content": "Verify no regression on the original 'white window' case the intersection was originally built for",
+    "content": "Lint backend changes and smoke-test via python -c",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md with completed work and remaining issues",
     "status": "completed"
   }
 ]

@@ -449,3 +449,60 @@ Rationale:
 - Multi-select Stylist response actions (e.g. “save this whole outfit”).
 - Backend `closet_item_ids` form field to skip image round-trip (future optimisation).
 - Reworking the entire composer layout — only the attachment entry point changes.
+
+---
+
+# Phase M12 — Matting hardening (May 2026 closet-test follow-up)
+
+> **Context:** After Phase O.6 the SegFormer + rembg + `apply_alpha_intersection`
+> triad was restored on the save flow. Live closet tests surfaced two
+> remaining edge-case regressions: (a) low-contrast accessories (burgundy
+> sneakers on cobblestone, dark belt on dark trousers) coming out as
+> smeared blobs because SegFormer returned a patchy mask the dilation
+> couldn't rescue, and (b) the Edit Item → "Clean background" CTA used a
+> rembg-only path so users saw different cutouts on first save vs.
+> CTA reruns of the same crop.
+
+## ✅ Patch 12g — Mask "confidence" check (SHIPPED)
+
+- File: `backend/app/services/clothing_parser.py::apply_alpha_intersection`.
+- Behaviour: after the SegFormer mask is resized to the matted-PNG
+  dimensions, compute `(mask > 127).mean()`. If coverage < **40 %** of
+  the bbox, treat the mask as unreliable → return `None` → caller keeps
+  the rembg-only output.
+- Why 40 %: empirical sweet spot from May 2026 closet tests. Tops /
+  bottoms / dresses score 60–95 % when SegFormer is confident; sunglasses
+  / belts / bags / hats score 50–80 %; failure modes (low-contrast
+  accessories) score 10–30 %. 40 % bisects the gap cleanly.
+- Soft fallback (caller already handles `None`), so this never blocks
+  rembg-only cutouts.
+- Smoke-tested via `python -c` with synthetic 256×256 PNGs across four
+  coverage regimes (10 %, 38.6 %, 41.5 %, 100 %) — bail/refine matches
+  the threshold.
+
+## ✅ Patch 12h — Triad parity in `/clean-background` (SHIPPED)
+
+- File: `backend/app/api/v1/closet.py::clean_item_background`.
+- Behaviour: the CTA now runs **SegFormer (best-effort) → rembg + CLIP
+  guard → `apply_alpha_intersection`**, mirroring `_run_background_matte`.
+  All three stages are independently soft — any failure falls back to
+  rembg-only output.
+- Adds `reconstruction_metadata.segformer_refined` (bool) so we can tell
+  triad-refined CTA reruns apart from rembg-only fallbacks during triage.
+- Lint clean (ruff), backend restarted cleanly, smoke import of the
+  endpoint confirms `parse_garments` + `apply_alpha_intersection` are
+  wired.
+
+## Still open after this session
+
+- **Issue 2 (P0)** — Gemini overriding SegFormer category hints. Need
+  `garment_vision.analyze_outfit` to present SegFormer's category as a
+  strict constraint when the two disagree.
+- **Issue 3 (P1)** — "Analysis failed" transient error on first upload.
+  Blocked on DevTools logs from the user.
+- **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
+  Blocked on Colab diagnostic (`ls -la /content/eyes_v4_q4_k_m/`).
+- **Task 2 (P1)** — Warm-load SegFormer / rembg / CLIP on backend boot
+  to cut analyze wall time from ~60 s.
+- **Task 3 (P1)** — Vertex AI Try-On widget. Blocked on user populating
+  `.env` with GCP service account JSON.

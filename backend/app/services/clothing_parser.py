@@ -1019,6 +1019,47 @@ def apply_alpha_intersection(
     else:
         mask_resized = (seg_mask_bbox * 255).astype(np.uint8)
 
+    # Patch 12g (May 2026) — SegFormer mask "confidence" check.
+    # When SegFormer is unconfident about a garment (low-contrast
+    # accessories on busy backgrounds: burgundy sneakers on
+    # cobblestone, dark belt on dark trousers, thin sunglasses
+    # frames in a head crop), the returned mask is patchy — a sparse
+    # constellation of pixels rather than a solid blob. Intersecting
+    # rembg's clean alpha with a patchy mask wipes out the bulk of
+    # the garment and leaves a smeared, fragmented thumbnail. The
+    # dilation step (Patch 12f) widens halos but cannot rescue a
+    # mask whose CORE is missing.
+    #
+    # Heuristic: if the SegFormer mask covers less than
+    # ``_MIN_MASK_CONFIDENCE`` of the bbox area, we treat it as
+    # unreliable and bail out — the caller keeps rembg's untouched
+    # output, which on a tight per-garment crop is usually correct
+    # on its own. 40% is the empirical sweet spot from the May 2026
+    # closet tests:
+    #   * Sunglasses / belts / bags / hats → 50–80% mask coverage
+    #     of their bbox when SegFormer succeeds → SAFE.
+    #   * Burgundy sneakers / dark belts on dark trousers / glossy
+    #     leather shoes → 10–30% coverage (patchy speckle) → BAIL.
+    #   * Tops / bottoms / dresses → 60–95% coverage → SAFE.
+    # This is intentionally per-bbox (not per-frame) because
+    # ``apply_alpha_intersection`` is called with a per-garment crop;
+    # the bbox IS the crop.
+    _MIN_MASK_CONFIDENCE = 0.40
+    try:
+        mask_coverage = float((mask_resized > 127).mean())
+    except Exception:  # noqa: BLE001
+        mask_coverage = 1.0  # if mean() fails, don't gatekeep — let dilation try.
+    if mask_coverage < _MIN_MASK_CONFIDENCE:
+        logger.info(
+            "apply_alpha_intersection: SegFormer mask too patchy "
+            "(%.1f%% coverage < %.0f%% threshold) — falling back to "
+            "rembg-only output (crop %dx%d).",
+            mask_coverage * 100.0,
+            _MIN_MASK_CONFIDENCE * 100.0,
+            Wc, Hc,
+        )
+        return None
+
     # Patch 12f — proportional dilation. 2.5% of the crop's short edge
     # is the empirical sweet-spot from the May 2026 closet tests:
     #   * Tiny crops (200 px): ~5 px dilation — keeps small accessories
