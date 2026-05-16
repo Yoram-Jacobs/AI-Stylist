@@ -537,10 +537,14 @@ timeout. So:
      pixels with reduced alpha.
 
 4. **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
-   Blocked on Colab diagnostic (`ls -la /content/eyes_v4_q4_k_m/`).
+   ✅ **RESOLVED** (out-of-band). Artifacts benchmarked successfully and
+   stored on user's PC + Google Drive. Ready for VPS upload + cutover
+   when the user decides to swap the live Eyes GGUFs.
 
-5. **Task 3 (P1)** — Vertex AI Try-On widget. Blocked on user populating
-   `.env` with `GOOGLE_APPLICATION_CREDENTIALS` + `VERTEX_*` keys.
+5. **Task 3 (P1)** — Vertex AI Try-On widget. ⏸ **ON HOLD** (user-paused,
+   not blocked). `.env` keys (`GOOGLE_APPLICATION_CREDENTIALS` +
+   `VERTEX_*`) still need to be populated when the user is ready to
+   resume.
 
 ## Critical notes for the next agent (DO NOT IGNORE)
 
