@@ -981,6 +981,22 @@ def apply_alpha_intersection(
     garment class, so intersecting the two yields a clean cutout of just
     the targeted item.
 
+    Patch 12f (May 2026) — DILATE the SegFormer mask before blending.
+    Earlier behaviour used a strict ``min(rembg, gaussian_blur(mask))``,
+    which deleted any pixel SegFormer didn't mark — even pixels rembg
+    correctly identified as foreground. Two visible failure modes:
+      * A billowy-cuff blouse: SegFormer's ``Upper-clothes`` mask covers
+        the body but misses the puffy sleeve halo → sleeve pixels rembg
+        kept get wiped → fragmented "torn fabric" thumbnail.
+      * Burgundy sneakers on cobblestones: SegFormer's ``Shoes`` mask is
+        patchy because shoe-vs-pavement contrast is low → real shoe
+        pixels get wiped → smudgy blob thumbnail.
+    Dilating the mask by ``DILATE_PCT`` of the crop's short edge (clamped
+    to a sensible min/max) gives the intersection enough slack to admit
+    rembg's correct foreground pixels in the halo region — while still
+    relying on rembg's verdict as the upper bound, so background junk
+    that rembg correctly rejects stays rejected.
+
     Returns refined PNG bytes, or ``None`` on failure (caller should keep
     the rembg-only output).
     """
@@ -1002,20 +1018,37 @@ def apply_alpha_intersection(
             return None
     else:
         mask_resized = (seg_mask_bbox * 255).astype(np.uint8)
-    # Soften the binary mask edge a touch so the intersection inherits
-    # rembg's anti-aliasing rather than re-introducing stair-step pixels.
+
+    # Patch 12f — proportional dilation. 2.5% of the crop's short edge
+    # is the empirical sweet-spot from the May 2026 closet tests:
+    #   * Tiny crops (200 px): ~5 px dilation — keeps small accessories
+    #     from gaining a halo of background.
+    #   * Medium crops (1000 px): ~25 px — recovers puffy-sleeve overspill.
+    #   * Large crops (2000 px): ~50 px — recovers low-contrast shoe edges.
+    # Hard min/max protect either extreme.
+    _DILATE_PCT = 0.025
+    _DILATE_MIN_PX = 4
+    _DILATE_MAX_PX = 64
+    dilate_px = max(_DILATE_MIN_PX, min(_DILATE_MAX_PX, int(_DILATE_PCT * min(Hc, Wc))))
     try:
         from PIL import ImageFilter
 
-        mask_im = Image.fromarray(mask_resized, mode="L").filter(
-            ImageFilter.GaussianBlur(radius=2.0)
-        )
+        mask_im = Image.fromarray(mask_resized, mode="L")
+        # MaxFilter is morphological dilation on grayscale. Window size
+        # must be odd, equal to ``2*dilate_px + 1``.
+        if dilate_px > 0:
+            mask_im = mask_im.filter(ImageFilter.MaxFilter(2 * dilate_px + 1))
+        # Soften the dilated edge a touch so the intersection inherits
+        # rembg's anti-aliasing rather than re-introducing stair-step pixels.
+        mask_im = mask_im.filter(ImageFilter.GaussianBlur(radius=2.0))
         soft_mask = np.array(mask_im)
     except Exception:  # noqa: BLE001
         soft_mask = mask_resized
-    # New alpha = min(rembg_alpha, soft_segformer_mask). Anywhere SegFormer
-    # said "not this garment" we wipe out, even if rembg thought it was
-    # foreground.
+    # New alpha = min(rembg_alpha, dilated_soft_mask). Anywhere SegFormer
+    # (after dilation) said "not this garment AND not its halo" we wipe
+    # out, even if rembg thought it was foreground. Where dilation
+    # admitted the halo and rembg agrees → keep. Where dilation admitted
+    # the halo but rembg disagrees → still wipe (rembg has final say).
     new_alpha = np.minimum(arr[:, :, 3], soft_mask).astype(np.uint8)
     arr[:, :, 3] = new_alpha
     out = Image.fromarray(arr, mode="RGBA")
