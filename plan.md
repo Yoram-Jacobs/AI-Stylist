@@ -984,6 +984,268 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.5.1 — Silent path was silent because nothing was queued (hotfix) — SHIPPED
+
+User report after M20.5: "The silent process is so silent — nothing
+added to the closet."
+
+**Root cause:** `handleBulkUpload` (the new unified entry) called
+`continueInteractive(survivorFps, {})` WITHOUT `await`.
+`continueInteractive` is `async` (it does
+`Promise.all(fingerprints.map(fileToBase64))` over N files before
+calling `setCards`). The very next line scheduled
+`setTimeout(0, saveAllRef.current?.())`. Result:
+
+1. `setTimeout(0)` fires within ~milliseconds.
+2. `Promise.all(fileToBase64)` is still in progress.
+3. `setCards` hasn't been called yet, so `cards` is still empty
+   in React state.
+4. `saveAll` reads `cards` from its closure → `ready=[]` AND
+   `scanning=[]` → hits the `if (!ready.length && !scanning.length)`
+   branch → emits `toast.error('nothing to save')` (suppressed
+   in bulk mode because the user is on /home / wherever and not
+   on /add) → returns.
+5. `pendingAutoSave` is never set, no save happens. Silent
+   pipeline → silent failure.
+
+**Fix:** one keyword. `await continueInteractive(...)` before the
+`setTimeout(0)` saveAll trigger. Now the await resolves only after
+`Promise.all` completes AND `setCards(prev => [...prev, ...drafts])`
+has been queued, so by the time `setTimeout(0)` fires React has
+committed the new cards and `saveAll` sees the scanning batch.
+
+**Verification:** ESLint clean. Single-line `const ... = ` →
+`const ... = async ` + add `await` + comment block (~25 LoC of
+docstring explaining the trap).
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBulkUpload` made async,
+  added `await` on `continueInteractive`)
+- `plan.md` (this entry)
+
+## ✅ Patch M20.5 — Unified bulk-upload pipeline (delete the silent path entirely) — SHIPPED
+
+User architectural feedback after M20.4:
+
+> "The background bulk 'Add item' pipeline is identical to a
+> single-photo uploading pipeline. The only difference is a progress
+> bar replacing the real-time processing UI. All there is to do is
+> wire the silent batch uploader to the add item pipeline, rather
+> than reinventing it all over again."
+
+Correct on every count. The two paths had drifted into parallel
+implementations of analyze + save: every fix to the interactive
+pipeline (M21 SegFormer-anchored category, 12i/12j/12k/12l per-cat
+dilation + bbox padding, M20.b/c workStore wiring) had to be ported
+to the batch path and was missed each time the user reported a
+regression.
+
+### Refactor
+**Deleted** (~360 LoC):
+- `handleBatchBackground(files, skippedDuplicates)` — the parallel
+  worker loop that called `/closet/analyze` per file
+- `processOne(file)` — the per-file analyze + create handler with
+  its own retry, optimistic upsert, polish-candidate collection,
+  workStore wiring, etc.
+- `setBgBatch` state slot — bgBatch was set+mutated by the worker
+  loop
+- `pendingBatchSave` per-card flag — the duplicate-dialog handler
+  used it to route confirms through a direct `api.createItem` call
+  instead of `saveAll`
+
+**Added** (~70 LoC, mostly comments):
+- `bulkInfo` state: `{totalFiles, skippedDuplicates} | null` — pure
+  marker for "render the aggregate progress UI"
+- `bgBatch` rebuilt as a `useMemo` derived from `bulkInfo` + `cards`
+  so the existing progress-card JSX block at the bottom of the file
+  keeps working unchanged. Counters tick automatically as the
+  unified pipeline mutates `cards`.
+- `handleBulkUpload(survivorFps, skippedDuplicates)` — the new entry
+  point. It:
+  1. Sets `bulkInfo` (UI flips to aggregate mode).
+  2. Emits the "Skipped N already in closet" toast upfront if
+     applicable.
+  3. Calls `continueInteractive(survivorFps, {})` — the SAME entry
+     the ≤5-photo path uses. Drafts → `setCards` → `analyzeCard`
+     per draft (streaming, workStore-wired, fully M21+12i-l backend).
+  4. On the next microtask, fires `saveAllRef.current()` so the
+     M20.2 `pendingAutoSave` queue kicks in: ready cards (none yet)
+     persist, scanning cards (all of them) are queued, and the
+     existing effect re-fires `saveAll` once they all reach a
+     terminal state. `saveAll` then navigates to /closet itself.
+- `analyzeError: true` stamp on cards whose `analyzeCard` failed,
+  so the derived `bgBatch.analyzeFailed` counter can distinguish
+  "Gemini couldn't parse" from "save-time validation failure".
+- `DuplicateConfirmDialog` handlers stripped of the batch-origin
+  branch (~70 LoC) — both interactive and bulk cards now route
+  through `saveAll`, the dialog handler just stamps
+  `duplicateConfirmed: true`.
+
+### What the user sees
+- **Drop 6+ photos** → bulk mode UI activates (aggregate progress
+  card, cards grid suppressed), interactive pipeline runs underneath,
+  `WorkProgressFloater` shows per-card analyze + polish progress
+  exactly as the ≤5-photo path does.
+- **Each card now uses the full backend pipeline** — SegFormer detect
+  with M21 category anchoring, 12i/12j/12k/12l per-category
+  bbox + dilation budgets, NDJSON streaming response. The "13 cards
+  from 6 complex photos" complaint may resolve naturally if the new
+  pipeline yields more detections than the deprecated one.
+- **"You have news in your closet" toast** fires when the last polish
+  drains (same as the interactive path, because it IS the
+  interactive path).
+- **Duplicates** detected post-analysis show in the
+  DuplicateConfirmDialog; confirm → flows through `saveAll`,
+  cancel → card removed, `bgBatch.pendingDuplicates` ticks down via
+  the useMemo derivation.
+
+### Files touched
+- `frontend/src/pages/AddItem.jsx` — file shrank from
+  **2370 → 2086 lines (-284 lines / -12 %)** with no loss of
+  user-visible feature
+- `plan.md` (this entry)
+
+### Verification
+- ESLint: clean
+- esbuild: clean (2.0 MB bundle)
+- Lint scan for orphan references to deleted symbols: 5 hits,
+  all in /* comments */ documenting what was removed
+
+### Why this fixes M20.4's complaints "for free"
+- "Analysing 1 item" — gone, because the floater is now driven by
+  per-card workStore.registerAnalyze in `analyzeCard`, ticking up
+  garments-per-photo just like the ≤5-photo path. (M20.4's
+  batch-level workaround is removed.)
+- "No Polishing" — gone, because `saveAll::settle()` already
+  collects `polishCandidates` from every `clean_image_status ==
+  "pending"` create_item response and passes them to
+  `workStore.registerPolishItems()`. Always has, ever since M20.c.
+- "13 cards from 6 complex photos" — likely gone too, since the
+  unified path uses the streaming endpoint with M21 category
+  enforcement and the latest cropping budgets, which the silent
+  path was missing.
+
+## ✅ Patch M20.4 — Silent batch UX fixes (counter aggregate + deferMatte + polishing) — SHIPPED
+
+User feedback after M20.3 surfaced three concrete issues with the
+silent batch path:
+
+### Issue 1 — "Analysing 1 item" instead of "1/N files"
+The M20.3 wiring registered ONE workStore job per file with
+`updateAnalyze(jobId, {items: N, total: N})` set immediately to the
+per-photo decomposition count. Result on the floater:
+"Analysing 1 item" per row, no aggregate batch progress.
+
+**Fix:** Replaced N per-file jobs with ONE batch-level job at
+`handleBatchBackground` entry:
+```jsworkStore.registerAnalyze(batchAnalyzeJobId, "6 photos");
+workStore.updateAnalyze(batchAnalyzeJobId, { items: 0, total: 6 });
+```
+A shared `filesDone` counter is bumped inside `processOne` after
+each file completes (success or failure), and the job is
+`completeAnalyze`d once the worker loop exits. Floater now reads
+"Analysing N/M files" → ticks down → cleared.
+
+### Issue 2 — "13 cards from 6 complex photos, expected 20-30"
+**Not addressed in this patch — requires backend investigation.**
+Suspicion: a combination of (a) `_MIN_CROP_AREA_PCT=0.008` floor
+dropping small accessories/jewellery detected by SegFormer, plus
+(b) Patch 12k/12l's negative bbox padding pushing borderline items
+below that floor on tight crops. Need to add detection-count
+telemetry to `analyze_outfit` and run a controlled test before
+tuning. Filed as a separate backlog item.
+
+### Issue 3 — "No Polishing"
+The silent path's `cardLike` (built per analyzed item before
+`api.createItem`) was missing the `deferMatte` flag. Backend
+`create_item` therefore ran the matte synchronously → returned
+`clean_image_status='ready'` directly → workStore never saw any
+"pending" items → no "Polishing N/M photos" row, no
+"You have news in your closet" toast.
+
+**Fix:** Threaded `deferMatte: !!it.defer_matte` into `cardLike` so
+`buildCreatePayload` sets the flag on the POST body. Backend
+queues `_run_background_matte` as a BackgroundTask, returns
+`clean_image_status='pending'`, and the existing
+`polishCandidates.push(created)` collection now actually fires.
+Floater shows "Polishing N/M photos" and `WorkBatchDoneToast`
+fires when the last item drains.
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBatchBackground` +
+  `processOne` — replaced per-file workStore jobs with one
+  batch-level job, added `deferMatte` to `cardLike`, added
+  batch-level `completeAnalyze` after the worker loop)
+- `plan.md` (this entry)
+
+**Lint:** ESLint clean, esbuild clean.
+
+## ✅ Patch M20.3 — Silent batch path wired into `workStore` (UX parity) — SHIPPED
+
+**Gap:** The interactive `analyzeCard` flow (≤5 photos) was wired
+into the global `workStore` in Patch M20.b/c — cross-page "Analysing"
+floater, per-item polish progress bar, and "You have news in your
+closet" completion toast. The **silent batch path**
+(`handleBatchBackground`, used when uploading >5 photos) was
+ignored: it ran its own `bgBatch` progress UI on /add but never
+notified `workStore`, so a user who navigated away mid-upload lost
+all progress feedback, and the completion toast never fired.
+
+**Fix:** Wired `processOne` (the sequential per-file worker inside
+`handleBatchBackground`) into the same three workStore lifecycle
+hooks the interactive path uses:
+
+1. `workStore.registerAnalyze(jobId, filename)` at the top of
+   `processOne` — gives the floater a labelled row per file in
+   flight.
+2. `workStore.updateAnalyze(jobId, {items, total})` after the analyze
+   response arrives — surfaces the per-photo decomposition count
+   (e.g. a single shot that SegFormer split into 3 garments shows
+   `Analysing 3/3 items`).
+3. `workStore.completeAnalyze(jobId)` after every code-path that
+   ends the processing of this file (analyze success, analyze
+   failure with raw-photo fallback, file-read failure). Runs OUTSIDE
+   the per-item save loop so duplicate-redirect items don't leave
+   phantom jobs.
+4. `workStore.registerPolishItems(created)` collects every
+   `api.createItem` response whose `clean_image_status === 'pending'`
+   and registers it with the global polish tracker. The
+   `WorkProgressFloater` then shows `Polishing N/M photos` for the
+   whole batch and the `WorkBatchDoneToast` fires the "You have
+   news in your closet" sonner toast when the last item resolves.
+
+**Behavioural deltas the user will notice:**
+- Drop 6+ photos on /add → bottom-right floater pill appears with
+  one row per file (`Analysing image_001.jpg 1/1 items`), survives
+  navigation to /home / /closet / anywhere.
+- After all files have been analyse-saved, the floater switches to
+  `Polishing 6/6 photos` as the backend BackgroundTasks chew through
+  rembg + SegFormer alpha intersection per crop.
+- When the last polish drains: sonner toast `You have news in your
+  closet` fires with an "Open closet" action — same UX as the ≤5
+  interactive path.
+- `bgBatch` progress UI on /add stays unchanged (in-page progress
+  bar, count, final summary toast) — workStore is an ADDITIVE
+  cross-page layer, not a replacement.
+
+**No backend changes.** The silent path already calls the same
+`/closet/analyze` and `/closet` endpoints as the interactive flow,
+so the M21 / 12i / 12j / 12k / 12l fixes (SegFormer-anchored
+category, per-category dilation + bbox padding, negative-padding
+twink) were already active on this path from the moment they
+shipped. The silent path just wasn't surfacing the resulting items
+through the new UX layer.
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBatchBackground::processOne`
+  — added `analyzeJobId` + 4 workStore lifecycle calls in
+  exception-safe positions; collected `polishCandidates` from
+  successful saves; registered the batch with workStore at end of
+  each file)
+- `plan.md` (this entry)
+
+**Lint:** ESLint clean, esbuild clean.
+
 ## ✅ Patch 12l — Delicate-borderline twink on Top.bottom (-1.5 % → -2.5 %) — SHIPPED
 
 User screenshot after 12k showed the skirt + boots cards clean but
