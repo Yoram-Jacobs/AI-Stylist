@@ -414,6 +414,27 @@ class Settings:
     DEFER_REMBG_ON_ANALYZE: bool = (
         os.environ.get("DEFER_REMBG_ON_ANALYZE", "true").lower() == "true"
     )
+
+    # Patch M14 (May 2026) — Defer Nano Banana reconstruction off the
+    # /closet/analyze hot path. ``should_reconstruct`` fires on every
+    # crop whose bbox touches a frame edge — which is the case for
+    # essentially every full-body outfit upload (tops touch top, shoes
+    # touch bottom, etc.). Each fire spawns a ~20-40 s Gemini image
+    # generation call inside ``_analyse_one_crop``; the parallel
+    # ``Semaphore(6)`` is bounded by the slowest single
+    # (analyze + reconstruct) chain, so a 4-item outfit blocks the
+    # response for 30-60 s and routinely hits the Kubernetes ingress
+    # 60 s ceiling → 502 Bad Gateway. When this flag is ``true``
+    # (default), the per-crop analyzer skips reconstruction and marks
+    # the item with ``needs_reconstruction=true`` + ``reconstruction_reasons``.
+    # The ``/closet`` save handler then queues a BackgroundTask that
+    # runs ``reconstruct()`` and patches ``reconstructed_image_url`` a
+    # few seconds later — exactly the same pattern as the deferred
+    # rembg matte. Set ``false`` to restore the legacy synchronous
+    # path for triage.
+    DEFER_RECONSTRUCTION_ON_ANALYZE: bool = (
+        os.environ.get("DEFER_RECONSTRUCTION_ON_ANALYZE", "true").lower() == "true"
+    )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which

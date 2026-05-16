@@ -553,6 +553,57 @@ failed → succeeds on retry" UX. Per-crop Gemini parallelism was
 already in place (`asyncio.Semaphore(6)` inside
 `garment_vision._analyse_crops`), so no change was needed there.
 
+## ✅ Patch M14 — Defer Nano Banana reconstruction off the analyze hot path (SHIPPED)
+
+**Diagnosis from live preview logs after M13:** Even with all three
+models warm, `/closet/analyze` was still 33–60 s for a 4-item outfit
+(timeline screenshots from user showed `/analyze` hanging 50–140 s →
+502 Bad Gateway from the Kubernetes ingress 60 s ceiling).
+
+`detect_items` (SegFormer) was fast (~5 s) and rembg matting was
+already deferred (`DEFER_REMBG_ON_ANALYZE=true`). The remaining
+consumer was **`should_reconstruct` firing inside
+`_analyse_one_crop`** on every crop whose bbox touched a frame edge
+(i.e. essentially every crop in a full-body outfit shot — tops touch
+top, footwear touch bottom, etc.). Each fire ran a 20–40 s Gemini
+image-generation call synchronously; the parallel `Semaphore(6)` was
+bounded by the slowest single (analyze + reconstruct) chain → 30–60 s
+critical path per request.
+
+**Implementation (mirror of M8 `defer_matte`):**
+- New config flag `DEFER_RECONSTRUCTION_ON_ANALYZE` (`config.py`),
+  default `true` (env-overrideable to `false` for triage).
+- `garment_vision._analyse_one_crop`: when flag is on and
+  `should_reconstruct` fires, skip the inline `reconstruct()` call,
+  set `reconstruction=None`, and surface
+  `needs_reconstruction=True` + `reconstruction_reasons=[...]` on
+  the returned dict.
+- `closet.CreateItemIn`: two new optional fields
+  (`needs_reconstruction: bool`, `reconstruction_reasons: list[str]`)
+  so the frontend echoes the analyzer's flag back on save.
+- `closet.py`: new `_run_background_reconstruction(item_id, crop_bytes,
+  analysis, reasons)` task that runs `reconstruct()` and patches
+  `reconstructed_image_url` + `reconstruction_metadata` (with
+  `deferred=true` marker). Mirrors `_run_background_matte`
+  bit-for-bit; all failures are soft.
+- `closet.create_item`: queues the new BackgroundTask when
+  `payload.needs_reconstruction and raw_bytes`.
+
+**Expected /analyze wall time (4-item full-body outfit):**
+- Before: 50–60 s (often 502)
+- After: ~10–15 s (detect 5 s + parallel per-crop Gemini analyze 5–10 s)
+- Reconstruction now lands seconds-to-minutes after save via
+  BackgroundTask → `reconstructed_image_url` populates in the
+  background and the next /closet read picks it up.
+
+**Frontend handling:** the closet list already uses
+`pick_source_data_url` priority chain
+(`thumbnail_data_url → reconstructed_image_url → clean_image_url →
+segmented_image_url → original_image_url`). When the reconstruction
+lands, the cached thumbnail is invalidated (`$unset thumbnail_data_url`)
+so the next read regenerates from the freshly reconstructed image.
+No frontend change needed; the React store already polls deferred work.
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops

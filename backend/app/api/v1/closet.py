@@ -148,6 +148,14 @@ class CreateItemIn(BaseModel):
     # endpoint's purposes; kept as a separate field for clearer logs
     # and so the two paths can be enabled / disabled independently.
     defer_matte: bool = False
+    # Patch M14 (May 2026) — When the analyzer deferred Nano Banana
+    # reconstruction to keep ``/closet/analyze`` under the ingress 60s
+    # ceiling, each item arrives flagged so the save handler can fire a
+    # post-save BackgroundTask to fill in ``reconstructed_image_url``.
+    # See ``DEFER_RECONSTRUCTION_ON_ANALYZE`` in config. Mirrors the
+    # ``defer_matte`` / ``_run_background_matte`` pattern.
+    needs_reconstruction: bool = False
+    reconstruction_reasons: list[str] = []
 
 
 class UpdateItemIn(BaseModel):
@@ -480,6 +488,95 @@ async def _run_background_matte(
     )
 
 
+async def _run_background_reconstruction(
+    item_id: str,
+    crop_bytes: bytes,
+    analysis: dict[str, Any],
+    reasons: list[str],
+) -> None:
+    """Patch M14 (May 2026) — Post-save Nano Banana reconstruction.
+
+    Mirrors :func:`_run_background_matte` but for the
+    ``reconstructed_image_url`` field. Fired by :func:`create_item` when
+    the upstream ``/analyze`` deferred reconstruction
+    (``settings.DEFER_RECONSTRUCTION_ON_ANALYZE=true``) — the analyzer
+    marked the item with ``needs_reconstruction=true`` and a list of
+    heuristic ``reasons`` (e.g. ``["edge_touch_top", "edge_touch_left"]``).
+
+    Why defer
+    ---------
+    ``should_reconstruct`` triggers on every crop whose bbox touches a
+    frame edge — which is the common case for full-body outfit uploads
+    (tops touch top, footwear touch bottom, etc.). Each fire spawns a
+    20-40 s Gemini image-generation call. Inside the synchronous
+    ``_analyse_one_crop`` loop with a ``Semaphore(6)``, a 4-item outfit
+    blocks the analyze response for 30-60 s — routinely hitting the
+    Kubernetes ingress 60 s ceiling → 502 Bad Gateway. Deferring it
+    here lets ``/analyze`` return in ~15 s and the reconstruction
+    fills in seconds-to-minutes later on the saved item document.
+
+    Failure modes (all soft — match the matte task)
+    -----------------------------------------------
+      * Reconstruction returned ``None`` (Gemini image gen unavailable
+        / safety blocked / validation failed) — leave
+        ``reconstructed_image_url`` unset; UI falls back to the bbox
+        crop, identical to today.
+      * Exception during the generation — log and exit; the item still
+        saves successfully without a reconstruction.
+    """
+    from app.services.reconstruction import reconstruct
+
+    db = get_db()
+    t0 = datetime.now(timezone.utc)
+    try:
+        result = await reconstruct(crop_bytes, analysis, reasons=reasons)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Background reconstruction FAILED for item %s: %s",
+            item_id, repr(exc)[:200],
+        )
+        return
+
+    if not result or not result.get("image_b64"):
+        logger.info(
+            "Background reconstruction SKIPPED for item %s "
+            "(no image returned; reasons=%s)",
+            item_id, reasons,
+        )
+        return
+
+    mime = result.get("mime_type", "image/png")
+    data_url = f"data:{mime};base64,{result['image_b64']}"
+    meta = {
+        "method": "reconstruction",
+        "model": result.get("model"),
+        "prompt": result.get("prompt"),
+        "reasons": reasons,
+        "deferred": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {
+            "$set": {
+                "reconstructed_image_url": data_url,
+                "reconstruction_metadata": meta,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            # Invalidate the cached thumbnail so the next /closet read
+            # regenerates it from the freshly reconstructed image via
+            # ``pick_source_data_url``.
+            "$unset": {"thumbnail_data_url": ""},
+        },
+    )
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    logger.info(
+        "Background reconstruction READY for item %s "
+        "(model=%s in %.1fs reasons=%s)",
+        item_id, result.get("model"), elapsed, reasons,
+    )
+
+
 
 @router.post("", status_code=201)
 async def create_item(
@@ -624,6 +721,40 @@ async def create_item(
         # the deferred rembg matte task cover this case, so a missing
         # ``segmented_image_url`` here is expected when neither was wired.
         pass
+
+    # Patch M14 (May 2026) — Post-save Nano Banana reconstruction. The
+    # analyzer marked this item with ``needs_reconstruction=true`` so
+    # the /analyze response could leave inside the ingress 60 s ceiling
+    # without paying the ~20-40 s Gemini image-gen cost per crop. Queue
+    # the actual generation as a fire-and-forget BackgroundTask now —
+    # the saved item gets its ``reconstructed_image_url`` patched in
+    # seconds-to-minutes later. Mirrors ``needs_bg_matte`` above.
+    if payload.needs_reconstruction and raw_bytes:
+        # We use the item's existing analysis fields as the prompt
+        # source. Build the same shape ``reconstruct()`` expects.
+        recon_analysis: dict[str, Any] = {
+            "category": payload.category,
+            "sub_category": payload.sub_category,
+            "item_type": payload.item_type,
+            "color": payload.color,
+            "material": payload.material,
+            "pattern": payload.pattern,
+            "brand": payload.brand,
+            "dress_code": (
+                payload.dress_code.value
+                if hasattr(payload.dress_code, "value")
+                else payload.dress_code
+            ),
+            "title": payload.title,
+            "name": payload.name,
+        }
+        background_tasks.add_task(
+            _run_background_reconstruction,
+            doc["id"],
+            raw_bytes,
+            recon_analysis,
+            payload.reconstruction_reasons,
+        )
 
     # Best-effort FashionCLIP embedding: persist a 512-d L2-normalised
     # vector so the closet can later be searched by similarity
@@ -1142,6 +1273,12 @@ async def analyze_item_image(
                     # the backend queues ``_run_background_matte`` per
                     # item, identical to the one-pass path.
                     "defer_matte": det.get("defer_matte", False),
+                    # Patch M14 (May 2026) — analyzer deferred Nano
+                    # Banana reconstruction; frontend echoes these back
+                    # on /closet save and the backend queues
+                    # ``_run_background_reconstruction`` per item.
+                    "needs_reconstruction": det.get("needs_reconstruction", False),
+                    "reconstruction_reasons": det.get("reconstruction_reasons", []),
                 }
             )
         if dropped_unidentifiable:

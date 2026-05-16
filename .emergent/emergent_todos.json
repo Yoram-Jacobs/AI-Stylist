@@ -1,22 +1,26 @@
 [
   {
-    "content": "Create /app/backend/app/services/warmup.py with parallel SegFormer + rembg + CLIP warmup",
+    "content": "Add DEFER_RECONSTRUCTION_ON_ANALYZE config flag",
     "status": "completed"
   },
   {
-    "content": "Add WARMUP_MODELS_ON_STARTUP config flag",
+    "content": "Patch garment_vision._analyse_one_crop to defer reconstruction when flag is on; surface needs_reconstruction + reasons per item",
     "status": "completed"
   },
   {
-    "content": "Wire warmup_models() into server.py startup hook as fire-and-forget asyncio.create_task",
+    "content": "Add CreateItemIn fields (needs_reconstruction, reconstruction_reasons) and analyze response passthrough",
     "status": "completed"
   },
   {
-    "content": "Restart backend, observe warm-load logs, time first /closet/analyze cold vs. post-warmup",
+    "content": "Add _run_background_reconstruction in closet.py + wire BackgroundTask in create_item",
     "status": "completed"
   },
   {
-    "content": "Update plan.md and finish",
+    "content": "Lint + restart + measure new analyze_outfit duration",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md + finish",
     "status": "completed"
   }
 ]

@@ -1748,17 +1748,39 @@ class GarmentVisionService:
                 return None
 
             reconstruction_payload: dict[str, Any] | None = None
+            needs_reconstruction = False
+            reconstruction_reasons: list[str] = []
             try:
                 from app.services.reconstruction import (
                     reconstruct,
                     should_reconstruct,
                 )
+                from app.config import settings as _settings
 
                 needs, reasons = should_reconstruct(analysis, det.get("bbox"))
                 if needs:
-                    reconstruction_payload = await reconstruct(
-                        crop_bytes, analysis, reasons=reasons,
-                    )
+                    if _settings.DEFER_RECONSTRUCTION_ON_ANALYZE:
+                        # Patch M14 (May 2026) — Defer Nano Banana off
+                        # the analyze hot path. We surface the
+                        # reconstruction intent + reasons so the
+                        # ``/closet`` save endpoint can queue the actual
+                        # generation as a BackgroundTask; the response
+                        # leaves the inner loop with
+                        # ``reconstruction=None`` and ``needs_reconstruction=True``.
+                        # Skipping a 20-40s Gemini image call per crop is
+                        # the dominant /analyze latency win on full-body
+                        # outfits (where every crop touches a frame edge
+                        # → every crop normally triggers reconstruction).
+                        needs_reconstruction = True
+                        reconstruction_reasons = list(reasons)
+                        logger.info(
+                            "reconstruction DEFERRED for label=%s reasons=%s",
+                            det.get("label"), reasons,
+                        )
+                    else:
+                        reconstruction_payload = await reconstruct(
+                            crop_bytes, analysis, reasons=reasons,
+                        )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "reconstruction pipeline failed for label=%s: %s",
@@ -1773,6 +1795,13 @@ class GarmentVisionService:
                 "crop_mime": crop_mime,
                 "analysis": analysis,
                 "reconstruction": reconstruction_payload,
+                # Patch M14 — Marker fields used by the ``/closet`` save
+                # endpoint to decide whether to queue a post-save
+                # reconstruction BackgroundTask. ``False`` / empty list
+                # when reconstruction either wasn't needed, ran inline
+                # (DEFER_RECONSTRUCTION_ON_ANALYZE=false), or failed.
+                "needs_reconstruction": needs_reconstruction,
+                "reconstruction_reasons": reconstruction_reasons,
             }
 
     async def _analyse_crops(
