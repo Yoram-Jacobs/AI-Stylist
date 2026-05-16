@@ -984,6 +984,45 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.5.1 — Silent path was silent because nothing was queued (hotfix) — SHIPPED
+
+User report after M20.5: "The silent process is so silent — nothing
+added to the closet."
+
+**Root cause:** `handleBulkUpload` (the new unified entry) called
+`continueInteractive(survivorFps, {})` WITHOUT `await`.
+`continueInteractive` is `async` (it does
+`Promise.all(fingerprints.map(fileToBase64))` over N files before
+calling `setCards`). The very next line scheduled
+`setTimeout(0, saveAllRef.current?.())`. Result:
+
+1. `setTimeout(0)` fires within ~milliseconds.
+2. `Promise.all(fileToBase64)` is still in progress.
+3. `setCards` hasn't been called yet, so `cards` is still empty
+   in React state.
+4. `saveAll` reads `cards` from its closure → `ready=[]` AND
+   `scanning=[]` → hits the `if (!ready.length && !scanning.length)`
+   branch → emits `toast.error('nothing to save')` (suppressed
+   in bulk mode because the user is on /home / wherever and not
+   on /add) → returns.
+5. `pendingAutoSave` is never set, no save happens. Silent
+   pipeline → silent failure.
+
+**Fix:** one keyword. `await continueInteractive(...)` before the
+`setTimeout(0)` saveAll trigger. Now the await resolves only after
+`Promise.all` completes AND `setCards(prev => [...prev, ...drafts])`
+has been queued, so by the time `setTimeout(0)` fires React has
+committed the new cards and `saveAll` sees the scanning batch.
+
+**Verification:** ESLint clean. Single-line `const ... = ` →
+`const ... = async ` + add `await` + comment block (~25 LoC of
+docstring explaining the trap).
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBulkUpload` made async,
+  added `await` on `continueInteractive`)
+- `plan.md` (this entry)
+
 ## ✅ Patch M20.5 — Unified bulk-upload pipeline (delete the silent path entirely) — SHIPPED
 
 User architectural feedback after M20.4:

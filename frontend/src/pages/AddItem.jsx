@@ -585,7 +585,7 @@ export default function AddItem() {
   // without user input — exactly the "fire and forget" UX the silent
   // batch promised, but powered by the canonical pipeline.
   // ------------------------------------------------------------------
-  const handleBulkUpload = (survivorFps, skippedDuplicates = 0) => {
+  const handleBulkUpload = async (survivorFps, skippedDuplicates = 0) => {
     // Marker for the JSX render block. ``bgBatch`` is now a useMemo
     // derived from ``bulkInfo`` + ``cards`` so the existing progress
     // card UI keeps working unchanged.
@@ -612,27 +612,33 @@ export default function AddItem() {
     // category enforcement, and is subject to all the 12i / 12j /
     // 12k / 12l per-category cropping budgets — none of which the
     // old silent path was getting).
-    continueInteractive(survivorFps, /* duplicateAcks */ {});
-    // Auto-fire ``saveAll`` on the next microtask. The cards have
-    // just been queued via ``setCards`` (synchronous) and
-    // ``analyzeCard`` calls have been kicked off (their state
-    // updates are async). Right now they're all in
-    // ``status === 'scanning'`` so ``saveAll`` will:
-    //   1. See ``ready.length === 0`` + ``scanning.length > 0`` →
-    //      go into the M20.2 "queue and wait" branch.
-    //   2. Set ``pendingAutoSave = true`` and show the
-    //      "Waiting for N photos…" toast.
-    //   3. The ``pendingAutoSave`` effect (also from M20.2) then
-    //      re-fires ``saveAll`` once the last scanning card flips
-    //      to ``ready``, which persists the lot via the optimistic
-    //      flow + background ``settle()`` and finally navigates to
-    //      /closet.
     //
-    // setTimeout 0 because ``setCards`` is batched — we need to let
-    // React flush so ``cards`` is non-empty when ``saveAll`` reads
-    // it. The ``saveAllRef`` indirection (from M20.2) ensures we
-    // call the LATEST saveAll closure (which captures the up-to-date
-    // ``cards`` array).
+    // Patch M20.5.1 — MUST ``await`` continueInteractive. It is async
+    // (does ``Promise.all(fileToBase64)`` over N files); without the
+    // await the next line's ``setTimeout(0, saveAll)`` fires while
+    // drafts are still being built, ``cards`` is still empty in
+    // saveAll's closure, saveAll's "no ready and no scanning" branch
+    // hits, and the user sees a "nothing to save" toast instead of a
+    // batch in flight. (Original M20.5 bug — silent path was silent
+    // because nothing was queued.)
+    await continueInteractive(survivorFps, /* duplicateAcks */ {});
+    // Auto-fire ``saveAll`` on the next macrotask. After the await
+    // above completes the synchronous setCards calls (one inside
+    // continueInteractive for the draft batch, plus one per
+    // ``analyzeCard(d)`` flipping the card to ``status=scanning``)
+    // are queued; ``setTimeout(0)`` lets React commit the new state
+    // and run the ``saveAllRef.current = saveAll`` useEffect before
+    // we call it, so saveAll sees the up-to-date ``cards``.
+    //
+    // The M20.2 ``pendingAutoSave`` queue then handles the rest:
+    //   1. First saveAll sees ``ready=[]`` + ``scanning=[N]`` and
+    //      goes into the "queue and wait" branch
+    //      (``setPendingAutoSave(true)`` + "Waiting for N photos…"
+    //      toast).
+    //   2. The ``pendingAutoSave`` effect re-fires saveAll once the
+    //      last scanning card flips to ``ready``, which persists the
+    //      batch via the optimistic flow + background ``settle()``
+    //      and navigates to /closet.
     setTimeout(() => {
       if (typeof saveAllRef.current === 'function') {
         saveAllRef.current();
