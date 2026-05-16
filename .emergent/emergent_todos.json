@@ -1,22 +1,22 @@
 [
   {
-    "content": "Fix onPhotoFileChosen + onReshootPhoto in ItemDetail.jsx (drop setForm reset) — same vein as Bug 2",
+    "content": "Add _pick_segformer_mask_for_category helper in closet.py",
     "status": "completed"
   },
   {
-    "content": "Swap _run_background_matte: matte_crop → remove_background (adds CLIP faithfulness guard, parity with Edit Item Clean Background)",
+    "content": "Refactor _run_background_matte to accept category + run SegFormer → rembg → apply_alpha_intersection",
     "status": "completed"
   },
   {
-    "content": "Add POST /api/v1/closet/repair-thumbnails — NDJSON streaming, mirrors /repair-hashes",
+    "content": "Update create_item caller to pass payload.category into the background task",
     "status": "completed"
   },
   {
-    "content": "Frontend hook: closetStore.repairThumbnails() + chip; auto-trigger on prewarm (throttled)",
+    "content": "Lint closet.py and restart backend",
     "status": "completed"
   },
   {
-    "content": "Lint, restart, smoke test (curl on both endpoints; frontend screenshot of chip)",
+    "content": "Verify pipeline self-check probe still passes; smoke-test the deferred matte on a real item",
     "status": "completed"
   }
 ]

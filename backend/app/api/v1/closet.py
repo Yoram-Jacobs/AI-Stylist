@@ -197,44 +197,190 @@ class UpdateItemIn(BaseModel):
     clear_reconstruction: bool = False
 
 
-async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
-    """Phase O.6 (revised Z2.6) — Background matte runner.
+# --- SegFormer category mapping --------------------------------------
+# Frontend / Gemini-side `CreateItemIn.category` values (e.g. "Top",
+# "Bottom", "Outerwear", "Full Body", "Footwear", "Accessories",
+# "Underwear") collapse onto the SegFormer-internal kinds emitted by
+# ``clothing_parser.parse_garments`` — `"top" | "bottom" | "dress" |
+# "footwear" | "accessory" | "headwear"`. The map is intentionally
+# lower-cased and forgiving; anything we don't recognise falls back to
+# "largest instance by mask area" inside the picker below.
+_CATEGORY_TO_SEGFORMER_KIND: dict[str, str] = {
+    "top": "top",
+    "tops": "top",
+    "shirt": "top",
+    "shirts": "top",
+    "blouse": "top",
+    "outerwear": "top",
+    "jacket": "top",
+    "jackets": "top",
+    "coat": "top",
+    "underwear": "top",
+    "bottom": "bottom",
+    "bottoms": "bottom",
+    "pants": "bottom",
+    "trousers": "bottom",
+    "jeans": "bottom",
+    "skirt": "bottom",
+    "skirts": "bottom",
+    "shorts": "bottom",
+    "dress": "dress",
+    "dresses": "dress",
+    "full body": "dress",
+    "fullbody": "dress",
+    "full-body": "dress",
+    "footwear": "footwear",
+    "shoes": "footwear",
+    "sneakers": "footwear",
+    "boots": "footwear",
+    "accessory": "accessory",
+    "accessories": "accessory",
+    "bag": "accessory",
+    "bags": "accessory",
+    "belt": "accessory",
+    "scarf": "accessory",
+    "sunglasses": "accessory",
+    "headwear": "headwear",
+    "hat": "headwear",
+    "hats": "headwear",
+}
+
+
+def _pick_segformer_mask_for_category(
+    garments: list[dict[str, Any]],
+    category: str | None,
+) -> Any | None:
+    """Return the best SegFormer per-garment mask (full-res ``np.uint8``
+    H×W array) to AND against rembg, given the item's user-facing
+    category. Returns ``None`` if SegFormer found nothing usable.
+
+    Strategy
+    --------
+    1. Map ``category`` → SegFormer kind via ``_CATEGORY_TO_SEGFORMER_KIND``.
+    2. Pick the instance whose ``category`` matches the kind AND has
+       the largest mask area (multi-component items already merged
+       upstream — see ``parse_garments``).
+    3. If no kind match, fall back to the largest mask overall — better
+       to AND with *something* (trims wall / poster / lamp) than to
+       give rembg free rein on the whole frame.
+
+    Defensive: catches structurally broken instances (missing ``mask``,
+    non-array masks, etc.) and ignores them silently.
+    """
+    if not garments:
+        return None
+    target_kind = (
+        _CATEGORY_TO_SEGFORMER_KIND.get((category or "").strip().lower())
+        if category
+        else None
+    )
+
+    def _area(g: dict[str, Any]) -> int:
+        m = g.get("mask")
+        if m is None:
+            return 0
+        try:
+            return int(m.sum())  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            return 0
+
+    if target_kind:
+        matches = [g for g in garments if g.get("category") == target_kind]
+        if matches:
+            best = max(matches, key=_area)
+            if _area(best) > 0:
+                return best.get("mask")
+    # Fallback: largest mask of any garment kind.
+    candidates = [g for g in garments if _area(g) > 0]
+    if not candidates:
+        return None
+    return max(candidates, key=_area).get("mask")
+
+
+async def _run_background_matte(
+    item_id: str,
+    raw_bytes: bytes,
+    category: str | None = None,
+) -> None:
+    """Phase O.6 (revised Z2.6 + Patch 12 — May 2026) — Background
+    matte runner.
 
     Fired by :func:`create_item` for items that arrived through the
-    single-pass ``/analyze`` pipeline (``from_one_pass=True``).
+    single-pass ``/analyze`` pipeline (``from_one_pass=True``) or the
+    legacy multi-crop ``/analyze`` with deferred matting
+    (``defer_matte=True``). In both cases the upstream pipeline has
+    already bbox-cropped to a single garment, so ``raw_bytes`` is a
+    tight per-garment image — there is no "raw full-frame upload"
+    code path that fires this task.
 
-    History
-    -------
-    Originally this called ``background_matting.matte_crop`` —
-    rembg-only, no faithfulness guard. Z2.6 swaps that for the full
-    ``remove_background`` pipeline (rembg + CLIP faithfulness check)
-    so the deferred add-item path produces the **same quality** of
-    cutout as the foreground "Clean background" button on the Edit
-    Item page. Latency cost is +200–500 ms per item for the CLIP
-    guard, which is invisible to the user because the task already
-    runs after the HTTP response.
+    Pipeline
+    --------
+    SegFormer + rembg + ``apply_alpha_intersection`` — the same triad
+    the legacy multi-crop ``_matte_crops`` flow uses on the hot path::
 
-    Result is written under ``clean_image_url`` and surfaces via the
-    next ``GET /closet`` once the user revisits — the closet
-    thumbnail then swaps from the JPEG bbox-crop to the clean
-    cutout in place (priority chain in ``thumbnails.pick_source_data_url``).
+        SegFormer (clothing_parser.parse_garments)
+            └─ pick the instance matching ``category`` (largest blob fallback)
+            └─ full-resolution H×W binary mask
+        rembg (background_matting.remove_background)
+            └─ alpha matte + CLIP faithfulness guard
+        clothing_parser.apply_alpha_intersection(matted_png, seg_mask)
+            └─ AND of the two alphas, gaussian-softened
+        → clean_image_url
 
-    Failure modes
-    -------------
-    Soft. Three reasons we may end up writing
-    ``clean_image_status="failed"`` instead of ``"ready"``:
+    Why SegFormer is back
+    ---------------------
+    Z2.6 removed it on the assumption that upstream crops were always
+    tight. They are not always tight in practice — when ``/analyze``
+    runs with ``USE_LOCAL_CLOTHING_PARSER=false`` or when the Gemini
+    fallback over-pads the bbox, rembg sees background junk (lamps,
+    posters, plants) and keeps it all as foreground. Result: the
+    "white-window" cutout regression. Intersecting with a per-class
+    SegFormer mask removes the junk regardless of crop tightness. On
+    already-tight crops the intersection is effectively a no-op (the
+    SegFormer mask covers ~100% of rembg's foreground), so this is
+    pure upside.
 
-      * rembg crashed (rare; mostly ``Image.open`` decoding errors)
-      * rembg returned an empty/None matte (very dark or noisy inputs)
-      * the CLIP faithfulness guard rejected the cutout because it
-        diverged too far from the original (model hallucinated /
-        chopped off a sleeve / dropped to a hand). In that case we
-        keep the original bbox JPEG as the displayed thumbnail
-        rather than show a worse cutout.
+    Failure modes (all soft — never block rembg)
+    --------------------------------------------
+      * SegFormer disabled (``USE_LOCAL_CLOTHING_PARSER=false``) →
+        skip the intersection, persist rembg-only output (today's
+        behaviour, lightweight-deploy compatible).
+      * SegFormer ran but found nothing matching the category → fall
+        back to the largest detected mask; if there's still nothing,
+        persist rembg-only output.
+      * ``apply_alpha_intersection`` returned ``None`` (mask shape
+        mismatch, decode error) → persist rembg-only output.
+      * rembg itself crashed or returned empty → mark
+        ``clean_image_status="failed"`` as before.
+      * CLIP faithfulness rejected the matte → same as before.
     """
     from app.services import background_matting
+    from app.services import clothing_parser as _cp
 
     db = get_db()
+
+    # 1. SegFormer (best-effort) — runs first so we can pass its mask
+    #    to the intersection step after rembg returns. Wrapped tight
+    #    so any failure here is invisible to rembg downstream.
+    seg_mask = None
+    if settings.USE_LOCAL_CLOTHING_PARSER:
+        try:
+            garments = await _cp.parse_garments(raw_bytes)
+            seg_mask = _pick_segformer_mask_for_category(garments, category)
+            if seg_mask is None and garments:
+                logger.info(
+                    "Background matte SegFormer: parsed %d instance(s) for item %s "
+                    "but none usable for category=%r",
+                    len(garments), item_id, category,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "Background matte SegFormer skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
+            seg_mask = None
+
+    # 2. rembg + CLIP guard (unchanged — the matte primitive).
     try:
         out = await background_matting.remove_background(raw_bytes)
     except Exception as exc:  # noqa: BLE001
@@ -257,6 +403,30 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
     result = out.get("image_png") if isinstance(out, dict) else None
     provider = out.get("provider") if isinstance(out, dict) else None
     faithful = out.get("faithful", True) if isinstance(out, dict) else True
+
+    # 3. Alpha intersection (best-effort) — refines edges and trims any
+    #    non-garment foreground rembg kept. Skipped silently when the
+    #    rembg PNG is missing or the SegFormer mask is unavailable.
+    if result and seg_mask is not None:
+        try:
+            refined = _cp.apply_alpha_intersection(result, seg_mask)
+            if refined:
+                logger.info(
+                    "Background matte SegFormer-refined for item %s "
+                    "(%d → %d bytes)",
+                    item_id, len(result), len(refined),
+                )
+                result = refined
+            else:
+                logger.info(
+                    "Background matte apply_alpha_intersection returned None "
+                    "for item %s — keeping rembg-only output", item_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "Background matte alpha intersection skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
 
     if not result:
         # Distinguish "rembg produced nothing" from "rembg produced
@@ -443,7 +613,10 @@ async def create_item(
         item_id_for_bg = doc["id"]
         raw_for_bg = raw_bytes
         background_tasks.add_task(
-            _run_background_matte, item_id_for_bg, raw_for_bg,
+            _run_background_matte,
+            item_id_for_bg,
+            raw_for_bg,
+            payload.category,
         )
     elif raw_bytes:
         # Legacy HF Inference API segmentation fallback was removed in May
