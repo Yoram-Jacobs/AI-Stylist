@@ -493,16 +493,76 @@ Rationale:
   endpoint confirms `parse_garments` + `apply_alpha_intersection` are
   wired.
 
-## Still open after this session
+## Smoking gun for Issue 3 — "Analysis failed" on first upload
 
-- **Issue 2 (P0)** — Gemini overriding SegFormer category hints. Need
-  `garment_vision.analyze_outfit` to present SegFormer's category as a
-  strict constraint when the two disagree.
-- **Issue 3 (P1)** — "Analysis failed" transient error on first upload.
-  Blocked on DevTools logs from the user.
-- **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
-  Blocked on Colab diagnostic (`ls -la /content/eyes_v4_q4_k_m/`).
-- **Task 2 (P1)** — Warm-load SegFormer / rembg / CLIP on backend boot
-  to cut analyze wall time from ~60 s.
-- **Task 3 (P1)** — Vertex AI Try-On widget. Blocked on user populating
-  `.env` with GCP service account JSON.
+User DevTools screenshot this session proved:
+
+```
+POST /api/v1/closet/analyze → 502 Bad Gateway
+```
+
+Root cause: **Kubernetes ingress timeout (60 s) killing the connection
+on first man-photo upload while SegFormer + rembg + CLIP load lazily.**
+On retry the models are warm and the request completes inside the
+timeout. So:
+
+> **Issue 3 ≡ Task 2 (wall time)** — same root cause, same fix.
+
+## Still open after this session (in priority order)
+
+1. **Task 2 / Issue 3 (P0)** — Wall time. Warm-load SegFormer + rembg +
+   CLIP at backend boot (FastAPI `lifespan`), and semaphore-parallelise
+   per-crop Gemini calls inside `analyze_outfit`. Target: cold-boot
+   man-photo analyze 60+ s → ≤ 20 s, comfortably under the ingress
+   60 s ceiling. Fixes the 502 first-attempt.
+
+2. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
+   with coat tails visible in the top get classified as "Overcoat".
+   Fix in `garment_vision.analyze_outfit`: pass SegFormer's category
+   as a strict constraint in the prompt (`"this crop is pre-classified
+   as {category} — you MUST respect this"`) and post-validate; if
+   Gemini still disagrees, log + overwrite with the SegFormer category.
+   Sub-category / title / colour / material stay Gemini's call.
+
+3. **NEW — blouse-skirt rim from dilation overspill (P1)** — Screenshot 2
+   shows the dilated alpha intersection pulling in a thin band of skirt
+   waistband at the bottom of a top crop. Dilation is correct in
+   principle (it rescued the puffy sleeves) but the 2.5% short-edge
+   floor is slightly hot on tight torso crops. Two options to evaluate
+   next session:
+   - Per-category dilation budget: tops/bottoms get ~1.5% short-edge,
+     accessories/footwear keep 2.5% (they need more halo).
+   - Soft taper: dilate but use a falloff weight at the dilated edge
+     rather than the current hard min(rembg, dilated_mask) — admit halo
+     pixels with reduced alpha.
+
+4. **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
+   Blocked on Colab diagnostic (`ls -la /content/eyes_v4_q4_k_m/`).
+
+5. **Task 3 (P1)** — Vertex AI Try-On widget. Blocked on user populating
+   `.env` with `GOOGLE_APPLICATION_CREDENTIALS` + `VERTEX_*` keys.
+
+## Critical notes for the next agent (DO NOT IGNORE)
+
+- **NEVER reintroduce `HF_TOKEN` / `EYES_HF_TOKEN` / HuggingFace
+  `transformers` for the Eyes service.** Those were sabotaged additions
+  in a previous fork, now purged. Target architecture is
+  **`llama.cpp` + GGUF**. Sabotaged docs are quarantined under
+  `/app/quarantine/2026-05-sabotage/` — do not trust files there.
+- `_run_background_matte(item_id, raw_bytes, category)` now **requires
+  the `category` arg**. Any new caller must pass `payload.category` or
+  the SegFormer mask picker will fall back to the largest-blob heuristic
+  and the cutout quality will silently regress.
+- `_recover_paired_footwear` is **intentionally conservative**: if the
+  second SegFormer pass finds nothing on the missing half, the mask is
+  unchanged so single-boot product shots stay faithful. **Do not "fix"
+  this** — it's a product requirement.
+- Card thumbnail priority chain in `thumbnails.pick_source_data_url`
+  prefers `reconstructed_image_url` (from `/clean-background`) over
+  `clean_image_url` (from `_run_background_matte`). Now that Patch 12h
+  shipped, both endpoints produce equivalent triad output, so the order
+  is no longer a regression risk — but keep this in mind when adding
+  any third matte path.
+- `apply_alpha_intersection` returns `None` when SegFormer mask covers
+  <40% of bbox (Patch 12g). Caller MUST treat `None` as "keep rembg-
+  only output", never as an error.
