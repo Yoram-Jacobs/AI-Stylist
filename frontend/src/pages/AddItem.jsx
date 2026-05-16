@@ -131,6 +131,20 @@ export default function AddItem() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [cards, setCards] = useState([]); // [{id,file,previewUrl,base64,status,progress,fields,error,dppData?}]
   const [saving, setSaving] = useState(false);
+  // Patch M20.2 (May 2026) — auto-save queue.
+  //
+  // Problem: user uploads N photos, presses Save the moment the FIRST
+  // one finishes analysing. The previous ``saveAll`` filtered cards
+  // by ``status in {ready, error}`` and silently dropped the others,
+  // then navigated to /closet — so the still-scanning N-1 photos
+  // vanished.
+  //
+  // Fix: when Save is pressed while some cards are still ``scanning``,
+  // persist the ready ones AND flip ``pendingAutoSave=true``. The
+  // user stays on /add, sees a small banner explaining the queue, and
+  // when all scanning cards reach a terminal state an effect re-fires
+  // ``saveAll`` to flush them too and then navigates.
+  const [pendingAutoSave, setPendingAutoSave] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   // Background batch state — shown instead of cards when user uploads
   // more than BG_THRESHOLD photos at once. Auto-analyzes + auto-saves
@@ -1004,7 +1018,30 @@ export default function AddItem() {
 
   const saveAll = async () => {
     const ready = cards.filter((c) => c.status === 'ready' || c.status === 'error' /* still savable if user fills */);
-    if (!ready.length) { toast.error(t('addItem.nothingToSave')); return; }
+    const scanning = cards.filter((c) => c.status === 'scanning');
+
+    // Patch M20.2 — neither ready nor scanning → nothing to save.
+    if (!ready.length && !scanning.length) {
+      toast.error(t('addItem.nothingToSave'));
+      return;
+    }
+
+    // Patch M20.2 — All cards still scanning. Mark the batch as
+    // queued and bail — the ``pendingAutoSave`` effect below will
+    // re-fire ``saveAll`` once they all finish.
+    if (!ready.length) {
+      setPendingAutoSave(true);
+      toast.info(
+        t('addItem.queuedForAutoSave', {
+          count: scanning.length,
+          defaultValue:
+            scanning.length === 1
+              ? 'Waiting for 1 photo to finish analysing — will save automatically.'
+              : `Waiting for ${scanning.length} photos to finish analysing — will save automatically.`,
+        }),
+      );
+      return;
+    }
 
     // Phase Z4 — optimistic-first "Save all".
     //
@@ -1135,18 +1172,41 @@ export default function AddItem() {
       setCards((prev) => prev.map((c) => (c.id === card.id ? { ...c, status: 'saved' } : c)));
     }
 
-    // Step 3 — instant feedback + navigate.
-    toast.success(
-      t('addItem.savedOptimistic', {
-        count: validCards.length,
-        defaultValue:
-          validCards.length === 1
-            ? 'Added to your closet — syncing in background'
-            : `${validCards.length} items added to your closet — syncing in background`,
-      }),
-    );
-    setSaving(false);
-    nav('/closet');
+    // Step 3 — instant feedback + (conditional) navigate.
+    //
+    // Patch M20.2 — If any cards are still ``scanning``, we DON'T
+    // navigate yet. The user stays on /add and watches the remaining
+    // analyses complete; the ``pendingAutoSave`` effect below will
+    // re-fire ``saveAll`` once they finish to flush the rest into
+    // the closet, then navigate.
+    const stillScanning = cards.some((c) => c.status === 'scanning');
+    if (stillScanning) {
+      toast.info(
+        t('addItem.savedSomeWaitingForRest', {
+          saved: validCards.length,
+          remaining: cards.filter((c) => c.status === 'scanning').length,
+          defaultValue:
+            `Saved ${validCards.length} — waiting for ${cards.filter((c) => c.status === 'scanning').length} more to finish analysing.`,
+        }),
+      );
+      setPendingAutoSave(true);
+      setSaving(false);
+      // settle() still fires below for the just-saved cards; only
+      // the navigation is deferred.
+    } else {
+      toast.success(
+        t('addItem.savedOptimistic', {
+          count: validCards.length,
+          defaultValue:
+            validCards.length === 1
+              ? 'Added to your closet — syncing in background'
+              : `${validCards.length} items added to your closet — syncing in background`,
+        }),
+      );
+      setSaving(false);
+      setPendingAutoSave(false);
+      nav('/closet');
+    }
 
     // Step 4+5 — parallel persistence + reconciliation. Runs after
     // navigation; failures surface via ``closetStore.recordSaveFailures``
@@ -1203,6 +1263,35 @@ export default function AddItem() {
     settle().catch(() => { /* recorded individually above */ });
   };
 
+  // Patch M20.2 — Auto-save queue driver.
+  //
+  // When the user pressed Save mid-batch, ``pendingAutoSave`` is set
+  // and ready cards are already on their way to the closet. We stay
+  // on /add and watch the remaining ``scanning`` cards. As soon as
+  // none are left scanning we re-fire ``saveAll`` to flush the cards
+  // that just finished, and ``saveAll`` itself navigates once there's
+  // nothing left to do.
+  //
+  // We use a ref to call the LATEST ``saveAll`` (which closes over
+  // the latest ``cards`` snapshot). Without the ref the effect would
+  // capture the saveAll from the render it was scheduled on, which
+  // would still see ``status='scanning'`` for the cards we're waiting
+  // on and re-queue forever.
+  const saveAllRef = useRef(null);
+  useEffect(() => {
+    saveAllRef.current = saveAll;
+  });
+  useEffect(() => {
+    if (!pendingAutoSave) return;
+    const stillScanning = cards.some((c) => c.status === 'scanning');
+    if (stillScanning) return;
+    // Drain — flush whatever's ready/error now. saveAll handles the
+    // navigation if no scanning cards remain after this pass.
+    if (typeof saveAllRef.current === 'function') {
+      saveAllRef.current();
+    }
+  }, [cards, pendingAutoSave]);
+
   return (
     <div className="container-px max-w-6xl mx-auto pt-6 md:pt-10 pb-28" data-testid="add-item-page">
       <div
@@ -1219,12 +1308,23 @@ export default function AddItem() {
           </Button>
           <Button
             onClick={saveAll}
-            disabled={saving || !!bgBatch || !cards.some((c) => c.status === 'ready')}
+            disabled={
+              saving
+              || !!bgBatch
+              // Patch M20.2 — Allow Save while some cards are still
+              // scanning (so the user can queue the batch); keep
+              // disabled while a previous queue is still draining
+              // (``pendingAutoSave``) to avoid re-entrant calls.
+              || pendingAutoSave
+              || (!cards.some((c) => c.status === 'ready') && !cards.some((c) => c.status === 'scanning'))
+            }
             className="rounded-xl"
             data-testid="add-item-save-all"
           >
-            {saving ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Save className="h-4 w-4 me-2" />}
-            {t('addItem.saveAll')}
+            {(saving || pendingAutoSave) ? <Loader2 className="h-4 w-4 me-2 animate-spin" /> : <Save className="h-4 w-4 me-2" />}
+            {pendingAutoSave
+              ? t('addItem.saveAllPending', { defaultValue: 'Saving — waiting for analysis…' })
+              : t('addItem.saveAll')}
           </Button>
         </div>
       </div>

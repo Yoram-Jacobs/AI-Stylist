@@ -984,6 +984,50 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.2 — Save-while-scanning auto-save queue (SHIPPED)
+
+**Bug:** User uploads N photos, presses Save the moment the FIRST
+one finishes analysing (button "turns black" = enabled by the first
+ready card). Only the first photo lands in the closet; the still-
+``scanning`` N-1 photos vanish silently. The previous ``saveAll``
+filtered ``cards.filter(c => c.status === 'ready' || 'error')`` and
+then ``nav('/closet')`` immediately — so scanning cards were dropped
+on unmount.
+
+**Fix:** Auto-save queue. When Save is pressed mid-batch, persist
+the ready cards (optimistic upsert + background settle as before)
+but DON'T navigate. Instead set ``pendingAutoSave=true`` and stay on
+/add. The user sees:
+- a toast "Saved X — waiting for Y more to finish analysing"
+- the Save button label flips to "Saving — waiting for analysis…" with a spinner
+- the global ``WorkProgressFloater`` continues to show analyze progress
+
+A small effect (`useEffect`) watches the cards array; once no card
+is ``scanning`` anymore it re-fires ``saveAll`` via a ``saveAllRef``
+to flush the newly-ready cards into the closet. ``saveAll`` itself
+navigates only when there's nothing left scanning.
+
+**Edge cases handled:**
+- All cards still scanning at Save time → no ready ones to persist,
+  just set ``pendingAutoSave=true`` and show "Waiting for N photos…"
+  toast.
+- A scanning card transitions to ``error`` (no title) → counts as
+  non-scanning, queue drains, ``saveAll`` filters it as skipped
+  (no infinite loop).
+- Multi-garment detection (`handleDetect` splits one upload into N
+  sub-cards) → sub-cards inherit scanning status from
+  ``buildBaseCard``; queue waits for ALL sub-cards to reach a
+  terminal state before draining.
+- ``saveAllRef`` pattern avoids stale closure in the effect — the
+  effect always calls the latest ``saveAll`` (with the latest
+  ``cards`` snapshot).
+
+**Save button gating updated:** previously
+``disabled={saving || bgBatch || !cards.some(c => c.status==='ready')}``.
+Now also disables on ``pendingAutoSave`` (to prevent re-entrant
+calls) and enables when scanning cards exist (so the user can queue
+them).
+
 **Both `WorkProgressFloater` and `WorkBatchDoneToast` are mounted at
 App root** (already scaffolded), so they render on every authenticated
 page including /add, /closet, /home, /stylist, etc.
