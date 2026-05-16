@@ -1,18 +1,30 @@
 [
   {
-    "content": "Update silent batch uploading pipeline with workStore wiring",
+    "content": "Patch M20.5: unify silent batch path with interactive analyzeCard+saveAll",
     "status": "completed"
   },
   {
-    "content": "Wire handleBatchBackground analyze loop into workStore.registerAnalyze/updateAnalyze/completeAnalyze",
+    "content": "Replace bgBatch state with simpler bulkInfo {totalFiles, skippedDuplicates}; derive progress via useMemo from cards",
     "status": "completed"
   },
   {
-    "content": "Register polish-candidate items (clean_image_status='pending') from silent batch save with workStore.registerPolishItems",
+    "content": "Remove handleBatchBackground + processOne (~360 lines)",
     "status": "completed"
   },
   {
-    "content": "Lint + verify nothing broke (ESLint clean, esbuild clean)",
+    "content": "Modify handleFiles: always continueInteractive; when files>threshold set bulkInfo + auto-call saveAll via saveAllRef",
+    "status": "completed"
+  },
+  {
+    "content": "Simplify DuplicateConfirmDialog handlers (drop pendingBatchSave branch, ~70 LoC)",
+    "status": "completed"
+  },
+  {
+    "content": "Stamp analyzeError on failed analyzeCard for the derived bgBatch.analyzeFailed counter",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + build clean; file shrank from 2370→2086 lines (-12%)",
     "status": "completed"
   }
 ]

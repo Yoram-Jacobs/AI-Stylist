@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -146,11 +146,96 @@ export default function AddItem() {
   // ``saveAll`` to flush them too and then navigates.
   const [pendingAutoSave, setPendingAutoSave] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-  // Background batch state — shown instead of cards when user uploads
-  // more than BG_THRESHOLD photos at once. Auto-analyzes + auto-saves
-  // each item with sane defaults; user is told to fix any misfits in
-  // /closet afterwards.
-  const [bgBatch, setBgBatch] = useState(null);
+  // Patch M20.5 (May 2026) — Bulk upload mode marker.
+  //
+  // Replaces the M20.3/M20.4 ``bgBatch`` state. The silent batch path
+  // (>5 photos) USED to be a parallel implementation of analyze + save
+  // (``handleBatchBackground`` + ``processOne``, ~360 LoC). That was
+  // a textbook DRY violation — every fix to the interactive pipeline
+  // had to be ported to the batch path, and M21 / 12i / 12j / 12k /
+  // 12l / M20.b / M20.c all shipped with the batch path missing the
+  // update.
+  //
+  // New design: the batch path is JUST the interactive path with
+  //   (a) the per-card editor UI suppressed in favour of an aggregate
+  //       progress card, and
+  //   (b) ``saveAll()`` auto-fired immediately after draft cards land
+  //       in state, so the M20.2 ``pendingAutoSave`` queue drains
+  //       everything and navigates to /closet without user input.
+  //
+  // ``bulkInfo`` is the marker for (a) — non-null means render the
+  // progress card and hide the grid. ``totalFiles`` is the user's
+  // original drop count, ``skippedDuplicates`` is what the upfront
+  // sha256/phash check filtered out. Everything else (cards-saved,
+  // cards-failed, in-flight analyses, "Polishing N/M photos") is
+  // derived from ``cards`` + the global ``workStore`` snapshot so
+  // the UI stays in lockstep with the canonical pipeline.
+  const [bulkInfo, setBulkInfo] = useState(null);
+  // Patch M20.5 — ``bgBatch`` was an independent state slot updated
+  // by the old ``handleBatchBackground`` worker loop. Now it's a
+  // pure useMemo derived from ``bulkInfo`` (the marker for "user
+  // dropped >5 photos, render the aggregate progress UI") + the
+  // shared ``cards`` array. Keeps the existing render block at the
+  // bottom of the JSX unchanged.
+  //
+  // ``totalFiles`` is the user's drop count (constant for this
+  // batch). The other counters tick as ``cards`` mutates:
+  //   * processed = cards that have left ``scanning`` status
+  //   * saved     = cards in ``saved`` status (post-settle())
+  //   * failed    = cards in ``error`` status that were rejected
+  //                 by saveAll's per-card validation
+  //   * analyzeFailed = cards whose ``analyzeCard`` threw — same
+  //                 visual semantics as the legacy bg-batch field,
+  //                 distinguishes "Gemini couldn't parse" from "save
+  //                 failed because no title"
+  //   * pendingDuplicates = cards where the analyzer flagged
+  //                 ``potential_duplicate`` — these are NOT
+  //                 auto-saved; the user resolves them via the
+  //                 existing DuplicateConfirmDialog and the count
+  //                 ticks down as decisions are made
+  const bgBatch = useMemo(() => {
+    if (!bulkInfo) return null;
+    const total = bulkInfo.totalFiles;
+    const skippedDuplicates = bulkInfo.skippedDuplicates || 0;
+    let saved = 0;
+    let failed = 0;
+    let analyzeFailed = 0;
+    let pendingDuplicates = 0;
+    let scanning = 0;
+    for (const c of cards) {
+      if (c.status === 'saved') saved += 1;
+      else if (c.status === 'error') {
+        // ``analyzeError`` flagged by ``analyzeCard`` on its failure
+        // path; otherwise the ``error`` status came from
+        // saveAll's per-card validation (missing title, payload
+        // rejection, etc.).
+        if (c.analyzeError) analyzeFailed += 1;
+        else failed += 1;
+      } else if (c.status === 'scanning') {
+        scanning += 1;
+      }
+      if (c.potentialDuplicate && c.status !== 'saved' && c.status !== 'error') {
+        pendingDuplicates += 1;
+      }
+    }
+    // "Processed" is "files no longer being analysed". Best effort
+    // — after ``handleDetect`` splits a single upload into N
+    // sub-cards we don't have a clean per-original-file signal, so
+    // we approximate via ``total - scanning`` clamped at >=0.
+    // ``scanning`` may exceed ``total`` briefly during multi-garment
+    // expansion (one file → 2-4 scanning sub-cards). When that
+    // happens we just show processed=0 until things settle.
+    const processed = Math.max(0, total - scanning);
+    return {
+      total,
+      processed,
+      saved,
+      failed,
+      analyzeFailed,
+      pendingDuplicates,
+      skippedDuplicates,
+    };
+  }, [bulkInfo, cards]);
   // Phase Z3 — pre-flight duplicate dialog state. Holds the
   // ``matches`` array returned by ``findDuplicatesInCloset`` plus a
   // continuation closure that resumes the upload flow once the user
@@ -322,14 +407,14 @@ export default function AddItem() {
     }
 
     // BG_THRESHOLD: above this we skip the per-card editor and run
-    // the auto-save batch path. Anything above 5 is clearly a "dump
-    // my whole wardrobe" moment.
+    // the unified auto-save flow (Patch M20.5). Anything above 5 is
+    // clearly a "dump my whole wardrobe" moment.
     const BG_THRESHOLD = 5;
     const isBatch = files.length > BG_THRESHOLD;
 
     // No duplicates → straight through.
     if (!matches.length) {
-      if (isBatch) return handleBatchBackground(files, 0);
+      if (isBatch) return handleBulkUpload(fingerprints, 0);
       return continueInteractive(fingerprints, /* duplicateAcks */ {});
     }
 
@@ -343,15 +428,13 @@ export default function AddItem() {
       // file list.
       const dupShas = new Set(matches.map((m) => m.sha256).filter(Boolean));
       const dupPhashes = new Set(matches.map((m) => m.phash).filter(Boolean));
-      const survivors = fingerprints
-        .filter(
-          (fp) =>
-            !(fp.sha256 && dupShas.has(fp.sha256)) &&
-            !(fp.phash && dupPhashes.has(fp.phash)),
-        )
-        .map((fp) => fp.file);
-      const skipped = files.length - survivors.length;
-      if (!survivors.length) {
+      const survivorFps = fingerprints.filter(
+        (fp) =>
+          !(fp.sha256 && dupShas.has(fp.sha256)) &&
+          !(fp.phash && dupPhashes.has(fp.phash)),
+      );
+      const skipped = files.length - survivorFps.length;
+      if (!survivorFps.length) {
         toast.message(
           t('addItem.preflight.allDuplicatesSkippedBatch', {
             count: skipped,
@@ -360,7 +443,7 @@ export default function AddItem() {
         );
         return;
       }
-      return handleBatchBackground(survivors, skipped);
+      return handleBulkUpload(survivorFps, skipped);
     }
 
     // INTERACTIVE path (≤5 photos): open the scrollable confirm
@@ -483,374 +566,78 @@ export default function AddItem() {
   };
 
   // ------------------------------------------------------------------
-  // Background batch upload (>5 photos): analyze + auto-save each one
-  // with whatever the analyzer returns. We process **strictly
-  // sequentially** because the analyze pipeline (SegFormer + rembg +
-  // Gemini) is RAM-heavy: running multiple in parallel on a small
-  // production VPS reliably OOMs the second/third call. With one at a
-  // time, items 2..N actually get analysed instead of silently
-  // falling through to the "save raw image" branch.
+  // Patch M20.5 (May 2026) — Unified bulk upload entry.
+  //
+  // The previous implementation (``handleBatchBackground`` +
+  // ``processOne``, ~360 LoC) was a parallel re-implementation of
+  // analyze + save that the silent batch path used instead of going
+  // through ``analyzeCard`` + ``saveAll``. Every fix to the
+  // interactive pipeline (M21 SegFormer-anchored category, 12i/12j/
+  // 12k/12l per-category dilation + bbox padding, M20.b/c workStore
+  // wiring) had to be ported to the batch path and was missed each
+  // time.
+  //
+  // New design: the batch path is JUST the interactive path with the
+  // per-card editor UI suppressed (driven by ``bulkInfo`` being
+  // non-null) and ``saveAll`` auto-fired immediately after the draft
+  // cards land in state. The M20.2 ``pendingAutoSave`` queue then
+  // drains everything in the background and navigates to /closet
+  // without user input — exactly the "fire and forget" UX the silent
+  // batch promised, but powered by the canonical pipeline.
   // ------------------------------------------------------------------
-  const handleBatchBackground = async (files, skippedDuplicates = 0) => {
-    setBgBatch({
-      total: files.length,
-      processed: 0,
-      saved: 0,
-      failed: 0,
-      // Items where the analyze call failed and we had to save the
-      // raw photo with blank fields. Surfaced in the final toast so
-      // the user knows which ones need cleanup in /closet.
-      analyzeFailed: 0,
-      // Items the analyzer flagged as potential_duplicate of an
-      // already-saved closet entry. The batch path no longer
-      // auto-saves these — instead each one is kicked over to the
-      // interactive `cards` list so the existing
-      // DuplicateConfirmDialog can ask the user to confirm/discard.
-      // We track the count so the final toast tells the user how
-      // many items still need their attention before we navigate.
-      pendingDuplicates: 0,
-      // Phase Z2 — pre-flight skipped this many photos because their
-      // SHA-256 hash already existed in the closet. Surfaced in the
-      // final toast so the user knows none of their selection went
-      // missing silently.
-      skippedDuplicates: skippedDuplicates || 0,
+  const handleBulkUpload = (survivorFps, skippedDuplicates = 0) => {
+    // Marker for the JSX render block. ``bgBatch`` is now a useMemo
+    // derived from ``bulkInfo`` + ``cards`` so the existing progress
+    // card UI keeps working unchanged.
+    setBulkInfo({
+      totalFiles: survivorFps.length,
+      skippedDuplicates,
     });
-    // Patch M20.4 (May 2026) — Single batch-level workStore job
-    // (was one job per file in M20.3, which made the floater read
-    // "Analysing 1 item" per row instead of "Analysing N/M files"
-    // for the whole batch). Now we register ONE job with
-    // ``total = files.length``, bump ``items`` after every file
-    // completes, and ``completeAnalyze`` after the worker loop
-    // exits. Counter reads "Analysing 2/6 files" → "3/6" → ...
-    // → cleared.
-    const batchAnalyzeJobId =
-      `bg-batch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const batchLabel =
-      files.length === 1
-        ? files[0]?.name || '1 photo'
-        : `${files.length} photos`;
-    workStore.registerAnalyze(batchAnalyzeJobId, batchLabel);
-    workStore.updateAnalyze(batchAnalyzeJobId, {
-      items: 0,
-      total: files.length,
-    });
-    let filesDone = 0;
-    toast.success(
-      t('addItem.bgUpload.started', {
-        count: files.length,
-        defaultValue: `Uploading ${files.length} photos in the background…`,
-      })
-    );
-
-    const queue = [...files];
-
-    // Try analysis with a single retry on failure. The first failure
-    // is usually a transient timeout / cold-start; a 1.2s pause and a
-    // second attempt clears most of those without piling more work
-    // onto an already-stressed backend.
-    //
-    // We pass ``language: i18n.language`` so The Eyes' Gemini prompt
-    // produces ``name`` / ``title`` / ``caption`` in the locale the
-    // user is currently viewing the UI in \u2014 not whatever was on
-    // their profile at signup. Enum / category strings stay canonical
-    // English; the frontend i18n layer translates those for display.
-    const requestLang = (i18n.language || '').split('-')[0] || 'en';
-    const analyzeWithRetry = async (b64) => {
-      try {
-        return await api.analyzeItemImage({ image_base64: b64, language: requestLang });
-      } catch (firstErr) {
-        await new Promise((r) => setTimeout(r, 1200));
-        try {
-          return await api.analyzeItemImage({ image_base64: b64, language: requestLang });
-        } catch (_secondErr) {
-          throw firstErr;
-        }
-      }
-    };
-
-    const processOne = async (file) => {
-      let createdHere = 0;
-      let failedHere = 0;
-      let analyzeFailedHere = 0;
-      let b64 = null;
-      // Patch M20.4 — collect polish candidates per file; registered
-      // with workStore at the bottom of processOne so the global
-      // polish tracker fires "Polishing N/M photos" + "You have news
-      // in your closet" toast at the right times.
-      const polishCandidates = [];
-      // Phase Z2 — recompute the fingerprint here so each saved item
-      // carries source_sha256/filename/size in the DB, even on the
-      // batch path. (We already verified upstream none of these are
-      // duplicates of existing closet items, otherwise the pre-flight
-      // gate would have dropped them; the hash is stored so *future*
-      // uploads of the same file are caught for free.)
-      let sha256 = null;
-      let phash = null;
-      try {
-        [sha256, phash] = await Promise.all([
-          sha256File(file),
-          aHashFile(file),
-        ]);
-      } catch (_) {
-        sha256 = null;
-        phash = null;
-      }
-      const sourceMeta = {
-        sourceSha256: sha256,
-        sourcePhash: phash,
-        sourceFilename: file?.name || null,
-        sourceSizeBytes: typeof file?.size === 'number' ? file.size : null,
-      };
-      try {
-        b64 = await fileToBase64(file);
-      } catch (_) {
-        failedHere += 1;
-        filesDone += 1;
-        workStore.updateAnalyze(batchAnalyzeJobId, {
-          items: filesDone,
-          total: files.length,
-        });
-        setBgBatch((b) => (b ? { ...b, processed: b.processed + 1, failed: b.failed + failedHere } : null));
-        return;
-      }
-
-      // Try analysis; on failure, fall back to saving the raw image
-      // with blank fields so the user still gets the item in /closet.
-      // Track the analyze-failure count separately so the final toast
-      // can tell the user "X items need fields filled in".
-      let analysisItems = null;
-      try {
-        const resp = await analyzeWithRetry(b64);
-        analysisItems =
-          Array.isArray(resp?.items) && resp.items.length > 0
-            ? resp.items
-            : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
-      } catch (_) {
-        analyzeFailedHere += 1;
-        analysisItems = [
-          { analysis: {}, crop_base64: b64, crop_mime: file.type || 'image/jpeg' },
-        ];
-      }
-
-      for (const it of analysisItems) {
-        const cardLike = {
-          base64: it.crop_base64 || b64,
-          mime: it.crop_mime || file.type || 'image/jpeg',
-          file: null,
-          fields: hydrate(it.analysis || {}, user),
-          useReconstructed: false,
-          // Patch M20.4 (May 2026) — forward the analyzer's
-          // ``defer_matte`` flag so ``buildCreatePayload`` sets
-          // ``defer_matte: true`` on the /closet POST. The backend's
-          // ``create_item`` then leaves ``clean_image_status =
-          // "pending"`` on the response and queues
-          // ``_run_background_matte`` as a fire-and-forget BackgroundTask.
-          // Without this, the silent batch path's items were saved
-          // with synchronous matte already done → status='ready' on
-          // creation → workStore never saw them as "pending" → no
-          // "Polishing N/M photos" row on the floater → no
-          // "You have news in your closet" toast. Bug visible on
-          // the May 2026 6-photo silent batch test ("No Polishing").
-          deferMatte: !!it.defer_matte,
-          // Phase Z2 — fingerprint passthrough into buildCreatePayload
-          // so the row stored in Mongo carries source_sha256 etc. and
-          // future uploads of the same file get caught by the
-          // client-side duplicate check against ``closetStore``
-          // (Phase Z3 — was /closet/preflight before).
-          ...sourceMeta,
-        };
-
-        // Duplicate gate (regression fix, restored): if the analyzer
-        // flagged this item as a likely re-upload of something already
-        // in the user's closet, do NOT silently auto-save. Surface the
-        // crop as an interactive card so the existing
-        // DuplicateConfirmDialog can ask the user whether to add it
-        // anyway. The batch path keeps processing the rest of the
-        // queue while the dialog is open — duplicates pile up one
-        // card at a time and the modal pops them serially.
-        if (it.potential_duplicate) {
-          const mime = cardLike.mime;
-          const dupCard = {
-            id: `bgdup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            file: null,
-            mime,
-            previewUrl: cardLike.base64
-              ? `data:${mime};base64,${cardLike.base64}`
-              : null,
-            base64: cardLike.base64,
-            originalCropUrl: cardLike.base64
-              ? `data:${mime};base64,${cardLike.base64}`
-              : null,
-            status: 'ready',
-            progress: 100,
-            fields: cardLike.fields,
-            potentialDuplicate: it.potential_duplicate,
-            // Flag set on cards that were redirected here mid-batch.
-            // The DuplicateConfirmDialog's onConfirm uses this to
-            // immediately POST /closet (instead of waiting for the
-            // user to click "Save All"), keeping the batch flow
-            // close to the original "fire-and-forget" feel.
-            pendingBatchSave: true,
-          };
-          setCards((prev) => [...prev, dupCard]);
-          setBgBatch((b) =>
-            b ? { ...b, pendingDuplicates: (b.pendingDuplicates || 0) + 1 } : b,
-          );
-          continue;
-        }
-
-        try {
-          const created = await api.createItem(buildCreatePayload(cardLike));
-          createdHere += 1;
-          // Patch the global closet store so /closet shows the new
-          // card the moment the user navigates there — no full
-          // refetch required. ``created`` is the persisted document
-          // returned by POST /closet (already includes id,
-          // created_at, etc.).
-          if (created && created.id) {
-            try {
-              const { closetStore } = await import('@/lib/closetStore');
-              closetStore.upsert(created);
-            } catch { /* store import failure should never block upload */ }
-            // Patch M20.3 — collect polish candidates for workStore.
-            // ``clean_image_status === 'pending'`` means the backend
-            // BackgroundTask is still running rembg + SegFormer
-            // alpha intersection on the crop; the global poller
-            // in ``workStore`` will track it and fire the "You have
-            // news in your closet" toast when the batch drains.
-            if (created.clean_image_status === 'pending') {
-              polishCandidates.push(created);
-            }
-          }
-        } catch (_) {
-          failedHere += 1;
-        }
-      }
-
-      // Patch M20.4 — bump the SHARED batch-level workStore counter
-      // (was a per-file ``completeAnalyze(analyzeJobId)`` in M20.3
-      // which made the floater show "Analysing 1 item" per row
-      // instead of the proper "N/M files" aggregate). Done in
-      // finally-style flow — no try/finally needed because the
-      // await chain above is already exception-safe (caught errors
-      // are counted in failedHere / analyzeFailedHere, not re-raised).
-      filesDone += 1;
-      workStore.updateAnalyze(batchAnalyzeJobId, {
-        items: filesDone,
-        total: files.length,
-      });
-      // Register any pending-matte items with the global polish
-      // tracker so the floater shows "Polishing N/M photos" and the
-      // ``WorkBatchDoneToast`` fires once the last one drains.
-      if (polishCandidates.length) {
-        workStore.registerPolishItems(polishCandidates);
-      }
-
-      setBgBatch((b) =>
-        b
-          ? {
-              ...b,
-              processed: b.processed + 1,
-              saved: b.saved + createdHere,
-              failed: b.failed + failedHere,
-              analyzeFailed: (b.analyzeFailed || 0) + analyzeFailedHere,
-            }
-          : null
+    // Surface the pre-flight duplicate count up-front (used to be
+    // bundled into the final completion toast). The user appreciates
+    // knowing nothing was silently dropped before processing kicks off.
+    if (skippedDuplicates > 0) {
+      toast.message(
+        t('addItem.preflight.someDuplicatesSkipped', {
+          count: skippedDuplicates,
+          defaultValue:
+            `Skipped ${skippedDuplicates} photo${skippedDuplicates === 1 ? '' : 's'} already in your closet.`,
+        }),
       );
-    };
-
-    // Sequential worker — process one file at a time. The earlier
-    // CONCURRENCY=3 implementation tried to run 3 analyse calls in
-    // parallel and got bitten by VPS RAM limits on production: the
-    // first item completed, items 2..N OOM'd inside rembg, fell into
-    // the catch above, and got saved as raw photos with empty fields.
-    while (queue.length) {
-      const next = queue.shift();
-      if (next) {
-        // eslint-disable-next-line no-await-in-loop
-        await processOne(next);
-      }
     }
-
-    // Patch M20.4 — Worker loop done. Clear the batch-level analyze
-    // job so the floater's "Analysing N/M files" row disappears.
-    // The polish tracker (registered per-file via
-    // ``workStore.registerPolishItems``) keeps running independently
-    // until each pending item drains; ``WorkBatchDoneToast`` then
-    // fires the "You have news in your closet" toast.
-    workStore.completeAnalyze(batchAnalyzeJobId);
-
-    // Read final counts from state via functional update so we don't
-    // race with React batching.
-    setBgBatch((b) => {
-      const saved = b?.saved ?? 0;
-      const failed = b?.failed ?? 0;
-      const analyzeFailed = b?.analyzeFailed ?? 0;
-      const pendingDuplicates = b?.pendingDuplicates ?? 0;
-      const skippedDuplicates = b?.skippedDuplicates ?? 0;
-      // Phase Z2 — appended to whichever toast variant fires below
-      // so the user knows the pre-flight silently dropped some
-      // photos that were already in the closet.
-      const dupTrailer = skippedDuplicates
-        ? ' ' +
-          t('addItem.bgUpload.skippedDupSuffix', {
-            count: skippedDuplicates,
-            defaultValue: `(skipped ${skippedDuplicates} already in closet)`,
-          })
-        : '';
-      if (pendingDuplicates) {
-        // Some uploads matched existing closet items — we surfaced
-        // them as interactive cards so the duplicate-confirm dialog
-        // can ask the user. Don't auto-navigate to /closet: the user
-        // needs to confirm/discard each one first.
-        toast.message(
-          t('addItem.bgUpload.duplicatesPending', {
-            saved,
-            pending: pendingDuplicates,
-            defaultValue: `Saved ${saved} new items · ${pendingDuplicates} look like duplicates — review them below.`,
-          }) + dupTrailer,
-        );
-      } else if (saved && !failed && !analyzeFailed) {
-        toast.success(
-          t('addItem.bgUpload.done', {
-            count: saved,
-            defaultValue: `Saved ${saved} items. Edit any misfits in your closet.`,
-          }) + dupTrailer,
-        );
-      } else if (saved && analyzeFailed && !failed) {
-        // All items saved, but some skipped analysis — tell the user
-        // which need attention so they're not surprised by blank
-        // cards in the closet.
-        toast.message(
-          t('addItem.bgUpload.partialAnalyze', {
-            saved,
-            analyzeFailed,
-            defaultValue: `Saved ${saved} items · ${analyzeFailed} need fields filled in (analysis failed).`,
-          }) + dupTrailer,
-        );
-      } else if (saved && failed) {
-        toast.message(
-          t('addItem.bgUpload.partial', {
-            saved,
-            failed,
-            defaultValue: `Saved ${saved} · ${failed} failed`,
-          }) + dupTrailer,
-        );
-      } else if (!saved && !pendingDuplicates && !skippedDuplicates) {
-        toast.error(
-          t('addItem.bgUpload.failed', {
-            defaultValue: 'Could not save any items. Please try again.',
-          })
-        );
+    // Hand off to the same code path as the interactive flow. This
+    // adds draft cards to ``setCards`` and kicks ``analyzeCard`` per
+    // card (which streams via NDJSON, registers with workStore for
+    // the cross-page floater, runs SegFormer + Gemini + the M21
+    // category enforcement, and is subject to all the 12i / 12j /
+    // 12k / 12l per-category cropping budgets — none of which the
+    // old silent path was getting).
+    continueInteractive(survivorFps, /* duplicateAcks */ {});
+    // Auto-fire ``saveAll`` on the next microtask. The cards have
+    // just been queued via ``setCards`` (synchronous) and
+    // ``analyzeCard`` calls have been kicked off (their state
+    // updates are async). Right now they're all in
+    // ``status === 'scanning'`` so ``saveAll`` will:
+    //   1. See ``ready.length === 0`` + ``scanning.length > 0`` →
+    //      go into the M20.2 "queue and wait" branch.
+    //   2. Set ``pendingAutoSave = true`` and show the
+    //      "Waiting for N photos…" toast.
+    //   3. The ``pendingAutoSave`` effect (also from M20.2) then
+    //      re-fires ``saveAll`` once the last scanning card flips
+    //      to ``ready``, which persists the lot via the optimistic
+    //      flow + background ``settle()`` and finally navigates to
+    //      /closet.
+    //
+    // setTimeout 0 because ``setCards`` is batched — we need to let
+    // React flush so ``cards`` is non-empty when ``saveAll`` reads
+    // it. The ``saveAllRef`` indirection (from M20.2) ensures we
+    // call the LATEST saveAll closure (which captures the up-to-date
+    // ``cards`` array).
+    setTimeout(() => {
+      if (typeof saveAllRef.current === 'function') {
+        saveAllRef.current();
       }
-      // Brief pause so the user sees the final 100% before navigating.
-      // Only auto-navigate when there are no pending duplicates — those
-      // need the user's explicit confirm/discard click first.
-      setTimeout(() => {
-        if (saved && !pendingDuplicates) nav('/closet');
-      }, 1200);
-      return null;
-    });
+    }, 0);
   };
 
   const analyzeCard = async (card) => {
@@ -1037,6 +824,12 @@ export default function AddItem() {
                   status: 'error',
                   progress: 0,
                   error: t('addItem.analyzeFailed'),
+                  // Patch M20.5 — flag so the derived ``bgBatch``
+                  // counter can distinguish "Gemini couldn't parse"
+                  // (analyzeFailed) from a save-time validation
+                  // failure (failed). User-facing semantics
+                  // identical to the old silent-batch counter.
+                  analyzeError: true,
                 }
               : c
           )
@@ -1051,7 +844,9 @@ export default function AddItem() {
       const msg = err?.response?.data?.detail || err?.message || t('addItem.analyzeFailed');
       setCards((prev) =>
         prev.map((c) =>
-          c.id === card.id ? { ...c, status: 'error', progress: 0, error: msg } : c
+          c.id === card.id
+            ? { ...c, status: 'error', progress: 0, error: msg, analyzeError: true }
+            : c
         )
       );
       toast.error(msg);
@@ -1464,83 +1259,30 @@ export default function AddItem() {
       <DuplicateConfirmDialog
         cards={cards}
         onCancel={(cardId) => {
+          // Patch M20.5 — Removed the bgBatch update branch. In the
+          // unified flow ``bgBatch`` is a useMemo derived from
+          // ``cards`` + ``bulkInfo`` so the pendingDuplicates count
+          // automatically ticks down when the card is filtered out
+          // below.
           setCards((prev) => {
             const removed = prev.find((c) => c.id === cardId);
             if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
-            // Decrement the batch's pendingDuplicates counter so the
-            // final toast / nav logic stays accurate after a discard.
-            if (removed?.pendingBatchSave) {
-              setBgBatch((b) =>
-                b
-                  ? {
-                      ...b,
-                      pendingDuplicates: Math.max(
-                        0,
-                        (b.pendingDuplicates || 0) - 1,
-                      ),
-                    }
-                  : b,
-              );
-            }
             return prev.filter((c) => c.id !== cardId);
           });
         }}
         onConfirm={async (cardId) => {
-          // Snapshot the card so we don't lose state to the
-          // setCards stamp below if we have to read from it after.
-          const card = cards.find((c) => c.id === cardId);
-          if (!card) return;
-
-          // Cards that came through the foreground / interactive path
-          // just get stamped — the user clicks "Save All" afterwards.
-          if (!card.pendingBatchSave) {
-            setCards((prev) =>
-              prev.map((c) =>
-                c.id === cardId ? { ...c, duplicateConfirmed: true } : c,
-              ),
-            );
-            return;
-          }
-
-          // Batch-origin cards: save immediately and remove from the
-          // cards list. This restores the "uploads continue in the
-          // background" UX while still requiring an explicit user
-          // confirmation for each duplicate.
-          try {
-            await api.createItem(buildCreatePayload(card));
-            setCards((prev) => prev.filter((c) => c.id !== cardId));
-            setBgBatch((b) =>
-              b
-                ? {
-                    ...b,
-                    saved: (b.saved || 0) + 1,
-                    pendingDuplicates: Math.max(
-                      0,
-                      (b.pendingDuplicates || 0) - 1,
-                    ),
-                  }
-                : b,
-            );
-          } catch (err) {
-            // Saving failed — keep the card visible so the user can
-            // edit + retry through the normal Save All flow. We stamp
-            // duplicateConfirmed so the dialog doesn't pop again for
-            // this card.
-            setCards((prev) =>
-              prev.map((c) =>
-                c.id === cardId
-                  ? { ...c, duplicateConfirmed: true, pendingBatchSave: false }
-                  : c,
-              ),
-            );
-            toast.error(
-              err?.response?.data?.detail ||
-                t('addItem.duplicate.saveFailed', {
-                  defaultValue:
-                    'Could not save the duplicate item. Please review and use Save All.',
-                }),
-            );
-          }
+          // Patch M20.5 — All cards (interactive AND bulk) now flow
+          // through the same ``saveAll`` pipeline; this handler just
+          // stamps ``duplicateConfirmed`` so saveAll's per-card
+          // validation lets the card through. The previous batch-
+          // origin code path that POSTed /closet directly is gone
+          // along with the rest of the parallel ``handleBatchBackground``
+          // implementation.
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === cardId ? { ...c, duplicateConfirmed: true } : c,
+            ),
+          );
         }}
       />
 

@@ -984,6 +984,108 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.5 — Unified bulk-upload pipeline (delete the silent path entirely) — SHIPPED
+
+User architectural feedback after M20.4:
+
+> "The background bulk 'Add item' pipeline is identical to a
+> single-photo uploading pipeline. The only difference is a progress
+> bar replacing the real-time processing UI. All there is to do is
+> wire the silent batch uploader to the add item pipeline, rather
+> than reinventing it all over again."
+
+Correct on every count. The two paths had drifted into parallel
+implementations of analyze + save: every fix to the interactive
+pipeline (M21 SegFormer-anchored category, 12i/12j/12k/12l per-cat
+dilation + bbox padding, M20.b/c workStore wiring) had to be ported
+to the batch path and was missed each time the user reported a
+regression.
+
+### Refactor
+**Deleted** (~360 LoC):
+- `handleBatchBackground(files, skippedDuplicates)` — the parallel
+  worker loop that called `/closet/analyze` per file
+- `processOne(file)` — the per-file analyze + create handler with
+  its own retry, optimistic upsert, polish-candidate collection,
+  workStore wiring, etc.
+- `setBgBatch` state slot — bgBatch was set+mutated by the worker
+  loop
+- `pendingBatchSave` per-card flag — the duplicate-dialog handler
+  used it to route confirms through a direct `api.createItem` call
+  instead of `saveAll`
+
+**Added** (~70 LoC, mostly comments):
+- `bulkInfo` state: `{totalFiles, skippedDuplicates} | null` — pure
+  marker for "render the aggregate progress UI"
+- `bgBatch` rebuilt as a `useMemo` derived from `bulkInfo` + `cards`
+  so the existing progress-card JSX block at the bottom of the file
+  keeps working unchanged. Counters tick automatically as the
+  unified pipeline mutates `cards`.
+- `handleBulkUpload(survivorFps, skippedDuplicates)` — the new entry
+  point. It:
+  1. Sets `bulkInfo` (UI flips to aggregate mode).
+  2. Emits the "Skipped N already in closet" toast upfront if
+     applicable.
+  3. Calls `continueInteractive(survivorFps, {})` — the SAME entry
+     the ≤5-photo path uses. Drafts → `setCards` → `analyzeCard`
+     per draft (streaming, workStore-wired, fully M21+12i-l backend).
+  4. On the next microtask, fires `saveAllRef.current()` so the
+     M20.2 `pendingAutoSave` queue kicks in: ready cards (none yet)
+     persist, scanning cards (all of them) are queued, and the
+     existing effect re-fires `saveAll` once they all reach a
+     terminal state. `saveAll` then navigates to /closet itself.
+- `analyzeError: true` stamp on cards whose `analyzeCard` failed,
+  so the derived `bgBatch.analyzeFailed` counter can distinguish
+  "Gemini couldn't parse" from "save-time validation failure".
+- `DuplicateConfirmDialog` handlers stripped of the batch-origin
+  branch (~70 LoC) — both interactive and bulk cards now route
+  through `saveAll`, the dialog handler just stamps
+  `duplicateConfirmed: true`.
+
+### What the user sees
+- **Drop 6+ photos** → bulk mode UI activates (aggregate progress
+  card, cards grid suppressed), interactive pipeline runs underneath,
+  `WorkProgressFloater` shows per-card analyze + polish progress
+  exactly as the ≤5-photo path does.
+- **Each card now uses the full backend pipeline** — SegFormer detect
+  with M21 category anchoring, 12i/12j/12k/12l per-category
+  bbox + dilation budgets, NDJSON streaming response. The "13 cards
+  from 6 complex photos" complaint may resolve naturally if the new
+  pipeline yields more detections than the deprecated one.
+- **"You have news in your closet" toast** fires when the last polish
+  drains (same as the interactive path, because it IS the
+  interactive path).
+- **Duplicates** detected post-analysis show in the
+  DuplicateConfirmDialog; confirm → flows through `saveAll`,
+  cancel → card removed, `bgBatch.pendingDuplicates` ticks down via
+  the useMemo derivation.
+
+### Files touched
+- `frontend/src/pages/AddItem.jsx` — file shrank from
+  **2370 → 2086 lines (-284 lines / -12 %)** with no loss of
+  user-visible feature
+- `plan.md` (this entry)
+
+### Verification
+- ESLint: clean
+- esbuild: clean (2.0 MB bundle)
+- Lint scan for orphan references to deleted symbols: 5 hits,
+  all in /* comments */ documenting what was removed
+
+### Why this fixes M20.4's complaints "for free"
+- "Analysing 1 item" — gone, because the floater is now driven by
+  per-card workStore.registerAnalyze in `analyzeCard`, ticking up
+  garments-per-photo just like the ≤5-photo path. (M20.4's
+  batch-level workaround is removed.)
+- "No Polishing" — gone, because `saveAll::settle()` already
+  collects `polishCandidates` from every `clean_image_status ==
+  "pending"` create_item response and passes them to
+  `workStore.registerPolishItems()`. Always has, ever since M20.c.
+- "13 cards from 6 complex photos" — likely gone too, since the
+  unified path uses the streaming endpoint with M21 category
+  enforcement and the latest cropping budgets, which the silent
+  path was missing.
+
 ## ✅ Patch M20.4 — Silent batch UX fixes (counter aggregate + deferMatte + polishing) — SHIPPED
 
 User feedback after M20.3 surfaced three concrete issues with the
