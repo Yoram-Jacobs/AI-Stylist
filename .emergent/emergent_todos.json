@@ -1,34 +1,26 @@
 [
   {
-    "content": "Phase 1: Fix bug — Last polished item stuck on 'Polishing photo…'",
+    "content": "M20.a — Last polished item stuck bug (P0): backend $set null + frontend defensive merge + robust polling",
     "status": "completed"
   },
   {
-    "content": "Backend: $unset → $set null in _run_background_matte (M20.a)",
+    "content": "M20.b — Cross-page Analysis-in-progress floater (P1)",
     "status": "completed"
   },
   {
-    "content": "Frontend closetStore.upsert defensive thumb clear (M20.a)",
+    "content": "M20.c — Global Polishing progress bar + 'You have news in your closet' toast (P1)",
     "status": "completed"
   },
   {
-    "content": "Frontend Closet.jsx robust polling rewrite (M20.a)",
+    "content": "M20.1 — Restore per-card 'Polishing photo…' badge (user feedback: useful for identifying which card is mid-polish)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Cross-page Analysis-in-progress floater (M20.b)",
+    "content": "M20.2 — Save-while-scanning auto-save queue (P1 bug)",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Global Polishing progress bar + 'You have news' toast (M20.c)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend smoke test for M20.a — PASSED (thumbnail_data_url=None confirmed in DB after BG matte ready)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend integration test via testing_agent — PASSED (60%, test artifacts blocked rest)",
+    "content": "plan.md updated with session wrap-up note for the next agent",
     "status": "completed"
   }
 ]

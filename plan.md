@@ -1034,6 +1034,44 @@ page including /add, /closet, /home, /stylist, etc.
 
 ## Still open after this session (in priority order)
 
+> 📌 **Session wrap-up — May 16 2026.** This session shipped **Patches
+> M20, M20.1, M20.2** — a unified UX wave around the Phase O.6
+> background polish pipeline. Everything below was already documented
+> when the session started; nothing on this list was touched this
+> session.
+>
+> **Shipped this session (recap, for the next agent):**
+> - **M20.a (P0 bug)** — "Last item stuck on Polishing photo…": fixed
+>   by changing `$unset thumbnail_data_url` → `$set thumbnail_data_url:
+>   None` in `_run_background_matte` (+ defensive `closetStore.upsert`
+>   thumb clear + robust `Closet.jsx` polling rewrite with live
+>   snapshot, ref-based backoff, 30-attempt cap, `incrementalSync`
+>   fallback). Verified via direct Python smoke test against live DB.
+> - **M20.b (P1 feature)** — Cross-page "Analysis in progress" floater:
+>   wired `AddItem.jsx::analyzeCard` into the pre-existing global
+>   `workStore` (registerAnalyze/updateAnalyze/completeAnalyze). The
+>   `WorkProgressFloater` was already mounted at App root.
+> - **M20.c (P1 feature)** — Global "Polishing" progress + "You have
+>   news in your closet" toast: wired `saveAll::settle` to
+>   `workStore.registerPolishItems`. Closet.jsx also self-registers
+>   any pending items it discovers (covers reload-from-prev-session).
+>   `WorkBatchDoneToast` already existed.
+> - **M20.1** — REVERSAL of an aspect of M20.c: the per-card
+>   "Polishing photo…" textual `Badge` is KEPT (user feedback —
+>   useful to know which specific cards are mid-polish). It now
+>   coexists with the global floater.
+> - **M20.2 (P1 bug)** — Save-while-scanning auto-save queue: pressing
+>   Save mid-batch no longer drops the still-scanning cards. Stays
+>   on /add, persists the ready ones, sets `pendingAutoSave=true`,
+>   re-fires `saveAll` via an effect once all cards reach a terminal
+>   state.
+>
+> **All ESLint + esbuild clean, backend smoke-tested, frontend live-
+> tested by user. ENABLE_RECONSTRUCTION still off (Nano Banana
+> auto-pipe disabled by design).**
+>
+> **Next agent: start here.**
+
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
    with coat tails visible in the top get classified as "Overcoat".
    Fix in `garment_vision.analyze_outfit`: pass SegFormer's category
