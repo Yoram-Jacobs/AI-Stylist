@@ -1,14 +1,18 @@
 [
   {
-    "content": "(2a) Raise small-mask drop threshold in parse_garments to kill phantom Belt/Skirt detections on noisy areas",
+    "content": "Revert bbox-expansion floor in _crop_to_bbox",
     "status": "completed"
   },
   {
-    "content": "(2b) Bbox padding floor in _crop_to_bbox so card thumbnails never upscale from <300 px",
-    "status": "completed"
+    "content": "Add frontend save/analyze in-flight guard so the same upload can't double-fire",
+    "status": "pending"
   },
   {
-    "content": "(2c) Smoke test full pipeline on an outfit photo via /analyze",
-    "status": "completed"
+    "content": "Decide if accessories (Bag/Shoes) should be saved as items or dropped from outfit photos",
+    "status": "pending"
+  },
+  {
+    "content": "Add frontend CSS object-fit:contain on closet card image to handle small-crop blur without expanding",
+    "status": "pending"
   }
 ]

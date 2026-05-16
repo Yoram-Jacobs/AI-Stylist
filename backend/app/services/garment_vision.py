@@ -664,15 +664,15 @@ DETECT_SYSTEM_PROMPT = (
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
-# Patch 12 (May 2026) — minimum short-edge pixel floor for crop output.
-# Card thumbnails in the closet UI render at ~600 px wide; below ~300 px
-# the browser upscales and the user sees blurry fragment cards. We
-# enforce a 384 px short-edge floor on the cropped JPEG by symmetrically
-# expanding the bbox (clamped to image bounds). If the *source image
-# itself* has a short edge smaller than this threshold, we accept the
-# crop at the source resolution — no upscaling, the user uploaded a
-# small photo and we shouldn't fabricate pixels.
-_MIN_CROP_SHORT_EDGE_PX = 384
+# NOTE — ``_MIN_CROP_SHORT_EDGE_PX`` (Patch 12, May 2026) was retired
+# the same day. Both implementations of a bbox short-edge floor here
+# (symmetric bbox expansion, then letter-box padding) caused regressions:
+# the first polluted small-mask crops with neighbouring garments and
+# fooled Gemini into hallucinated re-classifications; the second
+# misaligned the downstream ``apply_alpha_intersection`` mask. The
+# thumbnail-blur symptom is now handled in the frontend via
+# ``object-fit: contain`` on the closet card image. The crop emitted
+# here is exactly what the SegFormer bbox dictates.
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
 # A single bbox covering at least this fraction of the frame means the
 # user uploaded an already-tight garment shot; cropping further would
@@ -1046,32 +1046,22 @@ def _crop_to_bbox(
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
     if area_pct < _MIN_CROP_AREA_PCT:
         return None
-    # Patch 12 (May 2026) — short-edge floor. Card thumbnails render at
-    # ~600 px and below ~300 px the browser upscales and we see
-    # blurry-fragment cards. If the bbox short edge is below
-    # ``_MIN_CROP_SHORT_EDGE_PX`` AND the source image itself has room
-    # to grow, expand symmetrically (clamped to source bounds) so the
-    # cropped JPEG carries enough pixels for a crisp thumbnail. If the
-    # source image's short edge is below the floor we accept the
-    # smaller crop — never fabricate pixels via upscaling here.
-    src_short_edge = min(w, h)
-    target_short = min(_MIN_CROP_SHORT_EDGE_PX, src_short_edge)
-    cur_w, cur_h = x2 - x1, y2 - y1
-    if cur_w < target_short:
-        extra = target_short - cur_w
-        x1 = max(0, x1 - extra // 2)
-        x2 = min(w, x1 + target_short)
-        # If we hit the right edge first, push x1 back so the crop
-        # actually reaches the target width.
-        if x2 - x1 < target_short:
-            x1 = max(0, x2 - target_short)
-    if cur_h < target_short:
-        extra = target_short - cur_h
-        y1 = max(0, y1 - extra // 2)
-        y2 = min(h, y1 + target_short)
-        if y2 - y1 < target_short:
-            y1 = max(0, y2 - target_short)
     crop = img.crop((x1, y1, x2, y2))
+    # NOTE — earlier "Patch 12" (May 2026) added a 384 px short-edge
+    # floor here, either by expanding the bbox or by letter-boxing the
+    # canvas. Both approaches were retired:
+    #   * Bbox expansion polluted small-mask crops (Bag, Shoes) with
+    #     neighbouring garments, which Gemini then re-classified as a
+    #     wholly different garment (e.g. a "Bag" crop with t-shirt
+    #     pixels visible came back as "longline open blazer").
+    #   * Letter-boxing kept the crop content correct but misaligned
+    #     ``apply_alpha_intersection`` downstream — the SegFormer mask
+    #     covers only the real-garment pixels, and resizing it to match
+    #     the letter-boxed PNG stretches the mask into the padded
+    #     bars.
+    # The thumbnail-blur symptom is now handled in the frontend (CSS
+    # ``object-fit: contain``) instead. Keep the crop exactly as the
+    # bbox dictates — no source-image expansion, no canvas padding.
     buf = io.BytesIO()
     crop.save(buf, format="JPEG", quality=88, optimize=True)
     return buf.getvalue(), (x1, y1, x2, y2)
