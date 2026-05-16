@@ -271,7 +271,27 @@ export const api = {
       signal,
     }),
   analyzeItemImage: (body) =>
-    client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
+    // Patch M17 (May 2026) — /analyze now returns a StreamingResponse
+    // wrapping the legacy JSON body with keepalive whitespace bytes so
+    // the Kubernetes / Cloudflare ingress 60 s idle timeout never
+    // fires while Gemini chugs through the parallel per-crop calls.
+    // JSON.parse strips leading whitespace, so axios handles the body
+    // unchanged. On error the backend cannot set a non-200 status mid-
+    // stream, so it puts the intended status in a top-level
+    // ``_status`` field plus a human ``_error`` message; we translate
+    // that back into a thrown error here so the existing rejection /
+    // toast path works identically to the pre-M17 sync endpoint.
+    client
+      .post('/closet/analyze', body, { timeout: 180000 })
+      .then((r) => {
+        const data = r.data || {};
+        if (data && data._status && Number(data._status) >= 400) {
+          const err = new Error(data._error || 'Analyze failed');
+          err.response = { status: Number(data._status), data };
+          throw err;
+        }
+        return data;
+      }),
   searchCloset: (body) =>
     client.post('/closet/search', body, { timeout: 30000 }).then((r) => r.data),
   patchItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),

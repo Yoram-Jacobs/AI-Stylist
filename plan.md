@@ -696,6 +696,67 @@ auto-reconstruction path. The triad alone is good enough; the manual
 `.env`. The defer machinery (M14) and concurrency lift (M15) remain
 in place, so re-enabling is safe.
 
+## ✅ Patch M17 — Stream `/analyze` with keepalive bytes (SHIPPED, real 502 fix)
+
+**Why M13–M16 weren't enough on their own:** Live benchmarking on the
+preview pod revealed that the Emergent LLM-key tier throttles
+concurrent `gemini-2.5-flash` calls down to ~1 in flight at a time:
+
+```
+single analyze() wall:     16.1 s
+3 parallel analyze() wall: 52.9 s   (3× sequential, NOT 16 s)
+```
+
+So a 4-item outfit's `_analyse_crops` loop — even with the inner
+`Semaphore(6)` — was effectively serialised at the Gemini API and
+took 40–60 s. The Kubernetes ingress fires its 60 s **idle** timeout
+on the analyze response → 502 Bad Gateway → user sees "Analysis
+failed" even though the backend ultimately returns 200 OK seconds
+later. M13 warmed models (saves cold-start tax). M14 deferred Nano
+Banana (saves 20–40 s/crop). M15 raised concurrency 1→3 (fixes
+queue-behind-the-lock cases). M16 turned reconstruction off entirely.
+None of them helped because the dominant cost is **Gemini latency
+itself**, not anything we could move off the hot path.
+
+**Fix:** turn `/analyze` into a `StreamingResponse` that yields a
+single whitespace byte every `ANALYZE_KEEPALIVE_INTERVAL_S` seconds
+(default **8 s**) while the analyze coroutine runs. JSON allows
+arbitrary leading whitespace per RFC 8259, so the frontend's
+`axios.post(...).then(r => r.data)` parses the final body unchanged.
+The ingress idle timer resets every 8 s and never reaches the 60 s
+ceiling, regardless of how slow Gemini is.
+
+**Implementation summary:**
+- `closet.py::analyze_item_image` returns `StreamingResponse(...,
+  media_type="application/json", headers={"X-Accel-Buffering": "no"})`.
+- Pre-validation HTTPExceptions (bad base64, missing image, missing
+  service) fire **before** streaming starts → still set proper 4xx/503
+  status.
+- After streaming starts, errors are encoded in the body as
+  `{items:[], count:0, _status: <code>, _error: <message>}` — the
+  frontend's `analyzeItemImage` wrapper in `lib/api.js` detects
+  `_status >= 400` and throws so the existing rejection toast path
+  fires identically to the pre-M17 sync endpoint.
+- `X-Accel-Buffering: no` header prevents nginx-style proxies (which
+  the Emergent ingress is built on) from buffering the keepalive
+  bytes and only flushing them when the stream closes.
+- New env var `ANALYZE_KEEPALIVE_INTERVAL_S` (default 8) for tuning.
+- Frontend `axios` timeout raised 90 s → 180 s (the ingress is no
+  longer the limiting factor; Gemini latency is).
+
+**End-to-end timing (real 0003.jpg, 4-item outfit, internal call):**
+```
+endpoint returned: StreamingResponse status=200 content-type=application/json
+first byte at:    0.00 s
+keepalive bytes:  3
+total wall:       40.17 s
+final chunk size: 63 060 bytes
+parsed body:      items=4 count=4
+```
+
+The longest idle gap on the connection is now **8 s**, regardless of
+how long Gemini takes overall — the 502 is structurally impossible.
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops

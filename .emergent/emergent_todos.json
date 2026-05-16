@@ -1,22 +1,14 @@
 [
   {
-    "content": "Add ENABLE_RECONSTRUCTION config flag (default false)",
+    "content": "Wrap /analyze in StreamingResponse with keepalive bytes to bypass ingress 60s idle timeout",
     "status": "completed"
   },
   {
-    "content": "Short-circuit should_reconstruct() when ENABLE_RECONSTRUCTION=false",
-    "status": "completed"
-  },
-  {
-    "content": "Add safety gate in _run_background_reconstruction too (belt-and-braces)",
-    "status": "completed"
-  },
-  {
-    "content": "Lint + restart + verify no needs_reconstruction marker in next /analyze",
+    "content": "Lint + restart + verify keepalive emits during a 27s+ analyze",
     "status": "completed"
   },
   {
     "content": "Update plan.md + finish",
-    "status": "in_progress"
+    "status": "completed"
   }
 ]

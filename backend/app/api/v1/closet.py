@@ -1202,7 +1202,7 @@ def _safe_analysis(parsed: dict[str, Any]) -> dict[str, Any]:
 async def analyze_item_image(
     payload: AnalyzeIn,
     user: dict = Depends(get_current_user),
-) -> dict[str, Any]:
+) -> StreamingResponse:
     """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo.
 
     Returns an object with an ``items`` array. Each entry represents one
@@ -1211,6 +1211,30 @@ async def analyze_item_image(
     single item, the array has one entry (and the top-level legacy
     fields are mirrored from that single analysis for backward
     compatibility).
+
+    Patch M17 (May 2026) — streaming-with-keepalive
+    ----------------------------------------------
+    The endpoint emits its response as a ``StreamingResponse`` so the
+    Kubernetes / Cloudflare ingress 60 s **idle** timeout never fires
+    while Gemini chugs through the parallel per-crop calls. Per live
+    benchmarking, the Emergent LLM-key tier throttles concurrent
+    Gemini-2.5-Flash calls down to roughly 1 in flight at a time:
+    individual analyze() ≈ 16 s, 3 parallel analyze() ≈ 53 s (3×
+    sequential, not the 16 s the inner ``Semaphore(6)`` would suggest).
+    A 4-item outfit therefore needs ~60 s wall — exactly the ingress
+    ceiling — and the timeout used to kill connections at exactly 60 s
+    even though the backend ultimately returned 200 OK seconds later
+    (visible in our access logs).
+
+    The generator below kicks off the analyze coroutine, then yields
+    a single whitespace byte every ``_ANALYZE_KEEPALIVE_INTERVAL_S``
+    seconds while it works. JSON allows arbitrary leading whitespace,
+    so the frontend's ``axios.post(...).then(r => r.data)`` parses the
+    final body unchanged — **no frontend change required**. When the
+    analyze coroutine completes, we yield the final JSON body and
+    close the stream. On exception we emit a JSON body with
+    ``_status`` set to the intended HTTP status so the frontend can
+    detect failure via a small downstream check (see ``api.js``).
     """
     if garment_vision_service is None:
         raise HTTPException(503, "Garment analyzer not configured")
@@ -1243,133 +1267,209 @@ async def analyze_item_image(
         or (user or {}).get("preferred_language")
         or "en"
     )
-    if payload.multi:
-        # Production analyze pipeline: SegFormer crops the photo into
-        # per-garment regions, then N parallel Eyes calls analyse each
-        # crop. This is the only production path as of May 2026 --
-        # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
-        # benchmark showed it could not reliably emit multi-garment
-        # arrays (Gemini-2.5-Flash returned a single object for every
-        # image regardless of prompt phrasing). The single-pass
-        # function still exists for benchmark scripts; the production
-        # ``EYES_ONE_PASS`` flag was removed.
+
+    async def _do_analyze() -> dict[str, Any]:
+        """Inner analyze body — same logic as the pre-M17 endpoint."""
+        if payload.multi:
+            # Production analyze pipeline: SegFormer crops the photo into
+            # per-garment regions, then N parallel Eyes calls analyse each
+            # crop. This is the only production path as of May 2026 --
+            # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
+            # benchmark showed it could not reliably emit multi-garment
+            # arrays (Gemini-2.5-Flash returned a single object for every
+            # image regardless of prompt phrasing). The single-pass
+            # function still exists for benchmark scripts; the production
+            # ``EYES_ONE_PASS`` flag was removed.
+            try:
+                async with _ANALYZE_LOCK:
+                    detections = await garment_vision_service.analyze_outfit(
+                        raw, language=user_lang,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
+            items_out: list[dict[str, Any]] = []
+            dropped_unidentifiable = 0
+            from app.services.garment_vision import _is_unidentifiable
+
+            # Phase Z2 — duplicate detection is now done up-front via
+            # /closet/preflight (SHA-256 + perceptual hash, runs in the
+            # browser BEFORE this analyze call). The legacy server-side
+            # attribute matcher (find_potential_duplicate) has been
+            # removed: by the time we reach this loop the user has
+            # already approved any pre-flight matches, so paying for a
+            # second round of duplicate detection here is pure waste.
+            for det in detections:
+                analysis = _safe_analysis(dict(det.get("analysis") or {}))
+                if _is_unidentifiable(analysis):
+                    dropped_unidentifiable += 1
+                    continue
+                items_out.append(
+                    {
+                        "label": det.get("label"),
+                        "kind": det.get("kind"),
+                        "bbox": det.get("bbox"),
+                        "crop_base64": det.get("crop_base64"),
+                        "crop_mime": det.get("crop_mime", "image/jpeg"),
+                        "analysis": analysis,
+                        "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
+                        # Phase O.6 field. ``reconstruction_advised`` is
+                        # produced by the legacy pipeline as a heuristic
+                        # output of ``should_reconstruct`` per crop;
+                        # absence / False means "no CTA needed".
+                        "reconstruction_advised": det.get(
+                            "reconstruction_advised", False,
+                        ),
+                        # Patch 9a (May 2026) — the ``one_pass`` field
+                        # used to signal that the response came from
+                        # the retired single-call path. With one-pass
+                        # retired this is always False; kept in the
+                        # response shape so older frontend bundles
+                        # that read it don't choke.
+                        "one_pass": False,
+                        # Patch 8 (May 2026) — flag for the legacy
+                        # multi-crop path when
+                        # ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
+                        # The frontend echoes this back on /closet
+                        # save and the backend queues
+                        # ``_run_background_matte`` per item.
+                        "defer_matte": det.get("defer_matte", False),
+                        # Patch M14 (May 2026) — analyzer deferred Nano
+                        # Banana reconstruction; frontend echoes these
+                        # back on /closet save and the backend queues
+                        # ``_run_background_reconstruction`` per item.
+                        "needs_reconstruction": det.get("needs_reconstruction", False),
+                        "reconstruction_reasons": det.get("reconstruction_reasons", []),
+                    }
+                )
+            if not items_out:
+                raise HTTPException(
+                    422,
+                    "We couldn't identify any garment in this photo. "
+                    "Please try a clearer, well-lit shot.",
+                )
+            # Mirror the first item at the top level so older callers keep working.
+            first = items_out[0]["analysis"] if items_out else _safe_analysis({})
+            return {"items": items_out, "count": len(items_out), **first}
+
+        # Legacy single-item path (kept for any internal caller that sets multi=False).
         try:
             async with _ANALYZE_LOCK:
-                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+                parsed = await garment_vision_service.analyze(raw, language=user_lang)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %r", exc)
+            logger.warning("Garment analysis failed: %r", exc)
             raise HTTPException(
-                503,
-                "Garment analyzer is temporarily unavailable. Please try again.",
+                503, "Garment analyzer is temporarily unavailable. Please try again."
             ) from exc
-        items_out: list[dict[str, Any]] = []
-        dropped_unidentifiable = 0
+        analysis = _safe_analysis(parsed)
         from app.services.garment_vision import _is_unidentifiable
 
-        # Phase Z2 — duplicate detection is now done up-front via
-        # /closet/preflight (SHA-256 + perceptual hash, runs in the
-        # browser BEFORE this analyze call). The legacy server-side
-        # attribute matcher (find_potential_duplicate) has been
-        # removed: by the time we reach this loop the user has
-        # already approved any pre-flight matches, so paying for a
-        # second round of duplicate detection here is pure waste.
-        for det in detections:
-            analysis = _safe_analysis(dict(det.get("analysis") or {}))
-            if _is_unidentifiable(analysis):
-                dropped_unidentifiable += 1
-                continue
-            items_out.append(
-                {
-                    "label": det.get("label"),
-                    "kind": det.get("kind"),
-                    "bbox": det.get("bbox"),
-                    "crop_base64": det.get("crop_base64"),
-                    "crop_mime": det.get("crop_mime", "image/jpeg"),
-                    "analysis": analysis,
-                    "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
-                    # Phase O.6 field. ``reconstruction_advised`` is
-                    # produced by the legacy pipeline as a heuristic
-                    # output of ``should_reconstruct`` per crop; absence
-                    # / False means "no CTA needed".
-                    "reconstruction_advised": det.get(
-                        "reconstruction_advised", False,
-                    ),
-                    # Patch 9a (May 2026) — the ``one_pass`` field used
-                    # to signal that the response came from the retired
-                    # single-call path. With one-pass retired this is
-                    # always False; kept in the response shape so older
-                    # frontend bundles that read it don't choke.
-                    "one_pass": False,
-                    # Patch 8 (May 2026) — flag for the legacy multi-crop
-                    # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
-                    # The frontend echoes this back on /closet save and
-                    # the backend queues ``_run_background_matte`` per
-                    # item, identical to the one-pass path.
-                    "defer_matte": det.get("defer_matte", False),
-                    # Patch M14 (May 2026) — analyzer deferred Nano
-                    # Banana reconstruction; frontend echoes these back
-                    # on /closet save and the backend queues
-                    # ``_run_background_reconstruction`` per item.
-                    "needs_reconstruction": det.get("needs_reconstruction", False),
-                    "reconstruction_reasons": det.get("reconstruction_reasons", []),
-                }
-            )
-        if dropped_unidentifiable:
-            logger.info(
-                "/analyze: dropped %d unidentifiable item(s)",
-                dropped_unidentifiable,
-            )
-        # If everything was rejected, surface a clean 422 so the
-        # frontend can show "couldn't recognise any garment in this
-        # photo" instead of saving an empty card.
-        if not items_out:
+        if _is_unidentifiable(analysis):
             raise HTTPException(
                 422,
                 "We couldn't identify any garment in this photo. "
                 "Please try a clearer, well-lit shot.",
             )
-        # Mirror the first item at the top level so older callers keep working.
-        first = items_out[0]["analysis"] if items_out else _safe_analysis({})
-        return {"items": items_out, "count": len(items_out), **first}
+        crop_b64 = base64.b64encode(raw).decode("ascii")
+        # Phase Z2 — duplicate detection is now exclusively handled by
+        # the browser-side /closet/preflight call (SHA-256 + perceptual
+        # hash) BEFORE the analyze request is ever sent. We deliberately
+        # do NOT run the legacy attribute matcher here.
+        return {
+            "items": [
+                {
+                    "label": analysis.get("item_type") or analysis.get("sub_category") or "garment",
+                    "kind": "garment",
+                    "bbox": [0, 0, 1000, 1000],
+                    "crop_base64": crop_b64,
+                    "crop_mime": "image/jpeg",
+                    "analysis": analysis,
+                    "potential_duplicate": None,  # always None — kept for back-compat
+                }
+            ],
+            "count": 1,
+            **analysis,
+        }
 
-    # Legacy single-item path (kept for any internal caller that sets multi=False).
-    try:
-        async with _ANALYZE_LOCK:
-            parsed = await garment_vision_service.analyze(raw, language=user_lang)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Garment analysis failed: %r", exc)
-        raise HTTPException(
-            503, "Garment analyzer is temporarily unavailable. Please try again."
-        ) from exc
-    analysis = _safe_analysis(parsed)
-    from app.services.garment_vision import _is_unidentifiable
+    async def _stream_with_keepalive():
+        """Yield keepalive whitespace bytes while ``_do_analyze`` runs.
 
-    if _is_unidentifiable(analysis):
-        raise HTTPException(
-            422,
-            "We couldn't identify any garment in this photo. "
-            "Please try a clearer, well-lit shot.",
-        )
-    crop_b64 = base64.b64encode(raw).decode("ascii")
-    # Phase Z2 — duplicate detection is now exclusively handled by
-    # the browser-side /closet/preflight call (SHA-256 + perceptual
-    # hash) BEFORE the analyze request is ever sent. We deliberately
-    # do NOT run the legacy attribute matcher here.
-    return {
-        "items": [
-            {
-                "label": analysis.get("item_type") or analysis.get("sub_category") or "garment",
-                "kind": "garment",
-                "bbox": [0, 0, 1000, 1000],
-                "crop_base64": crop_b64,
-                "crop_mime": "image/jpeg",
-                "analysis": analysis,
-                "potential_duplicate": None,  # always None — kept for back-compat
+        Why this works: ``application/json`` permits arbitrary leading
+        whitespace per RFC 8259, so ``JSON.parse`` on the client cleanly
+        ignores the bytes we use as keepalive. The browser / axios
+        receives the first byte within seconds (well before the 60 s
+        ingress idle timeout), the connection stays alive on every
+        subsequent keepalive tick, and the final JSON body lands when
+        the analyzer is done.
+        """
+        task = asyncio.create_task(_do_analyze())
+        # Yield a no-op space immediately so the ingress sees the
+        # response headers + first body byte right away. Some
+        # proxies start the idle timer from the first body byte, not
+        # the headers, so we want to be safe.
+        yield b" "
+        while not task.done():
+            try:
+                # ``shield`` so cancelling the wait_for doesn't cancel
+                # the underlying analyze task.
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=_ANALYZE_KEEPALIVE_INTERVAL_S,
+                )
+            except asyncio.TimeoutError:
+                yield b" "
+        # Task complete — yield the final body (or an error envelope).
+        try:
+            body = task.result()
+        except HTTPException as exc:
+            # Stream is already open with status 200; we surface the
+            # intended HTTP status via ``_status`` so the frontend can
+            # detect it and behave like an axios rejection.
+            body = {
+                "items": [],
+                "count": 0,
+                "_status": exc.status_code,
+                "_error": str(exc.detail),
             }
-        ],
-        "count": 1,
-        **analysis,
-    }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("analyze streaming exception: %s", exc)
+            body = {
+                "items": [],
+                "count": 0,
+                "_status": 503,
+                "_error": "Garment analyzer is temporarily unavailable. "
+                "Please try again.",
+            }
+        yield json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+    return StreamingResponse(
+        _stream_with_keepalive(),
+        media_type="application/json",
+        headers={
+            # X-Accel-Buffering disables proxy buffering on nginx-style
+            # ingresses so the keepalive whitespace actually reaches
+            # the client between ticks rather than being buffered up
+            # at the ingress and flushed all at once when the stream
+            # closes (which would defeat the whole point of the
+            # keepalive — the ingress would still see a 60 s idle).
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+# Patch M17 (May 2026) — Module-level config for the keepalive heartbeat
+# inside the ``/analyze`` streaming response. 8 s comfortably beats
+# every commodity ingress idle timeout (Kubernetes nginx default 60 s,
+# Cloudflare 100 s, AWS ALB 60 s) with a 7×+ safety margin. Bumped via
+# env var ``ANALYZE_KEEPALIVE_INTERVAL_S`` if a future ingress is
+# tuned tighter.
+_ANALYZE_KEEPALIVE_INTERVAL_S = float(
+    os.environ.get("ANALYZE_KEEPALIVE_INTERVAL_S", "8")
+)
 
 
 @router.get("/analyze/version", include_in_schema=False)
