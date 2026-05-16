@@ -1,18 +1,18 @@
 [
   {
-    "content": "Add min-short-edge px floor in _crop_to_bbox that DROPS crops below threshold (returns None)",
+    "content": "Replace absolute 192 px floor with proportional floor max(96, 12% of src_short)",
     "status": "completed"
   },
   {
-    "content": "Smoke-test: confirm Bag/Shoes get dropped on outfit photo but kept on dedicated bag/shoe photo",
+    "content": "Smoke-test on man photo dimensions (550x810) to confirm pants/shoes/hat survive",
     "status": "completed"
   },
   {
-    "content": "Add frontend save/analyze in-flight guard so the same upload can't double-fire",
+    "content": "Smoke-test on woman-in-black dimensions to confirm bag/shoes still drop",
     "status": "completed"
   },
   {
-    "content": "Frontend CSS object-fit:contain for small-crop thumbnails",
-    "status": "completed"
+    "content": "Discuss Bug B (single-boot detection) options with user",
+    "status": "in_progress"
   }
 ]

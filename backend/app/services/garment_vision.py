@@ -664,25 +664,24 @@ DETECT_SYSTEM_PROMPT = (
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
-# Patch 12c (May 2026) — minimum bbox short-edge in pixels. Below this
-# the crop is *dropped entirely* (``_crop_to_bbox`` returns None and
-# the caller silently skips the detection). Rationale: when SegFormer
-# fires a small mask for an accessory (Bag) or footwear in the middle
-# of an outfit photo, the resulting bbox is too small to give Gemini
-# enough context to classify the object cleanly. Gemini then sees the
-# neighbouring t-shirt/skirt pixels bleed into the crop's padding
-# region and confidently re-classifies the crop as another *garment*
-# (the smoking gun behind "1 outfit photo → 4 cards including 2
-# hallucinated tops"). Dropping the crop is the right behaviour:
-#   * On an outfit photo the bag/shoes are tiny and get dropped →
-#     fewer, more accurate cards.
-#   * On a dedicated single-item bag/shoe photo the object fills the
-#     frame and the bbox short-edge is well above the floor → kept.
-# 192 px is a deliberate compromise — large enough to filter the
-# noise crops on the woman-in-black photo (Bag ~ 100-180 px),
-# small enough to keep a real close-up shot of a sneaker (~ 280 px
-# on a typical 1500 px frame) intact.
-_MIN_CROP_SHORT_EDGE_PX = 192
+# Patch 12d (May 2026) — short-edge floor for crop output, expressed
+# as a PROPORTIONAL function of the source image's short edge. The
+# previous absolute 192 px floor was too aggressive on small uploads:
+# the man-in-trench-coat photo arrived at 550×810 px and the floor
+# dropped Pants (184 px), Shoes (124 px), and Hat (104 px) — leaving
+# only the coat. Inversely, on large 2000+ px uploads, 192 px was too
+# permissive and let bag-strap slivers through.
+#
+# The proportional form ``max(_MIN_CROP_SHORT_EDGE_FLOOR_PX,
+# _MIN_CROP_SHORT_EDGE_PCT * src_short)`` adapts cleanly:
+#   *  550 px source → floor ≈ 96 px   (lets Pants 184 px through)
+#   * 1500 px source → floor ≈ 180 px  (drops typical phantoms)
+#   * 2000 px source → floor ≈ 240 px  (aggressive drop for bag slivers)
+# A hard cap of 256 px prevents very large uploads from silently
+# losing legitimate small-accessory crops.
+_MIN_CROP_SHORT_EDGE_PCT = 0.12
+_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96
+_MIN_CROP_SHORT_EDGE_CEIL_PX = 256
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
 # A single bbox covering at least this fraction of the frame means the
 # user uploaded an already-tight garment shot; cropping further would
@@ -1056,28 +1055,30 @@ def _crop_to_bbox(
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
     if area_pct < _MIN_CROP_AREA_PCT:
         return None
-    # Patch 12c (May 2026) — drop tiny crops outright. Below the short-
-    # edge floor Gemini doesn't have enough pixels to classify the
-    # cropped object cleanly and instead "borrows" surrounding context
-    # from the bbox padding, yielding hallucinated garment names (a Bag
-    # bbox 90 px wide with t-shirt pixels in the padding came back as
-    # "Black longline open blazer"). The clean fix is to drop the crop
-    # so the detection is silently filtered. The source-image short-edge
-    # caveat: if the user uploaded a tiny photo where every detection
-    # falls below the floor we still let the dominant one through —
-    # otherwise we'd silently lose the whole upload. The
-    # ``_looks_already_cropped`` path handles that case separately.
+    # Patch 12d (May 2026) — drop tiny crops outright. Below the
+    # proportional short-edge floor Gemini doesn't have enough pixels
+    # to classify the cropped object cleanly and instead "borrows"
+    # surrounding context from the bbox padding, yielding hallucinated
+    # garment names (a Bag bbox 90 px wide with t-shirt pixels in the
+    # padding came back as "Black longline open blazer"). The floor
+    # scales with source size so small uploads (e.g. 550×810 px phone
+    # thumbnails) don't lose every detection, and large uploads still
+    # filter genuine phantoms.
     cur_short = min(x2 - x1, y2 - y1)
     src_short = min(w, h)
-    if cur_short < _MIN_CROP_SHORT_EDGE_PX and src_short >= _MIN_CROP_SHORT_EDGE_PX * 2:
-        # Source has plenty of pixels but this particular detection is
-        # tiny → drop it. The "× 2" guard means we never drop on small
-        # uploads (e.g. a 384 px square thumbnail re-upload) where
-        # every crop would fall under 192 px anyway.
+    floor_px = max(
+        _MIN_CROP_SHORT_EDGE_FLOOR_PX,
+        min(
+            _MIN_CROP_SHORT_EDGE_CEIL_PX,
+            int(_MIN_CROP_SHORT_EDGE_PCT * src_short),
+        ),
+    )
+    if cur_short < floor_px:
         logger.info(
-            "_crop_to_bbox: dropping tiny crop short_edge=%d px (floor=%d px) "
-            "on %dx%d source — likely SegFormer sliver of an adjacent garment",
-            cur_short, _MIN_CROP_SHORT_EDGE_PX, w, h,
+            "_crop_to_bbox: dropping tiny crop short_edge=%d px "
+            "(floor=%d px = %.0f%% of %d×%d source) — "
+            "likely SegFormer sliver of an adjacent garment",
+            cur_short, floor_px, _MIN_CROP_SHORT_EDGE_PCT * 100, w, h,
         )
         return None
     crop = img.crop((x1, y1, x2, y2))
