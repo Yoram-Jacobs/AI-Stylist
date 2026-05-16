@@ -438,6 +438,25 @@ class Settings:
         os.environ.get("USE_CLOTHING_PARSER", "true").lower() == "true"
     )
 
+    # Patch M13 (May 2026) — Cold-start model warmup. Fires SegFormer +
+    # rembg + FashionCLIP loads in parallel as an asyncio background task
+    # from the FastAPI startup hook, so the FIRST user upload doesn't
+    # pay the cumulative 9-19s model-init tax that previously pushed
+    # cold-start /closet/analyze past the Kubernetes ingress 60s ceiling
+    # and triggered "502 Bad Gateway → Analysis failed" on first
+    # attempt. Default ``true`` on full-ML deploys, OFF on lightweight
+    # deploys (the lightweight container can't afford to preload models
+    # it doesn't need — it goes Gemini-only). Kill-switch via env var
+    # of the same name when triaging deploy-time issues.
+    WARMUP_MODELS_ON_STARTUP: bool = (
+        not _LIGHTWEIGHT_DEPLOY
+        and os.environ.get(
+            "WARMUP_MODELS_ON_STARTUP",
+            "true" if _HAS_LOCAL_ML else "false",
+        ).lower()
+        == "true"
+    )
+
     @property
     def paypal_client_id(self) -> str | None:
         return (

@@ -1,18 +1,22 @@
 [
   {
-    "content": "Add mask confidence check (<40% coverage) to apply_alpha_intersection in clothing_parser.py",
+    "content": "Create /app/backend/app/services/warmup.py with parallel SegFormer + rembg + CLIP warmup",
     "status": "completed"
   },
   {
-    "content": "Refactor /clean-background endpoint in closet.py to use SegFormer + rembg + apply_alpha_intersection triad",
+    "content": "Add WARMUP_MODELS_ON_STARTUP config flag",
     "status": "completed"
   },
   {
-    "content": "Lint backend changes and smoke-test via python -c",
+    "content": "Wire warmup_models() into server.py startup hook as fire-and-forget asyncio.create_task",
     "status": "completed"
   },
   {
-    "content": "Update plan.md with completed work and remaining issues",
+    "content": "Restart backend, observe warm-load logs, time first /closet/analyze cold vs. post-warmup",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md and finish",
     "status": "completed"
   }
 ]

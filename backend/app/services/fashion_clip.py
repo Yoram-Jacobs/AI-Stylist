@@ -69,7 +69,16 @@ class FashionClipService:
             def _load() -> tuple[Any, Any, str]:
                 np, torch, Image, (CLIPModel, CLIPProcessor) = _lazy_imports()
                 dev = "cuda" if torch.cuda.is_available() else "cpu"
-                mdl = CLIPModel.from_pretrained(self.model_id)
+                # Patch M13.2 (May 2026) — Force ``low_cpu_mem_usage=False``
+                # to bypass the transformers 4.57+ meta-device load path,
+                # which otherwise raises ``NotImplementedError: Cannot
+                # copy out of meta tensor`` on the subsequent ``.to(dev)``
+                # call. The meta path is a memory-optimisation for
+                # billion-parameter LMs; FashionCLIP is 150M params and
+                # fits comfortably in RAM so we don't need it.
+                mdl = CLIPModel.from_pretrained(
+                    self.model_id, low_cpu_mem_usage=False,
+                )
                 mdl.eval().to(dev)
                 proc = CLIPProcessor.from_pretrained(self.model_id)
                 return mdl, proc, dev

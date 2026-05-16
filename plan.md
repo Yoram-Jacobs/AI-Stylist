@@ -508,15 +508,54 @@ timeout. So:
 
 > **Issue 3 ≡ Task 2 (wall time)** — same root cause, same fix.
 
+## ✅ Patch M13 — Cold-start model warmup (SHIPPED, resolves Issue 3 ≡ Task 2)
+
+**Root cause confirmed by user DevTools last session:**
+`POST /api/v1/closet/analyze` returning `502 Bad Gateway` on first
+man-photo upload was a Kubernetes ingress 60 s timeout firing while
+the three heavy CV models lazy-loaded serially on the request thread.
+
+**Implementation:**
+- New module `backend/app/services/warmup.py` with `warmup_models()`
+  fire-and-forget entry point.
+- Topology: **SegFormer → FashionCLIP (serial on transformers track),
+  parallel with rembg (independent onnxruntime track).** A naïve
+  3-way parallel `asyncio.gather` exposes a torch/accelerate race
+  inside `transformers.from_pretrained` (concurrent threads observe
+  a half-initialised meta-device model → `NotImplementedError:
+  Cannot copy out of meta tensor`). Two-track sequencing is the
+  resilient middle ground.
+- Pre-imports the four needed transformers classes on the asyncio
+  thread before the gather, so the lazy `__getattr__` runs once
+  serially (avoids an earlier `ImportError` race we hit during M13.1).
+- Fired from `server.py::on_startup` as `asyncio.create_task` — NEVER
+  awaited inline so supervisor / k8s readiness probe still gets a
+  ready response in <3 s.
+- New config flag `WARMUP_MODELS_ON_STARTUP` in `config.py` (default
+  `true` on full-ML deploys, `false` on `LIGHTWEIGHT_DEPLOY=true`).
+
+**Bonus fix — M13.2:** `fashion_clip._load` now passes
+`low_cpu_mem_usage=False` to `CLIPModel.from_pretrained` to bypass the
+transformers 4.57 meta-device default. Without this fix the lazy
+fallback on first user request would have ALSO raised the same
+`NotImplementedError`, leaving the rembg CLIP faithfulness guard a
+permanent no-op. Verified working in a fresh subprocess.
+
+**Measured wall time on the dev pod (live `backend.err.log`):**
+- SegFormer **0.68 s**, FashionCLIP **0.95 s**, rembg **0.59 s**
+- Parallel wall **4.53 s** (vs. ~10-14 s serial cold-start cost)
+- 3/3 ready, 0 failed, 0 skipped.
+
+**Effect:** The first user upload after backend boot no longer pays
+the cumulative model-init tax. /closet/analyze should comfortably
+stay under the 60 s ingress ceiling, eliminating the "Analysis
+failed → succeeds on retry" UX. Per-crop Gemini parallelism was
+already in place (`asyncio.Semaphore(6)` inside
+`garment_vision._analyse_crops`), so no change was needed there.
+
 ## Still open after this session (in priority order)
 
-1. **Task 2 / Issue 3 (P0)** — Wall time. Warm-load SegFormer + rembg +
-   CLIP at backend boot (FastAPI `lifespan`), and semaphore-parallelise
-   per-crop Gemini calls inside `analyze_outfit`. Target: cold-boot
-   man-photo analyze 60+ s → ≤ 20 s, comfortably under the ingress
-   60 s ceiling. Fixes the 502 first-attempt.
-
-2. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
+1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
    with coat tails visible in the top get classified as "Overcoat".
    Fix in `garment_vision.analyze_outfit`: pass SegFormer's category
    as a strict constraint in the prompt (`"this crop is pre-classified
@@ -524,7 +563,7 @@ timeout. So:
    Gemini still disagrees, log + overwrite with the SegFormer category.
    Sub-category / title / colour / material stay Gemini's call.
 
-3. **NEW — blouse-skirt rim from dilation overspill (P1)** — Screenshot 2
+2. **NEW — blouse-skirt rim from dilation overspill (P1)** — Screenshot 2
    shows the dilated alpha intersection pulling in a thin band of skirt
    waistband at the bottom of a top crop. Dilation is correct in
    principle (it rescued the puffy sleeves) but the 2.5% short-edge
@@ -536,12 +575,12 @@ timeout. So:
      rather than the current hard min(rembg, dilated_mask) — admit halo
      pixels with reduced alpha.
 
-4. **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
+3. **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
    ✅ **RESOLVED** (out-of-band). Artifacts benchmarked successfully and
    stored on user's PC + Google Drive. Ready for VPS upload + cutover
    when the user decides to swap the live Eyes GGUFs.
 
-5. **Task 3 (P1)** — Vertex AI Try-On widget. ⏸ **ON HOLD** (user-paused,
+4. **Task 3 (P1)** — Vertex AI Try-On widget. ⏸ **ON HOLD** (user-paused,
    not blocked). `.env` keys (`GOOGLE_APPLICATION_CREDENTIALS` +
    `VERTEX_*`) still need to be populated when the user is ready to
    resume.
