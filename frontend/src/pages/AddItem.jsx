@@ -785,159 +785,156 @@ export default function AddItem() {
       // Pass current UI locale so Gemini name/caption come back in the
       // language the user is reading the app in — see ``AnalyzeIn.language``.
       const requestLang = (i18n.language || '').split('-')[0] || 'en';
-      const resp = await api.analyzeItemImage({ image_base64: card.base64, language: requestLang });
-      clearInterval(tick);
-      // New API shape: { items: [...], count, ...topLevelAnalysisMirror }.
-      // Legacy callers that still get a single object without `items` keep working.
-      const items = Array.isArray(resp?.items) && resp.items.length > 0 ? resp.items : null;
 
-      if (!items) {
-        // Legacy single-object response.
+      // Patch M19 (May 2026) — streaming NDJSON path. The backend's
+      // /closet/analyze emits frames as Gemini's batched call streams
+      // back: a ``detect`` frame within ~5-7 s carrying placeholder
+      // crops for every garment, then one ``item`` frame per analysed
+      // crop (~1-2 s apart) until the final ``done`` marker. We split
+      // the single card into N placeholder cards on ``detect`` and
+      // hydrate them on ``item`` so the user sees progress instead of
+      // staring at a single spinner for 17+ s. Single-item uploads
+      // take the same path: ``detect`` count=1 → one placeholder →
+      // ``item`` hydrates it.
+      let detectMeta = null;
+      let perCardIds = [];
+
+      const buildBaseCard = (meta, cardId) => ({
+        id: cardId,
+        file: null,
+        mime: meta.crop_mime || 'image/jpeg',
+        previewUrl: meta.crop_base64
+          ? `data:${meta.crop_mime || 'image/jpeg'};base64,${meta.crop_base64}`
+          : card.previewUrl,
+        base64: meta.crop_base64 || card.base64,
+        originalCropUrl: meta.crop_base64
+          ? `data:${meta.crop_mime || 'image/jpeg'};base64,${meta.crop_base64}`
+          : null,
+        reconstructedUrl: null,
+        reconstructedB64: null,
+        reconstructionMeta: null,
+        useReconstructed: false,
+        // Still scanning until the matching ``item`` frame lands.
+        status: 'scanning',
+        progress: 60,
+        fields: hydrate({}, user),
+        error: null,
+        label: meta.label || null,
+        potentialDuplicate: null,
+        fromOnePass: false,
+        reconstructionAdvised: false,
+        deferMatte: !!meta.defer_matte,
+        // Tracked so onItem can locate the right card in state.
+        _streamSlot: meta._slot,
+      });
+
+      const handleDetect = (frame) => {
+        detectMeta = frame;
+        const metas = (frame.items_meta || []).map((m, i) => ({
+          ...m,
+          _slot: i,
+        }));
+        if (metas.length === 0) {
+          // No usable crops — backend will follow with an `error`
+          // frame; let the streaming wrapper throw, the catch
+          // handler below will set card status=error.
+          return;
+        }
+        const newIds = metas.map((m, i) => `${card.id}-${i}`);
+        perCardIds = newIds;
+        const newCards = metas.map((m, i) => buildBaseCard(m, newIds[i]));
+        setCards((prev) => {
+          const idx = prev.findIndex((c) => c.id === card.id);
+          if (idx < 0) return prev;
+          return [...prev.slice(0, idx), ...newCards, ...prev.slice(idx + 1)];
+        });
+        if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
+      };
+
+      const handleItem = (frame) => {
+        const slotId = perCardIds[frame.index];
+        if (!slotId) return;
+        // Reconstruction (Nano Banana) is disabled by the backend
+        // (ENABLE_RECONSTRUCTION=false), but echo the metadata
+        // forward so re-enabling it later is a no-op on this side.
+        const rec = frame.reconstruction;
+        const recValidated = !!(rec && rec.validated && rec.image_b64);
+        const reconstructedUrl = recValidated
+          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
+          : null;
         setCards((prev) =>
           prev.map((c) =>
-            c.id === card.id
-              ? { ...c, status: 'ready', progress: 100, fields: hydrate(resp, user) }
+            c.id === slotId
+              ? {
+                  ...c,
+                  status: 'ready',
+                  progress: 100,
+                  fields: hydrate(frame.analysis || {}, user),
+                  label: frame.label || c.label,
+                  potentialDuplicate: frame.potential_duplicate || null,
+                  fromOnePass: !!frame.one_pass,
+                  reconstructionAdvised: !!frame.reconstruction_advised,
+                  deferMatte: !!frame.defer_matte,
+                  needsReconstruction: !!frame.needs_reconstruction,
+                  reconstructionReasons: frame.reconstruction_reasons || [],
+                  reconstructedUrl,
+                  reconstructedB64: recValidated ? rec.image_b64 : null,
+                  reconstructionMeta: recValidated
+                    ? {
+                        reasons: rec.reasons || [],
+                        prompt: rec.prompt,
+                        model: rec.model,
+                        mime_type: rec.mime_type,
+                      }
+                    : null,
+                  useReconstructed: recValidated,
+                  previewUrl: recValidated ? reconstructedUrl : c.previewUrl,
+                }
               : c
           )
         );
-        return;
-      }
+      };
 
-      if (items.length === 1) {
-        // Single-item photo — replace the original upload with the
-        // analyzer's matted crop so the saved image is the clean PNG
-        // cutout (background already removed by rembg server-side).
-        // Without this swap the closet would persist the raw JPEG and
-        // the user would have to click "Clean background" manually
-        // every time, even though the backend already produced the
-        // cutout. Reconstruction (Nano Banana) takes priority when
-        // validated; otherwise the rembg-matted crop is used.
-        //
-        // Phase O.6 — the single-pass backend pipeline returns
-        // ``one_pass: true`` and ``reconstruction_advised`` on each
-        // item, and does NOT pre-run rembg or reconstruction on the
-        // hot path. We capture both flags so:
-        //   • ``from_one_pass`` flows into ``buildCreatePayload`` →
-        //     backend skips synchronous SegFormer and queues rembg
-        //     as a fire-and-forget BackgroundTask.
-        //   • ``reconstructionAdvised`` decides whether to surface the
-        //     opt-in "Repair photo" CTA on the item card (the
-        //     reconstruction call moves to user-initiated, post-save).
-        const it = items[0];
-        const mime = it.crop_mime || 'image/jpeg';
-        const rec = it.reconstruction;
-        const recValidated = !!(rec && rec.validated && rec.image_b64);
-        const cropDataUrl = it.crop_base64
-          ? `data:${mime};base64,${it.crop_base64}`
-          : null;
-        const previewUrl = recValidated
-          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
-          : cropDataUrl;
+      const handleItemSkip = (frame) => {
+        const slotId = perCardIds[frame.index];
+        if (!slotId) return;
+        setCards((prev) => prev.filter((c) => c.id !== slotId));
+      };
+
+      const resp = await api.analyzeItemImage(
+        { image_base64: card.base64, language: requestLang },
+        {
+          onDetect: handleDetect,
+          onItem: handleItem,
+          onItemSkip: handleItemSkip,
+        }
+      );
+      clearInterval(tick);
+
+      const finalCount = resp?.count || (resp?.items || []).length;
+      if (finalCount === 0) {
+        // Backend produced a detect with all-skipped items — surface
+        // the same UX as the legacy 422 path.
         setCards((prev) =>
           prev.map((c) =>
             c.id === card.id
               ? {
                   ...c,
-                  status: 'ready',
-                  progress: 100,
-                  fields: hydrate(it.analysis || {}, user),
-                  label: it.label || null,
-                  potentialDuplicate: it.potential_duplicate || null,
-                  // Phase O.6 flags (absent on legacy responses → falsy)
-                  fromOnePass: !!it.one_pass,
-                  reconstructionAdvised: !!it.reconstruction_advised,
-                  // Patch 8 (May 2026) — analyzer skipped synchronous
-                  // rembg. The /closet save endpoint will queue the
-                  // matte as a BackgroundTask and the closet card
-                  // upgrades the thumbnail when ``clean_image_url``
-                  // is later populated.
-                  deferMatte: !!it.defer_matte,
-                  // Keep the original card.base64 untouched only if the
-                  // analyzer didn't return a usable crop (legacy fallback).
-                  ...(cropDataUrl
-                    ? {
-                        mime,
-                        previewUrl,
-                        base64: it.crop_base64,
-                        originalCropUrl: cropDataUrl,
-                        reconstructedUrl: recValidated
-                          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
-                          : null,
-                        reconstructedB64: recValidated ? rec.image_b64 : null,
-                        reconstructionMeta: recValidated
-                          ? {
-                              reasons: rec.reasons || [],
-                              prompt: rec.prompt,
-                              model: rec.model,
-                              mime_type: rec.mime_type,
-                            }
-                          : null,
-                        useReconstructed: recValidated,
-                      }
-                    : {}),
+                  status: 'error',
+                  progress: 0,
+                  error: t('addItem.analyzeFailed'),
                 }
               : c
           )
         );
+        toast.error(t('addItem.analyzeFailed'));
         return;
       }
 
-      // Multi-item photo — replace the single placeholder card with one
-      // fully-editable card per detected piece. Each new card owns the
-      // crop image so saving persists only the relevant garment.
-      const newCards = items.map((it, idx) => {
-        const mime = it.crop_mime || 'image/jpeg';
-        const rec = it.reconstruction;
-        const recValidated = !!(rec && rec.validated && rec.image_b64);
-        const previewUrl = recValidated
-          ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
-          : `data:${mime};base64,${it.crop_base64}`;
-        return {
-          id: `${card.id}-${idx}`,
-          file: null,
-          mime,
-          previewUrl,
-          base64: it.crop_base64,
-          originalCropUrl: `data:${mime};base64,${it.crop_base64}`,
-          reconstructedUrl: recValidated
-            ? `data:${rec.mime_type || 'image/png'};base64,${rec.image_b64}`
-            : null,
-          reconstructedB64: recValidated ? rec.image_b64 : null,
-          reconstructionMeta: recValidated
-            ? {
-                reasons: rec.reasons || [],
-                prompt: rec.prompt,
-                model: rec.model,
-                mime_type: rec.mime_type,
-              }
-            : null,
-          useReconstructed: recValidated,
-          status: 'ready',
-          progress: 100,
-          fields: hydrate(it.analysis || {}, user),
-          error: null,
-          label: it.label || null,
-          potentialDuplicate: it.potential_duplicate || null,
-          // Phase O.6 — single-pass flags (absent on legacy responses).
-          fromOnePass: !!it.one_pass,
-          reconstructionAdvised: !!it.reconstruction_advised,
-          // Patch 8 (May 2026) — deferred-matte flag from
-          // ``settings.DEFER_REMBG_ON_ANALYZE``.
-          deferMatte: !!it.defer_matte,
-        };
-      });
-      if (card.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(card.previewUrl);
-      setCards((prev) => {
-        const idx = prev.findIndex((c) => c.id === card.id);
-        if (idx < 0) return prev;
-        return [...prev.slice(0, idx), ...newCards, ...prev.slice(idx + 1)];
-      });
-      toast.success(
-        t('addItem.detected', { count: items.length })
-      );
+      toast.success(t('addItem.detected', { count: finalCount }));
     } catch (err) {
       clearInterval(tick);
-      const msg = err?.response?.data?.detail || t('addItem.analyzeFailed');
+      const msg = err?.response?.data?.detail || err?.message || t('addItem.analyzeFailed');
       setCards((prev) =>
         prev.map((c) =>
           c.id === card.id ? { ...c, status: 'error', progress: 0, error: msg } : c

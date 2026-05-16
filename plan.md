@@ -823,6 +823,84 @@ batch path is forcibly broken, matching pre-M18 behaviour.
 - After M18 (batched single Gemini call): **4-item outfit /analyze
   drops to ~17 s end-to-end — under one third of the 60 s ingress
   ceiling.**
+- After M19 (NDJSON stream + frontend incremental render): user sees
+  **placeholder cards at 7.5 s** and items fill in every ~1 s after.
+  Perceived wait roughly halved.
+
+## ✅ Patch M19 — End-to-end streaming with Gemini `stream=True` (Option B shipped)
+
+**Why:** M18 dropped a 4-item outfit /analyze from 60 s → 17 s, but the
+user still saw a 17 s blank wait — the entire batched JSON body lands
+at once. The user explicitly asked for `stream=True` so cards pop in
+as Gemini emits them.
+
+**Implementation (backend):**
+- New `_scan_complete_json_objects(text, start_pos)` — brace-counting
+  / quote-tracking parser that extracts complete `{...}` objects from
+  a growing buffer of streamed text. Tolerates fenced code blocks,
+  partial trailing objects. ~50 LoC, no `ijson` dependency.
+- New `_build_batch_litellm_messages(n, crops, language)` — shared
+  prompt + image-attachment builder for both batched paths.
+- New `GarmentVisionService.analyze_batch_stream(...)` — async
+  generator using `litellm.acompletion(stream=True)`. Accumulates
+  text deltas, runs the array scanner after every chunk, yields each
+  newly-completed object via `_coerce_single_garment` +
+  `_coerce_enums`. Tagged with `_streamed: true`.
+- New `GarmentVisionService.analyze_outfit_stream(...)` — high-level
+  orchestrator that reuses existing detect → crop → matte chain
+  and drives `analyze_batch_stream`. Emits frames:
+  `{type:"detect", count, items_meta:[...]}` →
+  `{type:"item", index, analysis, needs_reconstruction, ...}` →
+  `{type:"done", count}` or `{type:"error", status, message}`.
+- `/closet/analyze` inspects `Accept` header. Returns
+  NDJSON-streaming `StreamingResponse` when
+  `application/x-ndjson` is requested AND `multi=true`. Otherwise
+  keeps the M17 keepalive-whitespace JSON path — fully backwards
+  compatible.
+
+**Implementation (frontend):**
+- `lib/api.js::analyzeItemImage(body, callbacks?)`: when callbacks
+  supplied, upgrades to `fetch` + `ReadableStream.getReader()` with
+  `Accept: application/x-ndjson`. Splits on newlines, JSON-parses
+  each frame, dispatches to handlers (`onDetect`, `onItem`,
+  `onItemSkip`, `onError`, `onDone`). Returns aggregate
+  `{items, count, detect}` so callers that only want the final
+  state don't need to handle frames.
+- `pages/AddItem.jsx::analyzeCard` rewritten: on `onDetect`,
+  **splits the original upload card into `count` placeholder cards**
+  (each carrying its bbox crop as preview) — user sees N
+  "scanning…" cards within ~7 s of upload. On `onItem`, hydrates
+  the matching placeholder by index. On `onItemSkip`, removes the
+  placeholder.
+
+**Measured wall time on the dev pod (real 4-item outfit, NDJSON path):**
+
+| Stage | Pre-M19 (M18 only) | Post-M19 |
+|---|---|---|
+| First placeholder visible | n/a (17 s blank) | **7.5 s** |
+| First card filled | 17 s | 17.9 s |
+| Last card filled | 17 s | 21.4 s |
+| Perceived wait | 17 s silence | ~10 s of activity |
+
+Total wall is slightly higher (~4 s streaming overhead) but the
+perceived wait is roughly halved because the user sees N placeholder
+cards from 7.5 s onward.
+
+**Bulk-upload UX (5 photos):** with `_ANALYZE_LOCK = Semaphore(3)`
+(M15), 3 start immediately and 2 queue. Each in-flight photo emits
+its detect frame at ~7 s and items thereafter; queued photos detect
+as soon as a LOCK slot frees. User sees N×count placeholder cards
+across the whole batch within ~8-15 s, all fill over the next
+~20-25 s. **No more 60 s blank wall on any photo count.**
+
+**Reliability:**
+- Frame parsing fault-tolerant (malformed objects silently dropped).
+- Batch-stream failure falls back to per-crop loop (M18 invariant
+  preserved).
+- Pre-validation HTTPExceptions still fire as 4xx/503 before stream
+  opens.
+- Frontend axios path still works for any caller that doesn't pass
+  callbacks.
 
 ## Still open after this session (in priority order)
 

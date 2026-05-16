@@ -14,7 +14,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1201,6 +1201,7 @@ def _safe_analysis(parsed: dict[str, Any]) -> dict[str, Any]:
 @router.post("/analyze")
 async def analyze_item_image(
     payload: AnalyzeIn,
+    request: Request,
     user: dict = Depends(get_current_user),
 ) -> StreamingResponse:
     """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo.
@@ -1267,6 +1268,138 @@ async def analyze_item_image(
         or (user or {}).get("preferred_language")
         or "en"
     )
+
+    # Patch M19 (May 2026) — Streaming NDJSON variant. When the client
+    # opts in via ``Accept: application/x-ndjson``, we stream
+    # per-item frames as they arrive from Gemini rather than waiting
+    # for the full batched response. The frontend renders cards as
+    # frames land. Falls back to the legacy keepalive-whitespace
+    # JSON path on any setup error so a misbehaving client never
+    # breaks the API.
+    accept = (request.headers.get("accept") or "").lower()
+    wants_ndjson = "application/x-ndjson" in accept
+
+    if wants_ndjson and payload.multi:
+        async def _ndjson_stream():
+            # Frame producer — translates ``analyze_outfit_stream``
+            # frames into NDJSON lines + the per-item augmentation
+            # the existing closet save flow expects.
+            try:
+                async with _ANALYZE_LOCK:
+                    saw_detect = False
+                    items_meta: list[dict[str, Any]] = []
+                    async for frame in garment_vision_service.analyze_outfit_stream(
+                        raw, language=user_lang,
+                    ):
+                        ftype = frame.get("type")
+                        if ftype == "detect":
+                            saw_detect = True
+                            items_meta = frame.get("items_meta") or []
+                            yield (json.dumps(frame, ensure_ascii=False) + "\n").encode("utf-8")
+                        elif ftype == "item":
+                            idx = frame.get("index", -1)
+                            meta = (
+                                items_meta[idx]
+                                if 0 <= idx < len(items_meta)
+                                else {}
+                            )
+                            analysis = _safe_analysis(frame.get("analysis") or {})
+                            from app.services.garment_vision import (
+                                _is_unidentifiable,
+                            )
+                            if _is_unidentifiable(analysis):
+                                # Drop the slot — emit ``item_skip``
+                                # so the frontend can remove the
+                                # placeholder card it created from the
+                                # detect frame.
+                                out_frame = {
+                                    "type": "item_skip",
+                                    "index": idx,
+                                    "reason": "unidentifiable",
+                                }
+                            else:
+                                out_frame = {
+                                    "type": "item",
+                                    "index": idx,
+                                    "label": meta.get("label"),
+                                    "kind": meta.get("kind"),
+                                    "bbox": meta.get("bbox"),
+                                    "crop_base64": meta.get("crop_base64"),
+                                    "crop_mime": meta.get(
+                                        "crop_mime", "image/jpeg",
+                                    ),
+                                    "analysis": analysis,
+                                    "potential_duplicate": None,
+                                    "reconstruction_advised": False,
+                                    "one_pass": False,
+                                    "defer_matte": meta.get(
+                                        "defer_matte", False,
+                                    ),
+                                    "needs_reconstruction": frame.get(
+                                        "needs_reconstruction", False,
+                                    ),
+                                    "reconstruction_reasons": frame.get(
+                                        "reconstruction_reasons", [],
+                                    ),
+                                }
+                            yield (
+                                json.dumps(out_frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                        elif ftype == "error":
+                            yield (
+                                json.dumps(frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                            return
+                        elif ftype == "done":
+                            yield (
+                                json.dumps(frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                    # Sentinel — protect against generators that exit
+                    # without a `done` frame (very rare; would only
+                    # happen if `analyze_outfit_stream` was cancelled).
+                    if not saw_detect:
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "error",
+                                    "status": 503,
+                                    "message": (
+                                        "Garment analyzer produced no "
+                                        "frames; please retry."
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        ).encode("utf-8")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("ndjson analyze stream error: %s", exc)
+                yield (
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "status": 503,
+                            "message": (
+                                "Garment analyzer hit an unexpected "
+                                "error. Please try again."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+
+        return StreamingResponse(
+            _ndjson_stream(),
+            media_type="application/x-ndjson",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+            },
+        )
 
     async def _do_analyze() -> dict[str, Any]:
         """Inner analyze body — same logic as the pre-M17 endpoint."""
