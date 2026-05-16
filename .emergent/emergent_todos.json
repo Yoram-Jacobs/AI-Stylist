@@ -1,22 +1,14 @@
 [
   {
-    "content": "Add _pick_segformer_mask_for_category helper in closet.py",
+    "content": "(2a) Raise small-mask drop threshold in parse_garments to kill phantom Belt/Skirt detections on noisy areas",
     "status": "completed"
   },
   {
-    "content": "Refactor _run_background_matte to accept category + run SegFormer → rembg → apply_alpha_intersection",
+    "content": "(2b) Bbox padding floor in _crop_to_bbox so card thumbnails never upscale from <300 px",
     "status": "completed"
   },
   {
-    "content": "Update create_item caller to pass payload.category into the background task",
-    "status": "completed"
-  },
-  {
-    "content": "Lint closet.py and restart backend",
-    "status": "completed"
-  },
-  {
-    "content": "Verify pipeline self-check probe still passes; smoke-test the deferred matte on a real item",
+    "content": "(2c) Smoke test full pipeline on an outfit photo via /analyze",
     "status": "completed"
   }
 ]

@@ -73,7 +73,16 @@ _LABEL_MAP: dict[str, str | None] = {
 # to vanish entirely. The CCP-Ninja benchmark exposed this as a 0%
 # recall on every accessory class. Lower the bar for the categories
 # that are intrinsically small.
-_MIN_AREA_FRAC_DEFAULT = 0.005       # tops, bottoms, dresses
+# Patch 12 (May 2026) — Garment-class threshold bumped from 0.005 to
+# 0.010 (0.5% → 1.0% of frame) after the closet test revealed that
+# SegFormer regularly hallucinates a ~0.5% phantom Skirt/Pants on the
+# lower edge of a top-only photo (the shadow band where the shirt hem
+# meets the body). The lower threshold filtered too few of those out
+# and the user saw blurred phantom cards in their closet. Real garment
+# detections on a full-body shot are always at least a few percent of
+# the frame, so this is safe. Accessories / footwear / headwear keep
+# their tighter thresholds because they're intrinsically small.
+_MIN_AREA_FRAC_DEFAULT = 0.010       # tops, bottoms, dresses
 _MIN_AREA_FRAC_PER_CATEGORY: dict[str, float] = {
     "accessory": 0.0005,             # sunglasses, belts, bags, scarves
     "footwear":  0.0008,             # individual shoes/socks at full-body
@@ -376,6 +385,147 @@ async def _call_self_hosted(
     return out
 
 
+# Categories that participate in cross-label NMS. Accessories /
+# footwear / headwear are deliberately excluded — a belt on pants, a
+# bag in front of a dress, shoes overlapping the hem of trousers are
+# all legitimate overlaps that the user expects to see as separate
+# cards in their closet.
+_NMS_CATEGORIES: frozenset[str] = frozenset({"top", "bottom", "dress"})
+
+# Two thresholds, OR-combined:
+#   * containment of smaller-in-larger — catches "phantom inside real"
+#     (e.g. SegFormer's tight Upper-clothes mask fully inside its
+#     looser Dress mask on a long coat).
+#   * IoU — catches "two overlapping masks of similar size" (e.g.
+#     a pair of trousers split by a shadow into two adjacent blobs).
+# Empirically 0.70 / 0.50 fire on the coat / split-trousers cases in
+# the test closet without firing on legitimately-overlapping garments
+# like a tucked-in shirt + visible waistband.
+_NMS_CONTAINMENT_THRESHOLD: float = 0.70
+_NMS_IOU_THRESHOLD: float = 0.50
+
+
+def _suppress_overlapping_garments(
+    by_label: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Patch 12 (May 2026) — inter-label NMS for SegFormer outputs.
+
+    Removes / merges per-label detections that occupy substantially the
+    same pixels but were classified under different SegFormer labels.
+
+    Two cases this fixes
+    --------------------
+    1. **Phantom-inside-real** (e.g. long coat fires both ``Upper-clothes``
+       and ``Dress`` — the tight Upper-clothes mask sits entirely inside
+       the looser Dress mask). Containment-of-smaller-in-larger ≥
+       ``_NMS_CONTAINMENT_THRESHOLD`` → drop the smaller.
+
+    2. **Split-by-shadow** (e.g. trousers fire ``Pants`` on the upper
+       half and ``Skirt`` on the lower half because a shadow band
+       confused the per-pixel classifier). IoU is low but containment
+       on the smaller half is also low — instead this is caught by
+       same-category masks that *don't* overlap much being unioned
+       (see below).
+
+    Algorithm
+    ---------
+    * Sort garment-class entries (top / bottom / dress) by descending
+      mask area.
+    * For each smaller entry, compare against every larger entry kept
+      so far:
+        - If ``containment ≥ 0.70`` OR ``IoU ≥ 0.50``:
+            - **Same category** → union the smaller mask into the
+              larger and drop the smaller (handles "Pants" + "Skirt"
+              both = "bottom" overlapping a single trouser).
+            - **Different category** → drop the smaller (handles
+              "Upper-clothes" inside "Dress").
+
+    Accessories, footwear, and headwear are passed through untouched.
+
+    Idempotent and safe on empty / single-entry input.
+    """
+    if not by_label:
+        return by_label
+
+    nms_items: list[tuple[str, dict[str, Any], int]] = []
+    passthrough: dict[str, dict[str, Any]] = {}
+    for lbl, item in by_label.items():
+        if item.get("category") in _NMS_CATEGORIES:
+            try:
+                area = int(item["mask"].sum())
+            except Exception:  # noqa: BLE001
+                area = 0
+            if area > 0:
+                nms_items.append((lbl, item, area))
+            # else: zero-area item drops on the floor — useless anyway.
+        else:
+            passthrough[lbl] = item
+
+    # No or one garment-class detection → nothing to suppress.
+    if len(nms_items) < 2:
+        for lbl, item, _ in nms_items:
+            passthrough[lbl] = item
+        return passthrough
+
+    # Sort largest → smallest so we always compare new candidates
+    # against the already-kept "winners".
+    nms_items.sort(key=lambda t: t[2], reverse=True)
+
+    kept: list[tuple[str, dict[str, Any], int]] = []
+    suppressed: list[tuple[str, str, str, float, float]] = []
+    for lbl, item, area in nms_items:
+        merged = False
+        dropped = False
+        for kept_idx, (kept_lbl, kept_item, kept_area) in enumerate(kept):
+            inter = int(np.logical_and(item["mask"], kept_item["mask"]).sum())
+            if inter == 0:
+                continue
+            union = kept_area + area - inter
+            iou = inter / union if union > 0 else 0.0
+            # Containment of the smaller (= ``item``) inside the larger
+            # (= ``kept_item``). Larger-first sort guarantees this.
+            containment = inter / area if area > 0 else 0.0
+            if containment < _NMS_CONTAINMENT_THRESHOLD and iou < _NMS_IOU_THRESHOLD:
+                continue
+            same_category = item.get("category") == kept_item.get("category")
+            if same_category:
+                # Union the smaller into the larger and drop the smaller.
+                kept_item["mask"] = np.maximum(
+                    kept_item["mask"], item["mask"]
+                )
+                # Refresh area on the kept entry so subsequent comparisons
+                # see the post-union mask.
+                kept[kept_idx] = (
+                    kept_lbl,
+                    kept_item,
+                    int(kept_item["mask"].sum()),
+                )
+                merged = True
+            suppressed.append(
+                (lbl, kept_lbl, item.get("category") or "?", iou, containment)
+            )
+            dropped = True
+            break
+        if not (merged or dropped):
+            kept.append((lbl, item, area))
+
+    if suppressed:
+        logger.info(
+            "clothing_parser: NMS suppressed %d overlap(s): %s",
+            len(suppressed),
+            [
+                f"{lbl}(\u2192{tgt}, iou={iou:.2f}, cont={cont:.2f})"
+                for lbl, tgt, _cat, iou, cont in suppressed
+            ],
+        )
+
+    for lbl, item, _ in kept:
+        passthrough[lbl] = item
+    return passthrough
+
+
+
+
 async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
     """Return [{label, category, score, bbox, mask}] for each garment.
 
@@ -488,6 +638,17 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
     #     channel on cropped PNGs looks like swiss cheese.
     for item in by_label.values():
         item["mask"] = _postprocess_mask(item["mask"])
+
+    # 2c) Patch 12 (May 2026) — inter-label overlap suppression. Before
+    #     this step a long coat fires both "Upper-clothes" and "Dress"
+    #     and the user sees two cards from one garment. Trousers split
+    #     by a shadow fire two adjacent "bottom" masks and become two
+    #     cards. The fix is a pass of containment + IoU NMS across the
+    #     garment-class labels (top / bottom / dress). Accessory /
+    #     footwear / headwear are intentionally exempt because they
+    #     legitimately overlap with garments (belt on pants, bag on
+    #     dress, shoes overlap the hem of trousers).
+    by_label = _suppress_overlapping_garments(by_label)
 
     # 3) Finalise: compute bboxes from merged masks, emit canonical dict.
     out: list[dict[str, Any]] = []
