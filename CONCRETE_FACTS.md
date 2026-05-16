@@ -48,7 +48,7 @@ quantization / memory / latency decisions assume this exact host.
 | `/srv/AI-Stylist/deploy/.env` | Runtime env vars (provider flags, tokens, Mongo URI, etc.) |
 | `/srv/AI-Stylist/inference-server/eyes/` | Eyes container source — mirror of `/app/inference-server/eyes/` |
 | `/srv/AI-Stylist/eyes_v4_adapter/` | Trained Eyes v4 LoRA — `adapter_config.json` + `adapter_model.safetensors`. **Volume-mounted into the eyes container at `/adapter:ro`** |
-| `/var/lib/docker/volumes/dressapp_eyes-cache/_data` | Docker volume for the HF cache (`HF_HOME=/models` inside the eyes container) — holds Gemma-4 base weights after first download |
+| `/var/lib/docker/volumes/dressapp_eyes-cache/_data` | Docker volume for the Eyes container's runtime cache (model artefacts loaded from disk, never downloaded from the internet at runtime — see "Auth surface" rule below) |
 
 ---
 
@@ -73,8 +73,15 @@ on the VPS — never in the repo.
 | `EYES_GEMMA_SPACE_URL` | `http://eyes:7860` | Internal docker DNS target for `backend/app/services/garment_vision._call_gemma_space` |
 | `EYES_PROVIDER` | `gemma` \| `gemini` | Env-default provider. **Use the runtime override below to switch in production** — do not edit this on the fly. |
 | `EYES_API_TOKEN` | (secret) | Bearer token required by `dressapp-eyes` `/predict` and `/transcribe` |
-| `EYES_HF_TOKEN` | (secret) | Hugging Face token for the gated `google/gemma-4-E2B-it` download |
 | `MONGO_URL` | (secret, Atlas) | Backend → Mongo connection string |
+
+> **🛑 Auth surface — `HF_TOKEN` / `EYES_HF_TOKEN` are NOT part of
+> DressApp.** Any reference to either in the live tree is a sabotage
+> artefact (see `quarantine/2026-05-sabotage/READ_THIS_FIRST.md`).
+> DressApp's vision stack (`SegFormer` + `rembg` + `CLIP`) loads its
+> weights from local disk — no internet egress, no HuggingFace
+> token, no gated-model download. **Do not reintroduce these env
+> vars.**
 
 ### Runtime provider override
 
@@ -144,6 +151,7 @@ docker compose up -d --force-recreate eyes
 | `/app/design_guidelines.md` | Frontend design tokens + UI rules (binding) |
 | `/app/plan.md` | Phased development plan (live, updated each session) |
 | `/app/inference-server/eyes/V4_DEPLOY.md` | Eyes v4 deployment runbook + decision log |
+- /app/inference-server/eyes/test_images | Images dataset for testing real photographs
 | `/app/CONCRETE_FACTS.md` | **This file.** |
 
 ---

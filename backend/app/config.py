@@ -124,10 +124,15 @@ class Settings:
         """True when a direct Google key is configured (enables Nano Banana)."""
         return bool(self.GEMINI_API_KEY)
 
-    # --- Hugging Face (garment segmentation) ---
-    HF_TOKEN: str | None = os.environ.get("HF_TOKEN") or None
-    # Defaults to a purpose-built clothing segmenter. SAM is kept as a config
-    # surface but is not reachable on the serverless tier as of 2026.
+    # --- Hugging Face library use (NOT auth) ---
+    # ``HF_TOKEN`` has been **deliberately removed** from this config
+    # (May 2026 — see ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``).
+    # DressApp's SegFormer + CLIP weights are loaded from the local
+    # HF cache via the ``transformers`` library; the public models we
+    # use (``mattmdjaga/segformer_b2_clothes``, CLIP ViT-B/32) are not
+    # gated and do not require a token. **Do not reintroduce the
+    # ``HF_TOKEN`` setting** — any code path that suddenly "needs" it
+    # is a regression toward the sabotage line.
     HF_SAM_MODEL: str = os.environ.get(
         "HF_SAM_MODEL", "mattmdjaga/segformer_b2_clothes"
     )
@@ -164,10 +169,10 @@ class Settings:
     )
     # When set, the HF path hits this OpenAI-compatible endpoint URL
     # instead of going through HF Inference Providers routing. Use this
-    # to point at your own deployed Gemma 4 endpoint (HF Dedicated
-    # Endpoint, llama.cpp --server, Modal, Replicate, etc.). Example:
-    #   GARMENT_VISION_ENDPOINT_URL=https://xxx.endpoints.huggingface.cloud/v1
-    #   GARMENT_VISION_ENDPOINT_KEY=hf_xxxx    # optional, defaults to HF_TOKEN
+    # to point at your own deployed Gemma 4 endpoint (llama.cpp
+    # ``--server``, Modal, Replicate, etc.). Example:
+    #   GARMENT_VISION_ENDPOINT_URL=http://eyes:7860/v1
+    #   GARMENT_VISION_ENDPOINT_KEY=<shared bearer>
     GARMENT_VISION_ENDPOINT_URL: str | None = (
         os.environ.get("GARMENT_VISION_ENDPOINT_URL") or None
     )
@@ -191,26 +196,24 @@ class Settings:
     EYES_PROVIDER: str = (
         os.environ.get("EYES_PROVIDER", "gemma") or "gemma"
     ).strip().lower()
-    # Public HF Space URL exposing FastAPI ``/predict``.
+    # Public URL where the ``dressapp-eyes`` container exposes
+    # FastAPI ``/predict``. Internal docker DNS in production
+    # (``http://eyes:7860``); a different scheme in dev / preview.
     EYES_GEMMA_SPACE_URL: str | None = (
         os.environ.get("EYES_GEMMA_SPACE_URL") or None
     )
-    # Read-scope HF token for the (currently private) model repo. The
-    # HF Space pulls the GGUF at build time using this same secret —
-    # the backend doesn't need it at request time today, but we hold it
-    # in env so the same token can be reused later for HF Inference
-    # Endpoints / private Spaces.
-    EYES_HF_TOKEN: str | None = (
-        os.environ.get("EYES_HF_TOKEN") or None
-    )
-    # Bearer secret shared between this backend and the self-hosted Eyes
-    # container (Hetzner deploy). Generated with ``openssl rand -hex 32``
-    # and pasted into both this backend's env and the eyes container's
-    # env. Kept distinct from ``EYES_HF_TOKEN`` so the HF token is never
-    # sent on hot-path inference calls; it's only used by the eyes
-    # container at first boot to pull the GGUF from huggingface.co.
-    # When unset, the request-time auth falls back to ``EYES_HF_TOKEN``
-    # for backwards-compat with the legacy HF Space deploy.
+    # Bearer secret shared between this backend and the self-hosted
+    # Eyes container (Hetzner deploy). Generated with ``openssl rand
+    # -hex 32`` and pasted into both this backend's env and the eyes
+    # container's env.
+    #
+    # **Why there is no ``EYES_HF_TOKEN`` here:** DressApp's Eyes
+    # container loads its GGUF artefacts from a bind-mounted disk
+    # directory, **not** from huggingface.co. The earlier
+    # ``EYES_HF_TOKEN`` setting was a sabotage artefact (May 2026)
+    # that drove a deprecated HF-download bootstrap. It has been
+    # deliberately removed. See
+    # ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
     EYES_API_TOKEN: str | None = (
         os.environ.get("EYES_API_TOKEN") or None
     )
@@ -411,6 +414,53 @@ class Settings:
     DEFER_REMBG_ON_ANALYZE: bool = (
         os.environ.get("DEFER_REMBG_ON_ANALYZE", "true").lower() == "true"
     )
+
+    # Patch M14 (May 2026) — Defer Nano Banana reconstruction off the
+    # /closet/analyze hot path. ``should_reconstruct`` fires on every
+    # crop whose bbox touches a frame edge — which is the case for
+    # essentially every full-body outfit upload (tops touch top, shoes
+    # touch bottom, etc.). Each fire spawns a ~20-40 s Gemini image
+    # generation call inside ``_analyse_one_crop``; the parallel
+    # ``Semaphore(6)`` is bounded by the slowest single
+    # (analyze + reconstruct) chain, so a 4-item outfit blocks the
+    # response for 30-60 s and routinely hits the Kubernetes ingress
+    # 60 s ceiling → 502 Bad Gateway. When this flag is ``true``
+    # (default), the per-crop analyzer skips reconstruction and marks
+    # the item with ``needs_reconstruction=true`` + ``reconstruction_reasons``.
+    # The ``/closet`` save handler then queues a BackgroundTask that
+    # runs ``reconstruct()`` and patches ``reconstructed_image_url`` a
+    # few seconds later — exactly the same pattern as the deferred
+    # rembg matte. Set ``false`` to restore the legacy synchronous
+    # path for triage.
+    DEFER_RECONSTRUCTION_ON_ANALYZE: bool = (
+        os.environ.get("DEFER_RECONSTRUCTION_ON_ANALYZE", "true").lower() == "true"
+    )
+
+    # Patch M16 (May 2026) — Hard kill switch for the auto-reconstruction
+    # pipeline. After M14 we observed in live closet screenshots that
+    # the SegFormer + rembg + ``apply_alpha_intersection`` triad alone
+    # already produces acceptable per-garment cutouts (you can see the
+    # head still visible under the coat, the smeared sneaker, the cap
+    # with the face below — those are the raw triad outputs, never
+    # touched by Nano Banana). Nano Banana was supposed to clean those
+    # up but in practice it either (a) didn't fire reliably, (b) made
+    # things worse on low-contrast crops, or (c) added 20-40 s latency
+    # per crop with marginal quality gain. Burning that API budget and
+    # latency for no visible improvement is the wrong trade.
+    #
+    # When ``false`` (default):
+    #   * ``should_reconstruct`` returns ``(False, [])`` short-circuit
+    #     so neither the inline path nor the deferred BackgroundTask
+    #     ever fires.
+    #   * The manual "Repair Photo" CTA (``/closet/{id}/reshoot``)
+    #     stays usable — that's an explicit user request and not part
+    #     of the auto-pipeline being killed here.
+    # When ``true``:
+    #   * Restores the legacy behaviour (use together with
+    #     ``DEFER_RECONSTRUCTION_ON_ANALYZE`` to control sync vs. async).
+    ENABLE_RECONSTRUCTION: bool = (
+        os.environ.get("ENABLE_RECONSTRUCTION", "false").lower() == "true"
+    )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which
@@ -433,6 +483,25 @@ class Settings:
     # legacy detector if it fails or returns nothing useful).
     USE_CLOTHING_PARSER: bool = (
         os.environ.get("USE_CLOTHING_PARSER", "true").lower() == "true"
+    )
+
+    # Patch M13 (May 2026) — Cold-start model warmup. Fires SegFormer +
+    # rembg + FashionCLIP loads in parallel as an asyncio background task
+    # from the FastAPI startup hook, so the FIRST user upload doesn't
+    # pay the cumulative 9-19s model-init tax that previously pushed
+    # cold-start /closet/analyze past the Kubernetes ingress 60s ceiling
+    # and triggered "502 Bad Gateway → Analysis failed" on first
+    # attempt. Default ``true`` on full-ML deploys, OFF on lightweight
+    # deploys (the lightweight container can't afford to preload models
+    # it doesn't need — it goes Gemini-only). Kill-switch via env var
+    # of the same name when triaging deploy-time issues.
+    WARMUP_MODELS_ON_STARTUP: bool = (
+        not _LIGHTWEIGHT_DEPLOY
+        and os.environ.get(
+            "WARMUP_MODELS_ON_STARTUP",
+            "true" if _HAS_LOCAL_ML else "false",
+        ).lower()
+        == "true"
     )
 
     @property

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -29,6 +29,7 @@ import { bestImageUrl, isCleanImagePending } from '@/lib/itemImage';
 import { labelForCategory, labelForSource, labelForIntent } from '@/lib/taxonomy';
 import { useClosetStore } from '@/lib/useClosetStore';
 import { closetStore } from '@/lib/closetStore';
+import { workStore } from '@/lib/workStore';
 import { toast } from 'sonner';
 
 const CATEGORIES = ['all', 'top', 'bottom', 'outerwear', 'shoes', 'accessory', 'dress'];
@@ -145,56 +146,141 @@ export default function Closet() {
   // ──────────────────────────────────────────────────────────────────
   // Phase O.6 — poll for background-rembg completion.
   //
-  // After ``POST /closet`` with ``from_one_pass=true`` the server
-  // immediately returns the document with ``clean_image_status:
-  // "pending"`` and queues rembg as a fire-and-forget BackgroundTask.
-  // The closet grid initially renders the bbox-cropped JPEG; we poll
-  // ``GET /closet/{id}`` here on a gentle backoff so the moment the
-  // alpha-PNG cutout is ready we ``store.upsert(updated)`` and the
-  // thumbnail swaps in-place \u2014 no full grid refetch, no flash.
+  // After ``POST /closet`` with ``from_one_pass=true`` (or
+  // ``defer_matte=true``) the server immediately returns the document
+  // with ``clean_image_status: "pending"`` and queues rembg as a
+  // fire-and-forget BackgroundTask. The closet grid initially renders
+  // the bbox-cropped JPEG; we poll ``GET /closet/{id}`` here on a
+  // gentle backoff so the moment the alpha-PNG cutout is ready we
+  // ``store.upsert(updated)`` and the thumbnail swaps in-place — no
+  // full grid refetch, no flash.
   //
-  // We do NOT poll for every single ``pending`` item every cycle:
-  // ``polishingIds`` is recomputed against the LIVE store snapshot
-  // and only items whose status is still ``pending`` get a fresh GET.
-  // The cycle stops itself when none remain.
+  // Patch M20 (May 2026) — Robustness rewrite, motivated by user
+  // reports of "the last item stays on 'Polishing photo…' forever".
+  // Two structural issues in the previous polling loop:
+  //
+  //   1. ``live = store.items`` inside ``tick`` captured the closure's
+  //      ``store`` object, which is the React snapshot from the
+  //      render that mounted this effect — STALE relative to mutations
+  //      that landed in ``closetStore`` between scheduling and tick
+  //      execution (e.g. ``settle()`` finishing in AddItem after the
+  //      user navigated to /closet, or a parallel incremental sync).
+  //      Fix: read ``closetStore.getSnapshot().items`` directly so we
+  //      always see the live state.
+  //
+  //   2. ``attempt`` reset to 0 on every effect re-mount (each upsert
+  //      triggers a re-mount), so the backoff array was never
+  //      traversed and polling effectively ran at 3 s flat forever
+  //      with no upper bound. On a backend that genuinely failed to
+  //      write ``clean_image_status="ready"`` (rare but possible — e.g.
+  //      silent rembg crash, process restart mid-task), the poll would
+  //      hammer the API indefinitely. Fix: persist ``attempt`` in a
+  //      ref keyed by the pending-id signature; reset only when the
+  //      pending SET changes. Also cap lifetime at
+  //      ``POLL_MAX_ATTEMPTS`` after which we fire one final
+  //      ``incrementalSync()`` and give up.
   // ──────────────────────────────────────────────────────────────────
+  const pollAttemptRef = useRef(0);
+  const pollSignatureRef = useRef('');
   useEffect(() => {
     const pendingIds = (store.items || [])
       .filter((it) => it && it.clean_image_status === 'pending')
       .map((it) => it.id);
-    if (pendingIds.length === 0) return undefined;
+    if (pendingIds.length === 0) {
+      pollAttemptRef.current = 0;
+      pollSignatureRef.current = '';
+      return undefined;
+    }
+
+    // Patch M20 (May 2026) — also register these pending items with
+    // the global ``workStore`` so the cross-page floater
+    // (``WorkProgressFloater``) and the completion toast
+    // (``WorkBatchDoneToast``) cover items the user inherits on a
+    // fresh visit to /closet (e.g. previous-session items whose
+    // BackgroundTask was still running when the user closed the tab).
+    // ``registerPolishItems`` is idempotent — re-registering an
+    // already-tracked id is a no-op.
+    workStore.registerPolishItems(pendingIds);
+
+    // Backoff schedule (ms). After we exhaust the array, polling
+    // continues at the final entry (18 s) up to POLL_MAX_ATTEMPTS.
+    const POLL_STEPS_MS = [3000, 4000, 6000, 9000, 12000, 18000];
+    const POLL_MAX_ATTEMPTS = 30;   // ~5 minutes wall clock at the tail.
+
+    // Reset per-pass counter ONLY when the pending-id SET changes
+    // (new items appeared / set shrank). We don't reset on every
+    // items mutation \u2014 upsert-from-poll changes items[] but not the
+    // pending set, and resetting there would defeat the backoff.
+    const pendingSignature = pendingIds.slice().sort().join(',');
+    if (pollSignatureRef.current !== pendingSignature) {
+      pollSignatureRef.current = pendingSignature;
+      pollAttemptRef.current = 0;
+    }
+
     let cancelled = false;
-    let attempt = 0;
-    const POLL_STEPS_MS = [3000, 4000, 6000, 9000, 12000, 18000]; // ~52s total
+    let timer;
+
+    const scheduleNext = () => {
+      const idx = Math.min(
+        pollAttemptRef.current,
+        POLL_STEPS_MS.length - 1,
+      );
+      timer = setTimeout(tick, POLL_STEPS_MS[idx]);
+    };
+
     const tick = async () => {
       if (cancelled) return;
-      // Refetch each still-pending item in parallel; bail out as soon
-      // as any one of them flips to a terminal state so the grid
-      // updates on the first available result rather than waiting
-      // for the slowest. ``store.upsert`` is a no-op for unchanged
-      // docs so duplicate cycles cost nothing.
-      const live = store.items || [];
+
+      // Read the LIVE store snapshot, not the stale closure. ``store``
+      // captured at effect-mount can be many ticks behind by the time
+      // this runs (settle() finishing, parallel incremental sync, etc.).
+      const liveItems = closetStore.getSnapshot().items || [];
       const stillPending = pendingIds.filter((id) =>
-        live.find((it) => it.id === id && it.clean_image_status === 'pending'),
+        liveItems.find(
+          (it) => it.id === id && it.clean_image_status === 'pending',
+        ),
       );
-      if (stillPending.length === 0) return; // we're done
+      if (stillPending.length === 0) {
+        pollAttemptRef.current = 0;
+        return; // all matched items resolved \u2014 stop the loop
+      }
+
+      // Hard cap: after POLL_MAX_ATTEMPTS, fire one last incremental
+      // sync (the last items-list-level chance to pull the latest)
+      // and give up. Prevents runaway polling if the backend
+      // BackgroundTask genuinely failed without writing a terminal
+      // status.
+      if (pollAttemptRef.current >= POLL_MAX_ATTEMPTS) {
+        // eslint-disable-next-line no-console
+        console.info(
+          'closet poll giving up after %d attempts (%d still pending)',
+          POLL_MAX_ATTEMPTS,
+          stillPending.length,
+        );
+        closetStore.incrementalSync().catch(() => { /* best-effort */ });
+        return;
+      }
+
       try {
         const results = await Promise.all(
           stillPending.map((id) => api.getItem(id).catch(() => null)),
         );
-        if (cancelled) return;
+        // Apply upserts EVEN IF the effect was cancelled while we
+        // awaited \u2014 the data is fresh; dropping it would force the
+        // next mount to refetch unnecessarily.
         results.forEach((it) => {
-          if (it && it.id) store.upsert(it);
+          if (it && it.id) closetStore.upsert(it);
         });
       } catch {
         /* swallow \u2014 polling is best-effort */
       }
-      attempt += 1;
-      const delay =
-        POLL_STEPS_MS[Math.min(attempt, POLL_STEPS_MS.length - 1)];
-      timer = setTimeout(tick, delay);
+
+      if (cancelled) return;
+      pollAttemptRef.current += 1;
+      scheduleNext();
     };
-    let timer = setTimeout(tick, POLL_STEPS_MS[0]);
+
+    scheduleNext();
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -784,7 +870,16 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
                   alt={item.title}
                   loading="lazy"
                   decoding="async"
-                  className="w-full h-full object-cover"
+                  // Patch 12 (May 2026) — ``object-contain`` (was
+                  // ``object-cover``). Cover scales the source up to
+                  // fill the 3:4 card, which on small crops produces
+                  // a visible bilinear blur. Contain renders the
+                  // source at its native aspect ratio with neutral
+                  // letterbox gutters against ``bg-secondary``. Crisp
+                  // for tiny crops, indistinguishable from cover on
+                  // garment-shaped portrait images that already match
+                  // ~3:4.
+                  className="w-full h-full object-contain"
                   data-testid="closet-item-thumb"
                 />
                 {polishing && (
@@ -793,6 +888,15 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
                   // running. The closet poll (Closet.jsx top-level)
                   // will swap the image in-place when status flips
                   // to "ready".
+                  //
+                  // Patch M20.1 (May 2026, user feedback) — Kept as
+                  // a per-card textual badge alongside the global
+                  // ``WorkProgressFloater``. The floater shows
+                  // aggregate "Polishing N/M photos" progress; this
+                  // badge identifies WHICH specific cards are still
+                  // mid-polish so the user can scan and know what's
+                  // about to update. Both indicators co-exist by
+                  // design.
                   <div
                     className="absolute inset-0 flex items-end justify-start p-2 pointer-events-none"
                     data-testid="closet-item-polishing"

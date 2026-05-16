@@ -449,3 +449,642 @@ Rationale:
 - Multi-select Stylist response actions (e.g. “save this whole outfit”).
 - Backend `closet_item_ids` form field to skip image round-trip (future optimisation).
 - Reworking the entire composer layout — only the attachment entry point changes.
+
+---
+
+# Phase M12 — Matting hardening (May 2026 closet-test follow-up)
+
+> **Context:** After Phase O.6 the SegFormer + rembg + `apply_alpha_intersection`
+> triad was restored on the save flow. Live closet tests surfaced two
+> remaining edge-case regressions: (a) low-contrast accessories (burgundy
+> sneakers on cobblestone, dark belt on dark trousers) coming out as
+> smeared blobs because SegFormer returned a patchy mask the dilation
+> couldn't rescue, and (b) the Edit Item → "Clean background" CTA used a
+> rembg-only path so users saw different cutouts on first save vs.
+> CTA reruns of the same crop.
+
+## ✅ Patch 12g — Mask "confidence" check (SHIPPED)
+
+- File: `backend/app/services/clothing_parser.py::apply_alpha_intersection`.
+- Behaviour: after the SegFormer mask is resized to the matted-PNG
+  dimensions, compute `(mask > 127).mean()`. If coverage < **40 %** of
+  the bbox, treat the mask as unreliable → return `None` → caller keeps
+  the rembg-only output.
+- Why 40 %: empirical sweet spot from May 2026 closet tests. Tops /
+  bottoms / dresses score 60–95 % when SegFormer is confident; sunglasses
+  / belts / bags / hats score 50–80 %; failure modes (low-contrast
+  accessories) score 10–30 %. 40 % bisects the gap cleanly.
+- Soft fallback (caller already handles `None`), so this never blocks
+  rembg-only cutouts.
+- Smoke-tested via `python -c` with synthetic 256×256 PNGs across four
+  coverage regimes (10 %, 38.6 %, 41.5 %, 100 %) — bail/refine matches
+  the threshold.
+
+## ✅ Patch 12h — Triad parity in `/clean-background` (SHIPPED)
+
+- File: `backend/app/api/v1/closet.py::clean_item_background`.
+- Behaviour: the CTA now runs **SegFormer (best-effort) → rembg + CLIP
+  guard → `apply_alpha_intersection`**, mirroring `_run_background_matte`.
+  All three stages are independently soft — any failure falls back to
+  rembg-only output.
+- Adds `reconstruction_metadata.segformer_refined` (bool) so we can tell
+  triad-refined CTA reruns apart from rembg-only fallbacks during triage.
+- Lint clean (ruff), backend restarted cleanly, smoke import of the
+  endpoint confirms `parse_garments` + `apply_alpha_intersection` are
+  wired.
+
+## Smoking gun for Issue 3 — "Analysis failed" on first upload
+
+User DevTools screenshot this session proved:
+
+```
+POST /api/v1/closet/analyze → 502 Bad Gateway
+```
+
+Root cause: **Kubernetes ingress timeout (60 s) killing the connection
+on first man-photo upload while SegFormer + rembg + CLIP load lazily.**
+On retry the models are warm and the request completes inside the
+timeout. So:
+
+> **Issue 3 ≡ Task 2 (wall time)** — same root cause, same fix.
+
+## ✅ Patch M13 — Cold-start model warmup (SHIPPED, resolves Issue 3 ≡ Task 2)
+
+**Root cause confirmed by user DevTools last session:**
+`POST /api/v1/closet/analyze` returning `502 Bad Gateway` on first
+man-photo upload was a Kubernetes ingress 60 s timeout firing while
+the three heavy CV models lazy-loaded serially on the request thread.
+
+**Implementation:**
+- New module `backend/app/services/warmup.py` with `warmup_models()`
+  fire-and-forget entry point.
+- Topology: **SegFormer → FashionCLIP (serial on transformers track),
+  parallel with rembg (independent onnxruntime track).** A naïve
+  3-way parallel `asyncio.gather` exposes a torch/accelerate race
+  inside `transformers.from_pretrained` (concurrent threads observe
+  a half-initialised meta-device model → `NotImplementedError:
+  Cannot copy out of meta tensor`). Two-track sequencing is the
+  resilient middle ground.
+- Pre-imports the four needed transformers classes on the asyncio
+  thread before the gather, so the lazy `__getattr__` runs once
+  serially (avoids an earlier `ImportError` race we hit during M13.1).
+- Fired from `server.py::on_startup` as `asyncio.create_task` — NEVER
+  awaited inline so supervisor / k8s readiness probe still gets a
+  ready response in <3 s.
+- New config flag `WARMUP_MODELS_ON_STARTUP` in `config.py` (default
+  `true` on full-ML deploys, `false` on `LIGHTWEIGHT_DEPLOY=true`).
+
+**Bonus fix — M13.2:** `fashion_clip._load` now passes
+`low_cpu_mem_usage=False` to `CLIPModel.from_pretrained` to bypass the
+transformers 4.57 meta-device default. Without this fix the lazy
+fallback on first user request would have ALSO raised the same
+`NotImplementedError`, leaving the rembg CLIP faithfulness guard a
+permanent no-op. Verified working in a fresh subprocess.
+
+**Measured wall time on the dev pod (live `backend.err.log`):**
+- SegFormer **0.68 s**, FashionCLIP **0.95 s**, rembg **0.59 s**
+- Parallel wall **4.53 s** (vs. ~10-14 s serial cold-start cost)
+- 3/3 ready, 0 failed, 0 skipped.
+
+**Effect:** The first user upload after backend boot no longer pays
+the cumulative model-init tax. /closet/analyze should comfortably
+stay under the 60 s ingress ceiling, eliminating the "Analysis
+failed → succeeds on retry" UX. Per-crop Gemini parallelism was
+already in place (`asyncio.Semaphore(6)` inside
+`garment_vision._analyse_crops`), so no change was needed there.
+
+## ✅ Patch M14 — Defer Nano Banana reconstruction off the analyze hot path (SHIPPED)
+
+**Diagnosis from live preview logs after M13:** Even with all three
+models warm, `/closet/analyze` was still 33–60 s for a 4-item outfit
+(timeline screenshots from user showed `/analyze` hanging 50–140 s →
+502 Bad Gateway from the Kubernetes ingress 60 s ceiling).
+
+`detect_items` (SegFormer) was fast (~5 s) and rembg matting was
+already deferred (`DEFER_REMBG_ON_ANALYZE=true`). The remaining
+consumer was **`should_reconstruct` firing inside
+`_analyse_one_crop`** on every crop whose bbox touched a frame edge
+(i.e. essentially every crop in a full-body outfit shot — tops touch
+top, footwear touch bottom, etc.). Each fire ran a 20–40 s Gemini
+image-generation call synchronously; the parallel `Semaphore(6)` was
+bounded by the slowest single (analyze + reconstruct) chain → 30–60 s
+critical path per request.
+
+**Implementation (mirror of M8 `defer_matte`):**
+- New config flag `DEFER_RECONSTRUCTION_ON_ANALYZE` (`config.py`),
+  default `true` (env-overrideable to `false` for triage).
+- `garment_vision._analyse_one_crop`: when flag is on and
+  `should_reconstruct` fires, skip the inline `reconstruct()` call,
+  set `reconstruction=None`, and surface
+  `needs_reconstruction=True` + `reconstruction_reasons=[...]` on
+  the returned dict.
+- `closet.CreateItemIn`: two new optional fields
+  (`needs_reconstruction: bool`, `reconstruction_reasons: list[str]`)
+  so the frontend echoes the analyzer's flag back on save.
+- `closet.py`: new `_run_background_reconstruction(item_id, crop_bytes,
+  analysis, reasons)` task that runs `reconstruct()` and patches
+  `reconstructed_image_url` + `reconstruction_metadata` (with
+  `deferred=true` marker). Mirrors `_run_background_matte`
+  bit-for-bit; all failures are soft.
+- `closet.create_item`: queues the new BackgroundTask when
+  `payload.needs_reconstruction and raw_bytes`.
+
+**Expected /analyze wall time (4-item full-body outfit):**
+- Before: 50–60 s (often 502)
+- After: ~10–15 s (detect 5 s + parallel per-crop Gemini analyze 5–10 s)
+- Reconstruction now lands seconds-to-minutes after save via
+  BackgroundTask → `reconstructed_image_url` populates in the
+  background and the next /closet read picks it up.
+
+**Frontend handling:** the closet list already uses
+`pick_source_data_url` priority chain
+(`thumbnail_data_url → reconstructed_image_url → clean_image_url →
+segmented_image_url → original_image_url`). When the reconstruction
+lands, the cached thumbnail is invalidated (`$unset thumbnail_data_url`)
+so the next read regenerates from the freshly reconstructed image.
+No frontend change needed; the React store already polls deferred work.
+
+## ✅ Patch M15 — Raise `_ANALYZE_LOCK` semaphore from 1 → 3 (SHIPPED)
+
+**Diagnosis from live preview logs after M14:** Single-request
+`/analyze` dropped from 50-60 s → **17-31 s** as designed. But user
+DevTools screenshots still showed 502s on **bulk uploads** (multiple
+photos at once). Root cause: a hard `asyncio.Semaphore(1)` lock
+inside `closet.py` was serialising every `/analyze` call across the
+whole process — so on 4-photo bulk upload, the 4th call waited
+~70-90 s behind the queue and the Kubernetes ingress killed it with
+a 502, even though the backend ultimately returned 200 OK seconds
+later.
+
+**The lock's original rationale was OBSOLETE:**
+- It was added to prevent OOM from two concurrent `rembg` onnxruntime
+  sessions on a 3 GB Hetzner box.
+- Patch 8 (`DEFER_REMBG_ON_ANALYZE=true`) already removed rembg from
+  the analyze hot path → it's a post-save BackgroundTask now.
+- Patch M14 (`DEFER_RECONSTRUCTION_ON_ANALYZE=true`) just removed
+  Nano Banana from the same hot path → also a post-save BackgroundTask.
+- What remains inside `/analyze`: SegFormer (one short CPU spike,
+  ~2-4 s) + Gemini API calls (network-bound, no local memory).
+  Both safely parallelisable.
+
+**Implementation:**
+- New env var `ANALYZE_CONCURRENCY` (default `3`), read at module
+  import time.
+- `_ANALYZE_LOCK = asyncio.Semaphore(_ANALYZE_CONCURRENCY)`.
+- All four existing `async with _ANALYZE_LOCK` call sites unchanged —
+  they just block fewer requests now.
+
+**Effect on bulk uploads:**
+- Before: 4 photos × 25 s serial = 100 s → 4th hits 502.
+- After: 4 photos × 25 s with concurrency-3 = max ≈ 50 s wall
+  (3 concurrent + 1 queued briefly) → all complete under the 60 s
+  ceiling.
+
+**Kill switch:** Set `ANALYZE_CONCURRENCY=1` on RAM-constrained
+production deploys (e.g. 1 GB Emergent host pod) to restore the
+legacy single-lane behaviour without a code change.
+
+## ✅ Patch M16 — Disable Nano Banana auto-reconstruction entirely (SHIPPED)
+
+**Empirical observation from live closet screenshots after M14:**
+The items the user saw in the closet (charcoal coat with the head
+still visible underneath; pants crop with the coat overlapping the
+top; smeared single sneaker; cap crop with the face below) are all
+**raw SegFormer + rembg + `apply_alpha_intersection`** outputs.
+Nano Banana never actually replaced them in practice — either it
+silently failed, the BackgroundTask hadn't completed yet, or the
+output failed validation. Yet on the hot path it was costing 20-40 s
+per crop in the synchronous era and ~equivalent API spend now in the
+deferred era. Burning that latency + API budget for no visible
+quality gain is the wrong trade.
+
+**Decision (user-confirmed):** Flag Nano Banana off completely on the
+auto-reconstruction path. The triad alone is good enough; the manual
+"Repair Photo" CTA stays available for explicit user requests.
+
+**Implementation:**
+- New config flag `ENABLE_RECONSTRUCTION` in `config.py` (default
+  `false`).
+- `services/reconstruction.should_reconstruct` short-circuits to
+  `(False, [])` at the top of the function when the flag is off.
+  This single gate covers BOTH the inline path (deprecated via M14)
+  AND the deferred BackgroundTask path — neither ever fires.
+- `closet._run_background_reconstruction` has a belt-and-braces early
+  return (logs "SKIPPED — ENABLE_RECONSTRUCTION=false") in case an
+  in-flight save from before the flag flip carries
+  `needs_reconstruction=True` through.
+- `/closet/{id}/reshoot` ("Repair Photo" CTA) intentionally NOT
+  gated — explicit user action, still works.
+
+**Effect:**
+- `/analyze` no longer marks ANY item with `needs_reconstruction=True`.
+- Post-save BackgroundTask for reconstruction never queued.
+- Zero Nano Banana API spend on the auto-pipeline.
+- Closet items now persist with their `clean_image_url` (SegFormer +
+  rembg + `apply_alpha_intersection` triad) as the canonical source;
+  the `thumbnails.pick_source_data_url` priority chain falls to
+  `clean_image_url` since `reconstructed_image_url` will be `None`.
+
+**Verified post-restart (live process):**
+- `settings.ENABLE_RECONSTRUCTION = False`
+- `should_reconstruct({'category':'top'}, [0,200,500,800])` →
+  `(False, [])` (was edge-touching → would have triggered before)
+- All 4 trigger cases (edge-touch / undersized / aspect-mismatch /
+  whole-frame) return `(False, [])`.
+
+**To re-enable in the future:** set `ENABLE_RECONSTRUCTION=true` in
+`.env`. The defer machinery (M14) and concurrency lift (M15) remain
+in place, so re-enabling is safe.
+
+## ✅ Patch M17 — Stream `/analyze` with keepalive bytes (SHIPPED, real 502 fix)
+
+**Why M13–M16 weren't enough on their own:** Live benchmarking on the
+preview pod revealed that the Emergent LLM-key tier throttles
+concurrent `gemini-2.5-flash` calls down to ~1 in flight at a time:
+
+```
+single analyze() wall:     16.1 s
+3 parallel analyze() wall: 52.9 s   (3× sequential, NOT 16 s)
+```
+
+So a 4-item outfit's `_analyse_crops` loop — even with the inner
+`Semaphore(6)` — was effectively serialised at the Gemini API and
+took 40–60 s. The Kubernetes ingress fires its 60 s **idle** timeout
+on the analyze response → 502 Bad Gateway → user sees "Analysis
+failed" even though the backend ultimately returns 200 OK seconds
+later. M13 warmed models (saves cold-start tax). M14 deferred Nano
+Banana (saves 20–40 s/crop). M15 raised concurrency 1→3 (fixes
+queue-behind-the-lock cases). M16 turned reconstruction off entirely.
+None of them helped because the dominant cost is **Gemini latency
+itself**, not anything we could move off the hot path.
+
+**Fix:** turn `/analyze` into a `StreamingResponse` that yields a
+single whitespace byte every `ANALYZE_KEEPALIVE_INTERVAL_S` seconds
+(default **8 s**) while the analyze coroutine runs. JSON allows
+arbitrary leading whitespace per RFC 8259, so the frontend's
+`axios.post(...).then(r => r.data)` parses the final body unchanged.
+The ingress idle timer resets every 8 s and never reaches the 60 s
+ceiling, regardless of how slow Gemini is.
+
+**Implementation summary:**
+- `closet.py::analyze_item_image` returns `StreamingResponse(...,
+  media_type="application/json", headers={"X-Accel-Buffering": "no"})`.
+- Pre-validation HTTPExceptions (bad base64, missing image, missing
+  service) fire **before** streaming starts → still set proper 4xx/503
+  status.
+- After streaming starts, errors are encoded in the body as
+  `{items:[], count:0, _status: <code>, _error: <message>}` — the
+  frontend's `analyzeItemImage` wrapper in `lib/api.js` detects
+  `_status >= 400` and throws so the existing rejection toast path
+  fires identically to the pre-M17 sync endpoint.
+- `X-Accel-Buffering: no` header prevents nginx-style proxies (which
+  the Emergent ingress is built on) from buffering the keepalive
+  bytes and only flushing them when the stream closes.
+- New env var `ANALYZE_KEEPALIVE_INTERVAL_S` (default 8) for tuning.
+- Frontend `axios` timeout raised 90 s → 180 s (the ingress is no
+  longer the limiting factor; Gemini latency is).
+
+**End-to-end timing (real 0003.jpg, 4-item outfit, internal call):**
+```
+endpoint returned: StreamingResponse status=200 content-type=application/json
+first byte at:    0.00 s
+keepalive bytes:  3
+total wall:       40.17 s
+final chunk size: 63 060 bytes
+parsed body:      items=4 count=4
+```
+
+The longest idle gap on the connection is now **8 s**, regardless of
+how long Gemini takes overall — the 502 is structurally impossible.
+
+## ✅ Patch M18 — Batched single-call Gemini analyze (SHIPPED, 60 s → 17 s)
+
+**Why:** M17 closed the 502 vector but the user's DevTools timeline
+still showed `Content Download: 59.90 s` — the analyze body was being
+delivered over 60 s while Gemini chugged through 4 crops one at a time
+(Emergent LLM-key concurrency-1 throttle). Working but slow UX.
+
+**Fix:** Pack all N crops into ONE multi-modal Gemini request and ask
+for an N-element JSON array back. The model does the same amount of
+vision work but only pays network / prompt-prefix / response-prefix
+overhead **once instead of N times**. Batching also bypasses the
+concurrency-1 throttle entirely — the throttle limits CONCURRENT calls,
+not how many images one call can carry.
+
+**Implementation:**
+- New method `garment_vision.analyze_batch(crops_bytes, language)`:
+  builds one `UserMessage(file_contents=[ImageContent(...) × N])`,
+  attaches a "BATCH MODE — return EXACTLY N entries in order" rider
+  to the system prompt, parses the array via the existing
+  `_extract_json` (which already handles fenced code blocks, bare
+  arrays, and `{items: [...]}` wrappers), then runs each entry
+  through the same `_coerce_single_garment` + `_coerce_enums`
+  pipeline as the per-crop path so dress_code enums, title
+  fallbacks, provider tags etc. all line up.
+- New helper `_build_batched_results` materialises per-crop result
+  dicts (label, bbox, crop_base64, reconstruction gating, etc.)
+  from the batched analyses — mirrors the trailing portion of
+  `_analyse_one_crop` so downstream callers see an identical shape
+  regardless of execution path.
+- `_analyse_crops` now tries the batched path first and falls back
+  to the legacy per-crop loop on **any** batch-level failure (rate
+  limit, malformed array, wrong-length response, validation error).
+  That preserves the "one bad crop shouldn't kill the whole outfit"
+  invariant since the per-crop fallback already handles that case.
+- `_batched: true` is tagged on each analysis so we can distinguish
+  batched vs. fallback results in the closet for triage.
+
+**Measured wall time on the dev pod (real test images, post-M18):**
+
+| Items | Per-crop loop (old) | Batched single call | Speed-up |
+|---|---|---|---|
+| 2 |  ~22 s | **20.5 s** | 1.1× |
+| 3 |  ~30 s | **19.7 s** | 1.5× |
+| 4 |  40-60 s | **17.4 s end-to-end** | 2.3-3.4× |
+
+Batching is essentially flat-cost in item count — going from 4
+sequential 16 s calls (=64 s) to one 17 s call is the structural win.
+
+**Verified fallback:** synthetic batch-failure test confirms the
+per-crop loop still runs and returns 2 items in 22 s when the
+batch path is forcibly broken, matching pre-M18 behaviour.
+
+**Combined Patch M13–M18 effect on the original "Analysis failed" UX:**
+- Original (pre-M13): 60-100 s, often 502 Bad Gateway on first attempt.
+- After M13 (warmup): saved 4-5 s of cold-start tax.
+- After M14 (defer reconstruction): saved ~20-40 s/crop of inline
+  Nano Banana cost.
+- After M15 (concurrency 1 → 3): bulk uploads no longer queue serially
+  behind a single-slot lock.
+- After M16 (kill Nano Banana auto-pipe): zero API spend on a step that
+  produced nothing visible.
+- After M17 (streaming keepalive): 502 is structurally impossible
+  regardless of how long analyze takes.
+- After M18 (batched single Gemini call): **4-item outfit /analyze
+  drops to ~17 s end-to-end — under one third of the 60 s ingress
+  ceiling.**
+- After M19 (NDJSON stream + frontend incremental render): user sees
+  **placeholder cards at 7.5 s** and items fill in every ~1 s after.
+  Perceived wait roughly halved.
+
+## ✅ Patch M19 — End-to-end streaming with Gemini `stream=True` (Option B shipped)
+
+**Why:** M18 dropped a 4-item outfit /analyze from 60 s → 17 s, but the
+user still saw a 17 s blank wait — the entire batched JSON body lands
+at once. The user explicitly asked for `stream=True` so cards pop in
+as Gemini emits them.
+
+**Implementation (backend):**
+- New `_scan_complete_json_objects(text, start_pos)` — brace-counting
+  / quote-tracking parser that extracts complete `{...}` objects from
+  a growing buffer of streamed text. Tolerates fenced code blocks,
+  partial trailing objects. ~50 LoC, no `ijson` dependency.
+- New `_build_batch_litellm_messages(n, crops, language)` — shared
+  prompt + image-attachment builder for both batched paths.
+- New `GarmentVisionService.analyze_batch_stream(...)` — async
+  generator using `litellm.acompletion(stream=True)`. Accumulates
+  text deltas, runs the array scanner after every chunk, yields each
+  newly-completed object via `_coerce_single_garment` +
+  `_coerce_enums`. Tagged with `_streamed: true`.
+- New `GarmentVisionService.analyze_outfit_stream(...)` — high-level
+  orchestrator that reuses existing detect → crop → matte chain
+  and drives `analyze_batch_stream`. Emits frames:
+  `{type:"detect", count, items_meta:[...]}` →
+  `{type:"item", index, analysis, needs_reconstruction, ...}` →
+  `{type:"done", count}` or `{type:"error", status, message}`.
+- `/closet/analyze` inspects `Accept` header. Returns
+  NDJSON-streaming `StreamingResponse` when
+  `application/x-ndjson` is requested AND `multi=true`. Otherwise
+  keeps the M17 keepalive-whitespace JSON path — fully backwards
+  compatible.
+
+**Implementation (frontend):**
+- `lib/api.js::analyzeItemImage(body, callbacks?)`: when callbacks
+  supplied, upgrades to `fetch` + `ReadableStream.getReader()` with
+  `Accept: application/x-ndjson`. Splits on newlines, JSON-parses
+  each frame, dispatches to handlers (`onDetect`, `onItem`,
+  `onItemSkip`, `onError`, `onDone`). Returns aggregate
+  `{items, count, detect}` so callers that only want the final
+  state don't need to handle frames.
+- `pages/AddItem.jsx::analyzeCard` rewritten: on `onDetect`,
+  **splits the original upload card into `count` placeholder cards**
+  (each carrying its bbox crop as preview) — user sees N
+  "scanning…" cards within ~7 s of upload. On `onItem`, hydrates
+  the matching placeholder by index. On `onItemSkip`, removes the
+  placeholder.
+
+**Measured wall time on the dev pod (real 4-item outfit, NDJSON path):**
+
+| Stage | Pre-M19 (M18 only) | Post-M19 |
+|---|---|---|
+| First placeholder visible | n/a (17 s blank) | **7.5 s** |
+| First card filled | 17 s | 17.9 s |
+| Last card filled | 17 s | 21.4 s |
+| Perceived wait | 17 s silence | ~10 s of activity |
+
+Total wall is slightly higher (~4 s streaming overhead) but the
+perceived wait is roughly halved because the user sees N placeholder
+cards from 7.5 s onward.
+
+**Bulk-upload UX (5 photos):** with `_ANALYZE_LOCK = Semaphore(3)`
+(M15), 3 start immediately and 2 queue. Each in-flight photo emits
+its detect frame at ~7 s and items thereafter; queued photos detect
+as soon as a LOCK slot frees. User sees N×count placeholder cards
+across the whole batch within ~8-15 s, all fill over the next
+~20-25 s. **No more 60 s blank wall on any photo count.**
+
+**Reliability:**
+- Frame parsing fault-tolerant (malformed objects silently dropped).
+- Batch-stream failure falls back to per-crop loop (M18 invariant
+  preserved).
+- Pre-validation HTTPExceptions still fire as 4xx/503 before stream
+  opens.
+- Frontend axios path still works for any caller that doesn't pass
+  callbacks.
+
+## ✅ Patch M20 — Cross-page work tracker + last-item polish bug fix (SHIPPED)
+
+**Three things this patch ships, all motivated by user feedback after M19:**
+
+### M20.a — "Last item stuck on Polishing photo…" bug fix
+**Root cause:** The Phase O.6 frontend poll in `Closet.jsx` was
+calling `closetStore.upsert(polledItem)` to merge the freshly-fetched
+GET response into the local store. The backend's
+`_run_background_matte` used `$unset thumbnail_data_url` (intentionally
+— it invalidates the cached optimistic JPEG so the lazy backfill
+regenerates from the polished cutout). But MongoDB **omits unset
+fields from query results entirely**, so the merge
+`{...items[idx], ...polledItem}` KEPT the stale optimistic
+`thumbnail_data_url` and `bestImageUrl` resolved to the
+not-yet-polished JPEG. User saw the badge briefly clear, then the
+thumbnail stayed unprocessed-looking — interpreted as "the last item
+keeps showing Polishing photo…".
+
+**Fix (3-layer defence):**
+1. **Backend (`closet.py::_run_background_matte` + `_run_background_reconstruction`):**
+   replaced `$unset thumbnail_data_url` with `$set thumbnail_data_url: None`.
+   MongoDB now returns the field as null, the frontend merge
+   overwrites the stale local data URL, and the resolver falls
+   through to `clean_image_url` (the polished cutout).
+2. **Frontend (`closetStore.upsert`):** defensive — when an incoming
+   patch flips `clean_image_status` to `'ready'` (or supplies a fresh
+   `clean_image_url` / `reconstructed_image_url`) and the incoming
+   patch doesn't carry its own `thumbnail_data_url`, null the local
+   one so the fix works on older backends too.
+3. **Frontend (`Closet.jsx` polling):** robustness rewrite.
+   - Read `closetStore.getSnapshot().items` inside `tick` instead of
+     the stale closure's `store.items`.
+   - Persist `attempt` + `signature` in refs so the backoff actually
+     backs off across upsert-triggered re-mounts (was resetting to
+     3 s flat on every items mutation).
+   - Cap polling lifetime at `POLL_MAX_ATTEMPTS = 30` (~5 min wall
+     clock); on exhaustion fire one final `incrementalSync()` and
+     give up.
+   - Apply upserts even if the effect was cancelled mid-await (data
+     is fresh, dropping it would force the next mount to refetch).
+
+### M20.b — Cross-page "Analysis in progress" floater (Task 1)
+**Implementation:**
+- `lib/workStore.js` — singleton work tracker (useSyncExternalStore
+  pattern). Tracks active `/analyze` jobs (`analyzeJobs` keyed by
+  card id) and pending polish items (`polishPendingIds` set with a
+  per-item 5-minute timeout). Owns a single global poller running
+  every 3 s — starts when items are registered, stops when the set
+  drains. So the work survives navigation away from /add.
+- `components/WorkProgressFloater.jsx` — bottom-right pill,
+  glass-morphism style. Subscribes to `workStore` via
+  `useSyncExternalStore`, shows compact "Analysing N/M items" +
+  "Polishing N/M photos" rows with thin progress bars. Auto-hides
+  ~1.2 s after the last job drains for a visible "done" beat.
+- `AddItem.jsx::analyzeCard` calls `workStore.registerAnalyze` at
+  entry, `updateAnalyze({items, total})` on each NDJSON frame, and
+  `completeAnalyze` in `finally` (clears phantom jobs on error too).
+
+### M20.c — Global "Polishing" progress + "You have news" toast (Task 2)
+**Implementation:**
+- `AddItem.jsx::saveAll::settle()` — after each successful
+  `api.createItem`, items returned with `clean_image_status:
+  "pending"` are collected and passed to
+  `workStore.registerPolishItems()`. The store's global poller picks
+  them up and updates `closetStore` as each transitions out of
+  "pending".
+- `Closet.jsx` polling effect now ALSO calls
+  `workStore.registerPolishItems(pendingIds)` on every effect mount
+  so items inherited from a previous session (user closes the tab
+  mid-polish, reopens later) also surface on the floater.
+- `components/WorkBatchDoneToast.jsx` — subscribes to
+  `workStore.onBatchDone`. Fires a single sonner toast titled "You
+  have news in your closet" the moment the last item in the current
+  polish batch resolves; the toast has an "Open closet" action that
+  navigates to /closet.
+- `Closet.jsx::ItemCardInner` — the per-card "Polishing photo…"
+  text badge is KEPT (user feedback Patch M20.1 — useful to know
+  WHICH cards are still mid-polish). The badge and the global
+  floater coexist by design: the floater shows aggregate progress
+  ("Polishing N/M photos") and the per-card badge identifies the
+  specific in-flight items.
+
+## ✅ Patch M20.2 — Save-while-scanning auto-save queue (SHIPPED)
+
+**Bug:** User uploads N photos, presses Save the moment the FIRST
+one finishes analysing (button "turns black" = enabled by the first
+ready card). Only the first photo lands in the closet; the still-
+``scanning`` N-1 photos vanish silently. The previous ``saveAll``
+filtered ``cards.filter(c => c.status === 'ready' || 'error')`` and
+then ``nav('/closet')`` immediately — so scanning cards were dropped
+on unmount.
+
+**Fix:** Auto-save queue. When Save is pressed mid-batch, persist
+the ready cards (optimistic upsert + background settle as before)
+but DON'T navigate. Instead set ``pendingAutoSave=true`` and stay on
+/add. The user sees:
+- a toast "Saved X — waiting for Y more to finish analysing"
+- the Save button label flips to "Saving — waiting for analysis…" with a spinner
+- the global ``WorkProgressFloater`` continues to show analyze progress
+
+A small effect (`useEffect`) watches the cards array; once no card
+is ``scanning`` anymore it re-fires ``saveAll`` via a ``saveAllRef``
+to flush the newly-ready cards into the closet. ``saveAll`` itself
+navigates only when there's nothing left scanning.
+
+**Edge cases handled:**
+- All cards still scanning at Save time → no ready ones to persist,
+  just set ``pendingAutoSave=true`` and show "Waiting for N photos…"
+  toast.
+- A scanning card transitions to ``error`` (no title) → counts as
+  non-scanning, queue drains, ``saveAll`` filters it as skipped
+  (no infinite loop).
+- Multi-garment detection (`handleDetect` splits one upload into N
+  sub-cards) → sub-cards inherit scanning status from
+  ``buildBaseCard``; queue waits for ALL sub-cards to reach a
+  terminal state before draining.
+- ``saveAllRef`` pattern avoids stale closure in the effect — the
+  effect always calls the latest ``saveAll`` (with the latest
+  ``cards`` snapshot).
+
+**Save button gating updated:** previously
+``disabled={saving || bgBatch || !cards.some(c => c.status==='ready')}``.
+Now also disables on ``pendingAutoSave`` (to prevent re-entrant
+calls) and enables when scanning cards exist (so the user can queue
+them).
+
+**Both `WorkProgressFloater` and `WorkBatchDoneToast` are mounted at
+App root** (already scaffolded), so they render on every authenticated
+page including /add, /closet, /home, /stylist, etc.
+
+## Still open after this session (in priority order)
+
+1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
+   with coat tails visible in the top get classified as "Overcoat".
+   Fix in `garment_vision.analyze_outfit`: pass SegFormer's category
+   as a strict constraint in the prompt (`"this crop is pre-classified
+   as {category} — you MUST respect this"`) and post-validate; if
+   Gemini still disagrees, log + overwrite with the SegFormer category.
+   Sub-category / title / colour / material stay Gemini's call.
+
+2. **NEW — blouse-skirt rim from dilation overspill (P1)** — Screenshot 2
+   shows the dilated alpha intersection pulling in a thin band of skirt
+   waistband at the bottom of a top crop. Dilation is correct in
+   principle (it rescued the puffy sleeves) but the 2.5% short-edge
+   floor is slightly hot on tight torso crops. Two options to evaluate
+   next session:
+   - Per-category dilation budget: tops/bottoms get ~1.5% short-edge,
+     accessories/footwear keep 2.5% (they need more halo).
+   - Soft taper: dilate but use a falloff weight at the dilated edge
+     rather than the current hard min(rembg, dilated_mask) — admit halo
+     pixels with reduced alpha.
+
+3. **Issue 4 (P1)** — Unsloth GGUF `--mmproj` `KeyError: 'image_mean'`.
+   ✅ **RESOLVED** (out-of-band). Artifacts benchmarked successfully and
+   stored on user's PC + Google Drive. Ready for VPS upload + cutover
+   when the user decides to swap the live Eyes GGUFs.
+
+4. **Task 3 (P1)** — Vertex AI Try-On widget. ⏸ **ON HOLD** (user-paused,
+   not blocked). `.env` keys (`GOOGLE_APPLICATION_CREDENTIALS` +
+   `VERTEX_*`) still need to be populated when the user is ready to
+   resume.
+
+## Critical notes for the next agent (DO NOT IGNORE)
+
+- **NEVER reintroduce `HF_TOKEN` / `EYES_HF_TOKEN` / HuggingFace
+  `transformers` for the Eyes service.** Those were sabotaged additions
+  in a previous fork, now purged. Target architecture is
+  **`llama.cpp` + GGUF**. Sabotaged docs are quarantined under
+  `/app/quarantine/2026-05-sabotage/` — do not trust files there.
+- `_run_background_matte(item_id, raw_bytes, category)` now **requires
+  the `category` arg**. Any new caller must pass `payload.category` or
+  the SegFormer mask picker will fall back to the largest-blob heuristic
+  and the cutout quality will silently regress.
+- `_recover_paired_footwear` is **intentionally conservative**: if the
+  second SegFormer pass finds nothing on the missing half, the mask is
+  unchanged so single-boot product shots stay faithful. **Do not "fix"
+  this** — it's a product requirement.
+- Card thumbnail priority chain in `thumbnails.pick_source_data_url`
+  prefers `reconstructed_image_url` (from `/clean-background`) over
+  `clean_image_url` (from `_run_background_matte`). Now that Patch 12h
+  shipped, both endpoints produce equivalent triad output, so the order
+  is no longer a regression risk — but keep this in mind when adding
+  any third matte path.
+- `apply_alpha_intersection` returns `None` when SegFormer mask covers
+  <40% of bbox (Patch 12g). Caller MUST treat `None` as "keep rembg-
+  only output", never as an error.

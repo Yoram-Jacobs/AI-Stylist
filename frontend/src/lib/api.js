@@ -270,8 +270,133 @@ export const api = {
       onLine: onEvent,
       signal,
     }),
-  analyzeItemImage: (body) =>
-    client.post('/closet/analyze', body, { timeout: 90000 }).then((r) => r.data),
+  analyzeItemImage: (body, callbacks) => {
+    // Patch M19 (May 2026) — Optional NDJSON streaming.
+    //
+    // When called with a ``callbacks`` object containing handlers for
+    // ``onDetect`` / ``onItem`` / ``onItemSkip`` / ``onError`` /
+    // ``onDone``, we open a ``fetch`` to /closet/analyze with
+    // ``Accept: application/x-ndjson`` and feed each newline-
+    // terminated JSON frame to the matching handler as it arrives
+    // from Gemini's stream. The frontend uses this to render placeholder
+    // cards within ~6 s of upload (DETECT frame) and progressively
+    // fill them as Gemini emits each item (~1 s apart).
+    //
+    // Without callbacks the call falls back to the legacy axios JSON
+    // path (still works on the new backend — the streaming endpoint
+    // only kicks in for clients that explicitly opt-in via the
+    // ``Accept`` header).
+    if (
+      !callbacks ||
+      (!callbacks.onItem &&
+        !callbacks.onDetect &&
+        !callbacks.onError &&
+        !callbacks.onDone)
+    ) {
+      return client
+        .post('/closet/analyze', body, { timeout: 180000 })
+        .then((r) => {
+          const data = r.data || {};
+          if (data && data._status && Number(data._status) >= 400) {
+            const err = new Error(data._error || 'Analyze failed');
+            err.response = { status: Number(data._status), data };
+            throw err;
+          }
+          return data;
+        });
+    }
+
+    // Streaming path.
+    const url = `${API_BASE}/closet/analyze`;
+    const token = tokenStore.get();
+    return (async () => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/x-ndjson',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        // Pre-validation HTTPException (4xx / 5xx) — body is JSON.
+        let detail = `HTTP ${resp.status}`;
+        try {
+          const j = await resp.json();
+          detail = j?.detail || j?._error || detail;
+        } catch (_e) {
+          /* keep generic detail */
+        }
+        const err = new Error(detail);
+        err.response = { status: resp.status, data: { detail } };
+        throw err;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      const emittedItems = [];
+      let detectMeta = null;
+      let doneCount = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Split on newlines; keep any trailing partial line in buffer.
+        const newlineIdx = buffer.lastIndexOf('\n');
+        if (newlineIdx < 0) continue;
+        const lines = buffer.slice(0, newlineIdx).split('\n');
+        buffer = buffer.slice(newlineIdx + 1);
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (!line) continue;
+          let frame;
+          try {
+            frame = JSON.parse(line);
+          } catch (_e) {
+            continue;
+          }
+          switch (frame.type) {
+            case 'detect':
+              detectMeta = frame;
+              callbacks.onDetect?.(frame);
+              break;
+            case 'item':
+              emittedItems[frame.index] = frame;
+              callbacks.onItem?.(frame);
+              break;
+            case 'item_skip':
+              callbacks.onItemSkip?.(frame);
+              break;
+            case 'done':
+              doneCount = frame.count || 0;
+              callbacks.onDone?.(frame);
+              break;
+            case 'error': {
+              const err = new Error(frame.message || 'Analyze failed');
+              err.response = {
+                status: frame.status || 503,
+                data: { detail: frame.message },
+              };
+              callbacks.onError?.(frame);
+              throw err;
+            }
+            default:
+              break;
+          }
+        }
+      }
+      // Build a JSON-shaped fallback so callers that want a final
+      // aggregate can ``await analyzeItemImage(..., callbacks)`` and
+      // still use ``.items`` / ``.count``.
+      const items = emittedItems.filter(Boolean);
+      return {
+        items,
+        count: doneCount || items.length,
+        detect: detectMeta,
+      };
+    })();
+  },
   searchCloset: (body) =>
     client.post('/closet/search', body, { timeout: 30000 }).then((r) => r.data),
   patchItem: (id, body) => client.patch(`/closet/${id}`, body).then((r) => r.data),

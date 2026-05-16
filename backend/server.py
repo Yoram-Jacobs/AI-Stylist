@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT_DIR))
 from app.api.v1.router import api_v1_router  # noqa: E402
 from app.db.database import ensure_indexes, get_client  # noqa: E402
 from app.services.scheduler import shutdown_scheduler, start_scheduler  # noqa: E402
+from app.services.warmup import warmup_models  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -105,6 +106,19 @@ async def on_startup() -> None:
         start_scheduler()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Scheduler start skipped: %s", exc)
+    # Patch M13 (May 2026) — Fire-and-forget warmup of SegFormer + rembg
+    # + FashionCLIP so the FIRST user upload doesn't pay the cumulative
+    # cold-init tax that previously pushed /closet/analyze past the
+    # ingress 60s ceiling (Issue 3 "Analysis failed on first attempt").
+    # NEVER awaited inline: the supervisor / k8s readiness probe needs
+    # the backend to report ready immediately. The task self-isolates
+    # all exceptions and every dependent service still has its own
+    # lazy fallback if the warm-up fails.
+    try:
+        import asyncio as _asyncio
+        _asyncio.create_task(warmup_models())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Model warmup task not scheduled: %s", exc)
 
 
 @app.on_event("shutdown")

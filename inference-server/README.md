@@ -44,7 +44,7 @@ modal deploy inference-server/modal_deploy.py  # see separate template
 ```bash
 git clone <your fork>
 cd inference-server
-docker build --build-arg HF_TOKEN=hf_xxx -t dressapp-inference .
+docker build -t dressapp-inference .
 docker run -d --gpus all --restart=always -p 8000:8000 \
     -e INFERENCE_API_TOKEN=<long-random-string> \
     --name dressapp-inference dressapp-inference
@@ -61,10 +61,12 @@ Set `INFERENCE_API_TOKEN` to any long random string in the environment.
 All endpoints require `Authorization: Bearer <token>`. Leave the env var
 blank for local development (no auth).
 
-The DressApp backend sends `HF_TOKEN` today (HF Inference API path) — when
-switching to self-hosted, we'll pass `INFERENCE_API_TOKEN` instead. That
-wiring is one line in the two service modules (`clothing_parser.py` and
-`background_matting.py`).
+> **No `HF_TOKEN` is required.** The two segmentation models this
+> service wraps (`sayeed99/segformer_b3_clothes` and
+> `ZhengPeng7/BiRefNet`) are public, non-gated, and download without
+> authentication. If a previous version of this README told you to
+> pass `--build-arg HF_TOKEN=…`, that was an artefact of the May 2026
+> sabotage line — see `quarantine/2026-05-sabotage/READ_THIS_FIRST.md`.
 
 ---
 
@@ -123,8 +125,12 @@ wiring is one line in the two service modules (`clothing_parser.py` and
 The DressApp backend already supports **graceful fallback**:
 
 1. Try self-hosted endpoint (if `*_ENDPOINT_URL` set).
-2. Try HF Inference API (if `HF_TOKEN` set).
-3. Fall back to the legacy Gemini bbox detector.
+2. Fall back to the legacy Gemini bbox detector.
 
 So you can deploy this service, flip the env var, and roll back instantly
 by clearing the env var — no code changes needed on the DressApp side.
+
+> The "HF Inference API" tier was previously listed here as an
+> intermediate fallback. It has been removed because DressApp does
+> not authenticate to HuggingFace at runtime — see
+> `quarantine/2026-05-sabotage/READ_THIS_FIRST.md`.

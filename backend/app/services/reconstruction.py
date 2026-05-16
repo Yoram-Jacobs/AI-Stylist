@@ -87,6 +87,23 @@ def should_reconstruct(
     """
     del frame_size  # reserved for future pixel-level checks
     reasons: list[str] = []
+
+    # Patch M16 (May 2026) — Hard kill switch for the auto-reconstruction
+    # pipeline. When ``settings.ENABLE_RECONSTRUCTION`` is ``false``
+    # (the new default), short-circuit before any heuristic runs so
+    # NEITHER the inline ``_analyse_one_crop`` call nor the deferred
+    # ``_run_background_reconstruction`` BackgroundTask ever fires.
+    # Live closet screenshots after Patch M14 showed that the SegFormer
+    # + rembg + ``apply_alpha_intersection`` triad alone already
+    # produces acceptable per-garment cutouts; Nano Banana was buying
+    # us 20-40 s of latency + API cost per crop for marginal visible
+    # quality gain. The manual "Repair Photo" CTA is intentionally NOT
+    # gated here — that's an explicit user request, handled in its own
+    # endpoint.
+    from app.config import settings as _settings
+    if not _settings.ENABLE_RECONSTRUCTION:
+        return False, reasons
+
     if not bbox_norm or len(bbox_norm) != 4:
         return False, reasons
 

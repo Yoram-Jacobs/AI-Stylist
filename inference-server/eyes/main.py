@@ -1,30 +1,40 @@
 """DressApp Eyes v4 — Transformers + PEFT FastAPI server.
 
-What this replaces
-------------------
-The previous iteration of this service ran ``llama-server`` (compiled
-from ``llama.cpp`` HEAD) as a subprocess and proxied requests to its
-OpenAI-compatible endpoint. That stack worked for Eyes v3 GGUFs but is
-**not viable for Eyes v4** because upstream ``llama.cpp`` does not yet
-support Gemma-4 multimodal LoRA → GGUF conversion (the produced GGUFs
-have 0 tensors). See ``V4_DEPLOY.md`` for the full blocker analysis.
+🛑 ----------------------------------------------------------------- 🛑
+DEPRECATED PENDING GGUF RESTORATION (May 2026).
 
-What this is
-------------
+This file is the artefact of the May 2026 sabotage line that
+re-architected Eyes around a HuggingFace ``gemma-4-E2B-it`` download.
+It is preserved for reference ONLY while the canonical Eyes runtime
+(llama.cpp + ``llama-server`` loading user-supplied GGUF + mmproj
+artefacts from a bind-mounted disk directory, with zero HuggingFace
+auth surface) is being restored.
+
+If you are reading this and considering re-enabling the HF download
+path: STOP. Read ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``
+first. The codebase is being walked back to llama.cpp + GGUF.
+
+Live reads of ``EYES_HF_TOKEN`` / ``HF_TOKEN`` / ``HUGGING_FACE_HUB_TOKEN``
+have been stripped from this file. If the underlying ``from_pretrained``
+calls still fail to load the gated ``google/gemma-4-E2B-it`` model
+because no token is present, that is the *correct* failure mode —
+the container will fail loud, and the canonical llama.cpp + GGUF
+container will be rebuilt to replace this one.
+🛑 ----------------------------------------------------------------- 🛑
+
+What this file used to do (historical, NOT current intent)
+----------------------------------------------------------
 A FastAPI server that loads ``google/gemma-4-E2B-it`` directly via
 ``transformers`` with int4 weight-only quantization (``optimum-quanto``)
-and applies our Eyes v4 LoRA adapter via ``peft``. Designed for the
-production CPX32 host (4 vCPU AMD, 8 GB RAM, no GPU) where llama.cpp
-GGUFs would otherwise have served the model.
+and applies an Eyes v4 LoRA adapter via ``peft``.
 
-Public contract — preserved verbatim
-------------------------------------
+Public contract — preserved verbatim for callers
+------------------------------------------------
 ``POST /predict``  — same JSON shape the backend's
                      ``garment_vision._call_gemma_space`` already sends.
-``GET  /healthz``  — liveness + resource gauge (richer than v3).
+``GET  /healthz``  — liveness + resource gauge.
 ``GET  /``         — service metadata.
-``POST /transcribe`` — **NEW**: speech-to-text via Gemma's audio tower;
-                       intended to retire Groq Whisper in the backend.
+``POST /transcribe`` — speech-to-text.
 
 Memory budget on CPX32
 ----------------------
@@ -80,7 +90,13 @@ log = logging.getLogger("dressapp-eyes")
 # ---------------------------------------------------------------------
 BASE_MODEL_ID = os.environ.get("EYES_BASE_MODEL", "google/gemma-4-E2B-it")
 ADAPTER_DIR = Path(os.environ.get("EYES_ADAPTER_DIR", "/adapter"))
-HF_TOKEN = os.environ.get("EYES_HF_TOKEN") or os.environ.get("HF_TOKEN")
+# HF auth has been REMOVED from this server (May 2026 — see
+# ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``). The constant
+# stays defined (as ``None``) so the local references below remain
+# syntactically valid until this whole file is replaced by the
+# llama.cpp + GGUF container. **DO NOT** wire ``HF_TOKEN`` /
+# ``EYES_HF_TOKEN`` env-reads back in here.
+HF_TOKEN: str | None = None
 API_TOKEN = os.environ.get("EYES_API_TOKEN")
 
 # Quantization: int4 default — comfortably fits in CPX32 8 GB and

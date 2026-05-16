@@ -73,7 +73,16 @@ _LABEL_MAP: dict[str, str | None] = {
 # to vanish entirely. The CCP-Ninja benchmark exposed this as a 0%
 # recall on every accessory class. Lower the bar for the categories
 # that are intrinsically small.
-_MIN_AREA_FRAC_DEFAULT = 0.005       # tops, bottoms, dresses
+# Patch 12 (May 2026) — Garment-class threshold bumped from 0.005 to
+# 0.010 (0.5% → 1.0% of frame) after the closet test revealed that
+# SegFormer regularly hallucinates a ~0.5% phantom Skirt/Pants on the
+# lower edge of a top-only photo (the shadow band where the shirt hem
+# meets the body). The lower threshold filtered too few of those out
+# and the user saw blurred phantom cards in their closet. Real garment
+# detections on a full-body shot are always at least a few percent of
+# the frame, so this is safe. Accessories / footwear / headwear keep
+# their tighter thresholds because they're intrinsically small.
+_MIN_AREA_FRAC_DEFAULT = 0.010       # tops, bottoms, dresses
 _MIN_AREA_FRAC_PER_CATEGORY: dict[str, float] = {
     "accessory": 0.0005,             # sunglasses, belts, bags, scarves
     "footwear":  0.0008,             # individual shoes/socks at full-body
@@ -164,6 +173,132 @@ def _run_inference(pil_full: Image.Image) -> np.ndarray:
     )
     pred = upsampled.argmax(dim=1).squeeze(0).cpu().numpy().astype(np.int32)
     return pred
+
+
+# Patch 12e (May 2026) — pair-recovery thresholds for footwear.
+#   * ``_PAIR_ASYMMETRY_THRESHOLD`` — if smaller_half_mass / larger_half_mass
+#     is below this, the first-pass mask is suspect for a missing partner.
+#   * ``_PAIR_OVERLAP_PCT`` — when re-cropping the source image to the
+#     missing half, include this much of the *dominant* side so the
+#     SegFormer model has anatomical context for the half it's parsing
+#     (a lone leg-only crop often produces a 0-shoe result; a leg + a
+#     glimpse of the other shoe usually fires correctly).
+_PAIR_ASYMMETRY_THRESHOLD: float = 0.30
+_PAIR_OVERLAP_PCT: float = 0.15
+
+
+def _recover_paired_footwear(
+    full_image: Image.Image,
+    shoes_mask: np.ndarray,
+) -> np.ndarray:
+    """Patch 12e (May 2026) — Option B2 second-pass pair recovery.
+
+    Detects whether a unified ``Shoes`` mask is anatomically asymmetric
+    (one half of the frame carries < 30 % the mass of the other), and
+    if so re-runs SegFormer on the *missing* half of the source image
+    to look for the partner boot the first pass missed.
+
+    Fidelity rule
+    -------------
+    If the second pass also returns nothing in the missing half (e.g.
+    the photo is a profile shot, or the partner shoe is occluded by an
+    object or the model's pose), the function returns the original
+    mask unchanged. We never fabricate a partner the source photo
+    doesn't show — staying loyal to the user's upload is explicitly
+    required by product spec.
+
+    Why a second SegFormer pass is needed
+    -------------------------------------
+    SegFormer's per-pixel argmax has a strong global prior: if one
+    boot dominates the lower-frame footwear region, the model can
+    under-confidently classify the partner boot as "Right-leg" /
+    "Skin" / background. Cropping to a half-frame removes that prior
+    and forces the model to reconsider; on a clean photo with two
+    boots, the second pass routinely recovers the missed partner.
+
+    Cost
+    ----
+    ~2-4 s of CPU inference per asymmetric footwear detection. Fires
+    on a small fraction of uploads (only when symmetry is broken).
+    No-op on photos where both boots were detected cleanly.
+    """
+    if shoes_mask is None or shoes_mask.size == 0:
+        return shoes_mask
+    H, W = shoes_mask.shape
+    if H <= 0 or W <= 0:
+        return shoes_mask
+    mid = W // 2
+    left_mass = int(shoes_mask[:, :mid].sum())
+    right_mass = int(shoes_mask[:, mid:].sum())
+    total_mass = left_mass + right_mass
+    if total_mass == 0:
+        return shoes_mask
+    smaller = min(left_mass, right_mass)
+    larger = max(left_mass, right_mass)
+    if larger == 0 or (smaller / larger) >= _PAIR_ASYMMETRY_THRESHOLD:
+        # Already balanced — both halves carry comparable mass.
+        return shoes_mask
+
+    missing_left = left_mass < right_mass
+    overlap_px = int(W * _PAIR_OVERLAP_PCT)
+    if missing_left:
+        crop_x1, crop_x2 = 0, min(W, mid + overlap_px)
+    else:
+        crop_x1, crop_x2 = max(0, mid - overlap_px), W
+    if crop_x2 - crop_x1 <= 4:
+        return shoes_mask
+
+    half_img = full_image.crop((crop_x1, 0, crop_x2, H))
+    try:
+        half_class_mask = _run_inference(half_img)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "_recover_paired_footwear: second-pass inference failed: %s",
+            repr(exc)[:120],
+        )
+        return shoes_mask
+
+    # Find every class id whose label looks like a shoe in this model.
+    shoes_labels = {"Left-shoe", "Right-shoe", "Shoes"}
+    shoes_class_ids = [
+        cid for cid, label in _id2label.items() if label in shoes_labels
+    ]
+    if not shoes_class_ids:
+        return shoes_mask
+    half_shoes = np.zeros_like(half_class_mask, dtype=np.uint8)
+    for cid in shoes_class_ids:
+        half_shoes |= (half_class_mask == cid).astype(np.uint8)
+
+    # Translate the half-image mask back to full-image coordinates and
+    # restrict the union to the *missing* half only — the overlap zone
+    # on the dominant side is already covered by the original mask.
+    full_shoes_new = np.zeros_like(shoes_mask)
+    full_shoes_new[:, crop_x1:crop_x2] = half_shoes
+    if missing_left:
+        full_shoes_new[:, mid:] = 0
+    else:
+        full_shoes_new[:, :mid] = 0
+
+    new_mass = int(full_shoes_new.sum())
+    if new_mass < max(64, int(0.0005 * H * W)):
+        # Found nothing meaningful on the missing half → faithful to source.
+        logger.info(
+            "_recover_paired_footwear: second pass found no partner on the "
+            "%s half (mass=%d px, threshold=%d px) — keeping single-boot mask "
+            "faithful to the original photo",
+            "left" if missing_left else "right",
+            new_mass, max(64, int(0.0005 * H * W)),
+        )
+        return shoes_mask
+
+    merged = np.maximum(shoes_mask, full_shoes_new).astype(np.uint8)
+    logger.info(
+        "_recover_paired_footwear: recovered missing partner on %s half "
+        "(added %d px, mass %d → %d on %dx%d frame)",
+        "left" if missing_left else "right",
+        new_mass, int(shoes_mask.sum()), int(merged.sum()), W, H,
+    )
+    return merged
 
 
 # Classes whose mask should ALWAYS be treated as a single instance,
@@ -376,6 +511,147 @@ async def _call_self_hosted(
     return out
 
 
+# Categories that participate in cross-label NMS. Accessories /
+# footwear / headwear are deliberately excluded — a belt on pants, a
+# bag in front of a dress, shoes overlapping the hem of trousers are
+# all legitimate overlaps that the user expects to see as separate
+# cards in their closet.
+_NMS_CATEGORIES: frozenset[str] = frozenset({"top", "bottom", "dress"})
+
+# Two thresholds, OR-combined:
+#   * containment of smaller-in-larger — catches "phantom inside real"
+#     (e.g. SegFormer's tight Upper-clothes mask fully inside its
+#     looser Dress mask on a long coat).
+#   * IoU — catches "two overlapping masks of similar size" (e.g.
+#     a pair of trousers split by a shadow into two adjacent blobs).
+# Empirically 0.70 / 0.50 fire on the coat / split-trousers cases in
+# the test closet without firing on legitimately-overlapping garments
+# like a tucked-in shirt + visible waistband.
+_NMS_CONTAINMENT_THRESHOLD: float = 0.70
+_NMS_IOU_THRESHOLD: float = 0.50
+
+
+def _suppress_overlapping_garments(
+    by_label: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Patch 12 (May 2026) — inter-label NMS for SegFormer outputs.
+
+    Removes / merges per-label detections that occupy substantially the
+    same pixels but were classified under different SegFormer labels.
+
+    Two cases this fixes
+    --------------------
+    1. **Phantom-inside-real** (e.g. long coat fires both ``Upper-clothes``
+       and ``Dress`` — the tight Upper-clothes mask sits entirely inside
+       the looser Dress mask). Containment-of-smaller-in-larger ≥
+       ``_NMS_CONTAINMENT_THRESHOLD`` → drop the smaller.
+
+    2. **Split-by-shadow** (e.g. trousers fire ``Pants`` on the upper
+       half and ``Skirt`` on the lower half because a shadow band
+       confused the per-pixel classifier). IoU is low but containment
+       on the smaller half is also low — instead this is caught by
+       same-category masks that *don't* overlap much being unioned
+       (see below).
+
+    Algorithm
+    ---------
+    * Sort garment-class entries (top / bottom / dress) by descending
+      mask area.
+    * For each smaller entry, compare against every larger entry kept
+      so far:
+        - If ``containment ≥ 0.70`` OR ``IoU ≥ 0.50``:
+            - **Same category** → union the smaller mask into the
+              larger and drop the smaller (handles "Pants" + "Skirt"
+              both = "bottom" overlapping a single trouser).
+            - **Different category** → drop the smaller (handles
+              "Upper-clothes" inside "Dress").
+
+    Accessories, footwear, and headwear are passed through untouched.
+
+    Idempotent and safe on empty / single-entry input.
+    """
+    if not by_label:
+        return by_label
+
+    nms_items: list[tuple[str, dict[str, Any], int]] = []
+    passthrough: dict[str, dict[str, Any]] = {}
+    for lbl, item in by_label.items():
+        if item.get("category") in _NMS_CATEGORIES:
+            try:
+                area = int(item["mask"].sum())
+            except Exception:  # noqa: BLE001
+                area = 0
+            if area > 0:
+                nms_items.append((lbl, item, area))
+            # else: zero-area item drops on the floor — useless anyway.
+        else:
+            passthrough[lbl] = item
+
+    # No or one garment-class detection → nothing to suppress.
+    if len(nms_items) < 2:
+        for lbl, item, _ in nms_items:
+            passthrough[lbl] = item
+        return passthrough
+
+    # Sort largest → smallest so we always compare new candidates
+    # against the already-kept "winners".
+    nms_items.sort(key=lambda t: t[2], reverse=True)
+
+    kept: list[tuple[str, dict[str, Any], int]] = []
+    suppressed: list[tuple[str, str, str, float, float]] = []
+    for lbl, item, area in nms_items:
+        merged = False
+        dropped = False
+        for kept_idx, (kept_lbl, kept_item, kept_area) in enumerate(kept):
+            inter = int(np.logical_and(item["mask"], kept_item["mask"]).sum())
+            if inter == 0:
+                continue
+            union = kept_area + area - inter
+            iou = inter / union if union > 0 else 0.0
+            # Containment of the smaller (= ``item``) inside the larger
+            # (= ``kept_item``). Larger-first sort guarantees this.
+            containment = inter / area if area > 0 else 0.0
+            if containment < _NMS_CONTAINMENT_THRESHOLD and iou < _NMS_IOU_THRESHOLD:
+                continue
+            same_category = item.get("category") == kept_item.get("category")
+            if same_category:
+                # Union the smaller into the larger and drop the smaller.
+                kept_item["mask"] = np.maximum(
+                    kept_item["mask"], item["mask"]
+                )
+                # Refresh area on the kept entry so subsequent comparisons
+                # see the post-union mask.
+                kept[kept_idx] = (
+                    kept_lbl,
+                    kept_item,
+                    int(kept_item["mask"].sum()),
+                )
+                merged = True
+            suppressed.append(
+                (lbl, kept_lbl, item.get("category") or "?", iou, containment)
+            )
+            dropped = True
+            break
+        if not (merged or dropped):
+            kept.append((lbl, item, area))
+
+    if suppressed:
+        logger.info(
+            "clothing_parser: NMS suppressed %d overlap(s): %s",
+            len(suppressed),
+            [
+                f"{lbl}(\u2192{tgt}, iou={iou:.2f}, cont={cont:.2f})"
+                for lbl, tgt, _cat, iou, cont in suppressed
+            ],
+        )
+
+    for lbl, item, _ in kept:
+        passthrough[lbl] = item
+    return passthrough
+
+
+
+
 async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
     """Return [{label, category, score, bbox, mask}] for each garment.
 
@@ -483,11 +759,43 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
             "mask": combined,
         }
 
+    # 2a) Patch 12e (May 2026) — Option B2 pair recovery for footwear.
+    #     When the unified Shoes mask is anatomically lopsided (one
+    #     half of the frame carries < 30% the mass of the other), the
+    #     first SegFormer pass almost certainly missed a partner boot
+    #     due to a strong global prior on the dominant side. Re-run
+    #     SegFormer on the missing half to give the model a focused
+    #     second look. If nothing turns up on the missing half, the
+    #     photo genuinely only shows one boot (profile shot / occluded
+    #     partner) — leave the mask alone so the saved card stays
+    #     faithful to the original photo. See ``_recover_paired_footwear``.
+    if "Shoes" in by_label:
+        try:
+            by_label["Shoes"]["mask"] = await asyncio.to_thread(
+                _recover_paired_footwear, img, by_label["Shoes"]["mask"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "clothing_parser: pair recovery skipped after error: %s",
+                repr(exc)[:120],
+            )
+
     # 2b) Clean up every merged mask: fill shadow-holes, smooth jagged
     #     edges, drop floating specks. Without this step the alpha
     #     channel on cropped PNGs looks like swiss cheese.
     for item in by_label.values():
         item["mask"] = _postprocess_mask(item["mask"])
+
+    # 2c) Patch 12 (May 2026) — inter-label overlap suppression. Before
+    #     this step a long coat fires both "Upper-clothes" and "Dress"
+    #     and the user sees two cards from one garment. Trousers split
+    #     by a shadow fire two adjacent "bottom" masks and become two
+    #     cards. The fix is a pass of containment + IoU NMS across the
+    #     garment-class labels (top / bottom / dress). Accessory /
+    #     footwear / headwear are intentionally exempt because they
+    #     legitimately overlap with garments (belt on pants, bag on
+    #     dress, shoes overlap the hem of trousers).
+    by_label = _suppress_overlapping_garments(by_label)
 
     # 3) Finalise: compute bboxes from merged masks, emit canonical dict.
     out: list[dict[str, Any]] = []
@@ -673,6 +981,22 @@ def apply_alpha_intersection(
     garment class, so intersecting the two yields a clean cutout of just
     the targeted item.
 
+    Patch 12f (May 2026) — DILATE the SegFormer mask before blending.
+    Earlier behaviour used a strict ``min(rembg, gaussian_blur(mask))``,
+    which deleted any pixel SegFormer didn't mark — even pixels rembg
+    correctly identified as foreground. Two visible failure modes:
+      * A billowy-cuff blouse: SegFormer's ``Upper-clothes`` mask covers
+        the body but misses the puffy sleeve halo → sleeve pixels rembg
+        kept get wiped → fragmented "torn fabric" thumbnail.
+      * Burgundy sneakers on cobblestones: SegFormer's ``Shoes`` mask is
+        patchy because shoe-vs-pavement contrast is low → real shoe
+        pixels get wiped → smudgy blob thumbnail.
+    Dilating the mask by ``DILATE_PCT`` of the crop's short edge (clamped
+    to a sensible min/max) gives the intersection enough slack to admit
+    rembg's correct foreground pixels in the halo region — while still
+    relying on rembg's verdict as the upper bound, so background junk
+    that rembg correctly rejects stays rejected.
+
     Returns refined PNG bytes, or ``None`` on failure (caller should keep
     the rembg-only output).
     """
@@ -694,20 +1018,78 @@ def apply_alpha_intersection(
             return None
     else:
         mask_resized = (seg_mask_bbox * 255).astype(np.uint8)
-    # Soften the binary mask edge a touch so the intersection inherits
-    # rembg's anti-aliasing rather than re-introducing stair-step pixels.
+
+    # Patch 12g (May 2026) — SegFormer mask "confidence" check.
+    # When SegFormer is unconfident about a garment (low-contrast
+    # accessories on busy backgrounds: burgundy sneakers on
+    # cobblestone, dark belt on dark trousers, thin sunglasses
+    # frames in a head crop), the returned mask is patchy — a sparse
+    # constellation of pixels rather than a solid blob. Intersecting
+    # rembg's clean alpha with a patchy mask wipes out the bulk of
+    # the garment and leaves a smeared, fragmented thumbnail. The
+    # dilation step (Patch 12f) widens halos but cannot rescue a
+    # mask whose CORE is missing.
+    #
+    # Heuristic: if the SegFormer mask covers less than
+    # ``_MIN_MASK_CONFIDENCE`` of the bbox area, we treat it as
+    # unreliable and bail out — the caller keeps rembg's untouched
+    # output, which on a tight per-garment crop is usually correct
+    # on its own. 40% is the empirical sweet spot from the May 2026
+    # closet tests:
+    #   * Sunglasses / belts / bags / hats → 50–80% mask coverage
+    #     of their bbox when SegFormer succeeds → SAFE.
+    #   * Burgundy sneakers / dark belts on dark trousers / glossy
+    #     leather shoes → 10–30% coverage (patchy speckle) → BAIL.
+    #   * Tops / bottoms / dresses → 60–95% coverage → SAFE.
+    # This is intentionally per-bbox (not per-frame) because
+    # ``apply_alpha_intersection`` is called with a per-garment crop;
+    # the bbox IS the crop.
+    _MIN_MASK_CONFIDENCE = 0.40
+    try:
+        mask_coverage = float((mask_resized > 127).mean())
+    except Exception:  # noqa: BLE001
+        mask_coverage = 1.0  # if mean() fails, don't gatekeep — let dilation try.
+    if mask_coverage < _MIN_MASK_CONFIDENCE:
+        logger.info(
+            "apply_alpha_intersection: SegFormer mask too patchy "
+            "(%.1f%% coverage < %.0f%% threshold) — falling back to "
+            "rembg-only output (crop %dx%d).",
+            mask_coverage * 100.0,
+            _MIN_MASK_CONFIDENCE * 100.0,
+            Wc, Hc,
+        )
+        return None
+
+    # Patch 12f — proportional dilation. 2.5% of the crop's short edge
+    # is the empirical sweet-spot from the May 2026 closet tests:
+    #   * Tiny crops (200 px): ~5 px dilation — keeps small accessories
+    #     from gaining a halo of background.
+    #   * Medium crops (1000 px): ~25 px — recovers puffy-sleeve overspill.
+    #   * Large crops (2000 px): ~50 px — recovers low-contrast shoe edges.
+    # Hard min/max protect either extreme.
+    _DILATE_PCT = 0.025
+    _DILATE_MIN_PX = 4
+    _DILATE_MAX_PX = 64
+    dilate_px = max(_DILATE_MIN_PX, min(_DILATE_MAX_PX, int(_DILATE_PCT * min(Hc, Wc))))
     try:
         from PIL import ImageFilter
 
-        mask_im = Image.fromarray(mask_resized, mode="L").filter(
-            ImageFilter.GaussianBlur(radius=2.0)
-        )
+        mask_im = Image.fromarray(mask_resized, mode="L")
+        # MaxFilter is morphological dilation on grayscale. Window size
+        # must be odd, equal to ``2*dilate_px + 1``.
+        if dilate_px > 0:
+            mask_im = mask_im.filter(ImageFilter.MaxFilter(2 * dilate_px + 1))
+        # Soften the dilated edge a touch so the intersection inherits
+        # rembg's anti-aliasing rather than re-introducing stair-step pixels.
+        mask_im = mask_im.filter(ImageFilter.GaussianBlur(radius=2.0))
         soft_mask = np.array(mask_im)
     except Exception:  # noqa: BLE001
         soft_mask = mask_resized
-    # New alpha = min(rembg_alpha, soft_segformer_mask). Anywhere SegFormer
-    # said "not this garment" we wipe out, even if rembg thought it was
-    # foreground.
+    # New alpha = min(rembg_alpha, dilated_soft_mask). Anywhere SegFormer
+    # (after dilation) said "not this garment AND not its halo" we wipe
+    # out, even if rembg thought it was foreground. Where dilation
+    # admitted the halo and rembg agrees → keep. Where dilation admitted
+    # the halo but rembg disagrees → still wipe (rembg has final say).
     new_alpha = np.minimum(arr[:, :, 3], soft_mask).astype(np.uint8)
     arr[:, :, 3] = new_alpha
     out = Image.fromarray(arr, mode="RGBA")

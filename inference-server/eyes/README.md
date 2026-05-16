@@ -1,9 +1,17 @@
 # DressApp Eyes — Hetzner deploy
 
 Self-hosted FastAPI wrapper around the fine-tuned **Gemma-4 E2B**
-(`Yoram-Jacobs/dressapp-eyes-gguf` · `phase6-Q4_K_M.gguf`) used by the
-DressApp closet pipeline. Replaces the Qwen-VL leg of
+GGUF (`phase6-Q4_K_M.gguf` + `mmproj-Gemma4E2B-f16.gguf`) used by
+the DressApp closet pipeline. Replaces the Qwen-VL leg of
 `backend/app/services/garment_vision.py` when `EYES_PROVIDER=gemma`.
+
+> **No HuggingFace token, ever.** GGUF + mmproj artefacts are
+> bind-mounted from a local directory on the VPS (see Section 2
+> below). Read
+> `quarantine/2026-05-sabotage/READ_THIS_FIRST.md` for the
+> background — earlier versions of this README told you to set
+> `EYES_HF_TOKEN` and download from a private HF repo. That was
+> the sabotage line. **Don't reintroduce it.**
 
 Runs as a sibling container next to `backend`, `frontend`, and `caddy`
 in `deploy/docker-compose.yml`. Internal-only: backend reaches it at
@@ -59,13 +67,27 @@ If `git pull` reports `Already up to date.` but the
 `deploy/docker-compose.yml` is missing, the changes haven't landed on
 GitHub yet — push from your dev environment first.
 
-### 2. Add four new keys to `deploy/.env`
+### 2. Place the GGUF artefacts on disk and add three keys to `deploy/.env`
+
+The Eyes container reads its model file from a bind-mounted local
+directory. Put your trained Q4 + mmproj artefacts there:
+
+```bash
+sudo mkdir -p /srv/AI-Stylist/eyes_gguf
+# scp your two GGUF files into that directory (from Google Drive or
+# your local machine):
+#   - phase6-Q4_K_M.gguf            (~3.4 GB main model)
+#   - mmproj-Gemma4E2B-f16.gguf     (~600 MB vision projector, optional
+#                                    until Phase 2 vision)
+sudo chmod 644 /srv/AI-Stylist/eyes_gguf/*.gguf
+ls -la /srv/AI-Stylist/eyes_gguf/
+```
+
+Then edit `deploy/.env` — append:
 
 ```bash
 $EDITOR deploy/.env
 ```
-
-Append:
 
 ```
 # ---- DressApp Eyes (Phase O.3) -------------------------------------
@@ -74,11 +96,6 @@ Append:
 EYES_PROVIDER=gemma
 EYES_GEMMA_SPACE_URL=http://eyes:7860
 
-# Read-only HF token scoped to Yoram-Jacobs/dressapp-eyes-gguf.
-# Used ONCE on first eyes-container boot to download the GGUF; then
-# never sent again. Rotate after the first successful boot.
-EYES_HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
 # Shared secret between the backend container and the eyes container.
 # Generate with:  openssl rand -hex 32
 EYES_API_TOKEN=replace-with-32-bytes-of-hex
@@ -86,7 +103,17 @@ EYES_API_TOKEN=replace-with-32-bytes-of-hex
 # CPX32 has 4 dedicated AMD vCPUs — use them all for inference.
 # Default is 2 (sized for the 2-vCPU CX22/CX32 plans).
 EYES_LLAMA_THREADS=4
+
+# Optional: enables the LLaVA vision handler once mmproj is in place.
+# Set to the basename of the mmproj file in /srv/AI-Stylist/eyes_gguf/.
+EYES_MMPROJ_FILE=mmproj-Gemma4E2B-f16.gguf
 ```
+
+> **No `EYES_HF_TOKEN`.** It is not in this list because DressApp does
+> not download model artefacts from HuggingFace at runtime. Your GGUFs
+> live at `/srv/AI-Stylist/eyes_gguf/`. The compose file bind-mounts
+> that directory to `/models` inside the container, and the container
+> loads the file from there.
 
 ### 3. Bring up the new service
 

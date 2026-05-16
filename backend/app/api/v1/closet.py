@@ -10,10 +10,11 @@ import asyncio
 import base64
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,14 +47,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
 
 # Process-wide guard around the heavy analyze pipeline (SegFormer +
-# rembg + Gemini). On RAM-constrained production VPSs (e.g. 3 GB
-# Hetzner box) running two of these in parallel reliably OOMs the
-# second one inside rembg's onnxruntime session — symptom: the second
-# upload silently "lands as-is" with blank fields. Serialising at the
-# endpoint layer makes the API safe regardless of how many tabs /
-# parallel clients hit it. Sub-crops within a single call still run
-# concurrently via the inner Semaphore in `analyze_outfit`.
-_ANALYZE_LOCK = asyncio.Semaphore(1)
+# Gemini API calls). Historically this was a hard Semaphore(1) because
+# rembg ran INSIDE ``/analyze`` and two concurrent onnxruntime sessions
+# reliably OOM-killed the second one on the 3 GB Hetzner box (symptom:
+# the second upload silently "lands as-is" with blank fields).
+#
+# Patch M15 (May 2026) — that motivation is gone. ``/analyze`` no
+# longer runs rembg (Patch 8 deferred it to a post-save BackgroundTask
+# via ``DEFER_REMBG_ON_ANALYZE``) and no longer runs Nano Banana
+# reconstruction either (Patch M14 deferred it via
+# ``DEFER_RECONSTRUCTION_ON_ANALYZE``). What remains inside the hot
+# path is SegFormer (one short CPU spike) + Gemini API calls (network-
+# bound, no local memory). Both are safely parallelisable.
+#
+# Keeping the semaphore at 1 was the *real* cause of "Analysis failed
+# on second/third bulk upload" 502s: with each call taking 17-31 s
+# post-M14, the 3rd-4th queued request waited >60 s and the Kubernetes
+# ingress killed it with a 502 — even though the backend ultimately
+# returned 200 OK seconds later.
+#
+# Default raised to 3 concurrent analyses. Tunable via
+# ``ANALYZE_CONCURRENCY`` env var so RAM-constrained deploys can dial
+# it back to 1 without a code change.
+_ANALYZE_CONCURRENCY = max(1, int(os.environ.get("ANALYZE_CONCURRENCY", "3")))
+_ANALYZE_LOCK = asyncio.Semaphore(_ANALYZE_CONCURRENCY)
+logger.info(
+    "closet: analyze concurrency = %d (env ANALYZE_CONCURRENCY)",
+    _ANALYZE_CONCURRENCY,
+)
 
 
 class CreateItemIn(BaseModel):
@@ -148,6 +169,14 @@ class CreateItemIn(BaseModel):
     # endpoint's purposes; kept as a separate field for clearer logs
     # and so the two paths can be enabled / disabled independently.
     defer_matte: bool = False
+    # Patch M14 (May 2026) — When the analyzer deferred Nano Banana
+    # reconstruction to keep ``/closet/analyze`` under the ingress 60s
+    # ceiling, each item arrives flagged so the save handler can fire a
+    # post-save BackgroundTask to fill in ``reconstructed_image_url``.
+    # See ``DEFER_RECONSTRUCTION_ON_ANALYZE`` in config. Mirrors the
+    # ``defer_matte`` / ``_run_background_matte`` pattern.
+    needs_reconstruction: bool = False
+    reconstruction_reasons: list[str] = []
 
 
 class UpdateItemIn(BaseModel):
@@ -197,44 +226,190 @@ class UpdateItemIn(BaseModel):
     clear_reconstruction: bool = False
 
 
-async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
-    """Phase O.6 (revised Z2.6) — Background matte runner.
+# --- SegFormer category mapping --------------------------------------
+# Frontend / Gemini-side `CreateItemIn.category` values (e.g. "Top",
+# "Bottom", "Outerwear", "Full Body", "Footwear", "Accessories",
+# "Underwear") collapse onto the SegFormer-internal kinds emitted by
+# ``clothing_parser.parse_garments`` — `"top" | "bottom" | "dress" |
+# "footwear" | "accessory" | "headwear"`. The map is intentionally
+# lower-cased and forgiving; anything we don't recognise falls back to
+# "largest instance by mask area" inside the picker below.
+_CATEGORY_TO_SEGFORMER_KIND: dict[str, str] = {
+    "top": "top",
+    "tops": "top",
+    "shirt": "top",
+    "shirts": "top",
+    "blouse": "top",
+    "outerwear": "top",
+    "jacket": "top",
+    "jackets": "top",
+    "coat": "top",
+    "underwear": "top",
+    "bottom": "bottom",
+    "bottoms": "bottom",
+    "pants": "bottom",
+    "trousers": "bottom",
+    "jeans": "bottom",
+    "skirt": "bottom",
+    "skirts": "bottom",
+    "shorts": "bottom",
+    "dress": "dress",
+    "dresses": "dress",
+    "full body": "dress",
+    "fullbody": "dress",
+    "full-body": "dress",
+    "footwear": "footwear",
+    "shoes": "footwear",
+    "sneakers": "footwear",
+    "boots": "footwear",
+    "accessory": "accessory",
+    "accessories": "accessory",
+    "bag": "accessory",
+    "bags": "accessory",
+    "belt": "accessory",
+    "scarf": "accessory",
+    "sunglasses": "accessory",
+    "headwear": "headwear",
+    "hat": "headwear",
+    "hats": "headwear",
+}
+
+
+def _pick_segformer_mask_for_category(
+    garments: list[dict[str, Any]],
+    category: str | None,
+) -> Any | None:
+    """Return the best SegFormer per-garment mask (full-res ``np.uint8``
+    H×W array) to AND against rembg, given the item's user-facing
+    category. Returns ``None`` if SegFormer found nothing usable.
+
+    Strategy
+    --------
+    1. Map ``category`` → SegFormer kind via ``_CATEGORY_TO_SEGFORMER_KIND``.
+    2. Pick the instance whose ``category`` matches the kind AND has
+       the largest mask area (multi-component items already merged
+       upstream — see ``parse_garments``).
+    3. If no kind match, fall back to the largest mask overall — better
+       to AND with *something* (trims wall / poster / lamp) than to
+       give rembg free rein on the whole frame.
+
+    Defensive: catches structurally broken instances (missing ``mask``,
+    non-array masks, etc.) and ignores them silently.
+    """
+    if not garments:
+        return None
+    target_kind = (
+        _CATEGORY_TO_SEGFORMER_KIND.get((category or "").strip().lower())
+        if category
+        else None
+    )
+
+    def _area(g: dict[str, Any]) -> int:
+        m = g.get("mask")
+        if m is None:
+            return 0
+        try:
+            return int(m.sum())  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001
+            return 0
+
+    if target_kind:
+        matches = [g for g in garments if g.get("category") == target_kind]
+        if matches:
+            best = max(matches, key=_area)
+            if _area(best) > 0:
+                return best.get("mask")
+    # Fallback: largest mask of any garment kind.
+    candidates = [g for g in garments if _area(g) > 0]
+    if not candidates:
+        return None
+    return max(candidates, key=_area).get("mask")
+
+
+async def _run_background_matte(
+    item_id: str,
+    raw_bytes: bytes,
+    category: str | None = None,
+) -> None:
+    """Phase O.6 (revised Z2.6 + Patch 12 — May 2026) — Background
+    matte runner.
 
     Fired by :func:`create_item` for items that arrived through the
-    single-pass ``/analyze`` pipeline (``from_one_pass=True``).
+    single-pass ``/analyze`` pipeline (``from_one_pass=True``) or the
+    legacy multi-crop ``/analyze`` with deferred matting
+    (``defer_matte=True``). In both cases the upstream pipeline has
+    already bbox-cropped to a single garment, so ``raw_bytes`` is a
+    tight per-garment image — there is no "raw full-frame upload"
+    code path that fires this task.
 
-    History
-    -------
-    Originally this called ``background_matting.matte_crop`` —
-    rembg-only, no faithfulness guard. Z2.6 swaps that for the full
-    ``remove_background`` pipeline (rembg + CLIP faithfulness check)
-    so the deferred add-item path produces the **same quality** of
-    cutout as the foreground "Clean background" button on the Edit
-    Item page. Latency cost is +200–500 ms per item for the CLIP
-    guard, which is invisible to the user because the task already
-    runs after the HTTP response.
+    Pipeline
+    --------
+    SegFormer + rembg + ``apply_alpha_intersection`` — the same triad
+    the legacy multi-crop ``_matte_crops`` flow uses on the hot path::
 
-    Result is written under ``clean_image_url`` and surfaces via the
-    next ``GET /closet`` once the user revisits — the closet
-    thumbnail then swaps from the JPEG bbox-crop to the clean
-    cutout in place (priority chain in ``thumbnails.pick_source_data_url``).
+        SegFormer (clothing_parser.parse_garments)
+            └─ pick the instance matching ``category`` (largest blob fallback)
+            └─ full-resolution H×W binary mask
+        rembg (background_matting.remove_background)
+            └─ alpha matte + CLIP faithfulness guard
+        clothing_parser.apply_alpha_intersection(matted_png, seg_mask)
+            └─ AND of the two alphas, gaussian-softened
+        → clean_image_url
 
-    Failure modes
-    -------------
-    Soft. Three reasons we may end up writing
-    ``clean_image_status="failed"`` instead of ``"ready"``:
+    Why SegFormer is back
+    ---------------------
+    Z2.6 removed it on the assumption that upstream crops were always
+    tight. They are not always tight in practice — when ``/analyze``
+    runs with ``USE_LOCAL_CLOTHING_PARSER=false`` or when the Gemini
+    fallback over-pads the bbox, rembg sees background junk (lamps,
+    posters, plants) and keeps it all as foreground. Result: the
+    "white-window" cutout regression. Intersecting with a per-class
+    SegFormer mask removes the junk regardless of crop tightness. On
+    already-tight crops the intersection is effectively a no-op (the
+    SegFormer mask covers ~100% of rembg's foreground), so this is
+    pure upside.
 
-      * rembg crashed (rare; mostly ``Image.open`` decoding errors)
-      * rembg returned an empty/None matte (very dark or noisy inputs)
-      * the CLIP faithfulness guard rejected the cutout because it
-        diverged too far from the original (model hallucinated /
-        chopped off a sleeve / dropped to a hand). In that case we
-        keep the original bbox JPEG as the displayed thumbnail
-        rather than show a worse cutout.
+    Failure modes (all soft — never block rembg)
+    --------------------------------------------
+      * SegFormer disabled (``USE_LOCAL_CLOTHING_PARSER=false``) →
+        skip the intersection, persist rembg-only output (today's
+        behaviour, lightweight-deploy compatible).
+      * SegFormer ran but found nothing matching the category → fall
+        back to the largest detected mask; if there's still nothing,
+        persist rembg-only output.
+      * ``apply_alpha_intersection`` returned ``None`` (mask shape
+        mismatch, decode error) → persist rembg-only output.
+      * rembg itself crashed or returned empty → mark
+        ``clean_image_status="failed"`` as before.
+      * CLIP faithfulness rejected the matte → same as before.
     """
     from app.services import background_matting
+    from app.services import clothing_parser as _cp
 
     db = get_db()
+
+    # 1. SegFormer (best-effort) — runs first so we can pass its mask
+    #    to the intersection step after rembg returns. Wrapped tight
+    #    so any failure here is invisible to rembg downstream.
+    seg_mask = None
+    if settings.USE_LOCAL_CLOTHING_PARSER:
+        try:
+            garments = await _cp.parse_garments(raw_bytes)
+            seg_mask = _pick_segformer_mask_for_category(garments, category)
+            if seg_mask is None and garments:
+                logger.info(
+                    "Background matte SegFormer: parsed %d instance(s) for item %s "
+                    "but none usable for category=%r",
+                    len(garments), item_id, category,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "Background matte SegFormer skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
+            seg_mask = None
+
+    # 2. rembg + CLIP guard (unchanged — the matte primitive).
     try:
         out = await background_matting.remove_background(raw_bytes)
     except Exception as exc:  # noqa: BLE001
@@ -257,6 +432,30 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
     result = out.get("image_png") if isinstance(out, dict) else None
     provider = out.get("provider") if isinstance(out, dict) else None
     faithful = out.get("faithful", True) if isinstance(out, dict) else True
+
+    # 3. Alpha intersection (best-effort) — refines edges and trims any
+    #    non-garment foreground rembg kept. Skipped silently when the
+    #    rembg PNG is missing or the SegFormer mask is unavailable.
+    if result and seg_mask is not None:
+        try:
+            refined = _cp.apply_alpha_intersection(result, seg_mask)
+            if refined:
+                logger.info(
+                    "Background matte SegFormer-refined for item %s "
+                    "(%d → %d bytes)",
+                    item_id, len(result), len(refined),
+                )
+                result = refined
+            else:
+                logger.info(
+                    "Background matte apply_alpha_intersection returned None "
+                    "for item %s — keeping rembg-only output", item_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "Background matte alpha intersection skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
 
     if not result:
         # Distinguish "rembg produced nothing" from "rembg produced
@@ -291,22 +490,145 @@ async def _run_background_matte(item_id: str, raw_bytes: bytes) -> None:
                 "clean_image_url": data_url,
                 "clean_image_status": "ready",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
+                # Patch M20 (May 2026) — Explicitly null out the cached
+                # thumbnail INSTEAD of $unset. Two reasons:
+                #
+                #   1. Original rationale (preserved) — invalidate the
+                #      stale thumbnail so the next ``GET /closet``
+                #      lazy-backfill regenerates it from
+                #      ``clean_image_url`` via
+                #      ``pick_source_data_url``. Both null and unset
+                #      trigger the backfill (it checks
+                #      ``isinstance(it.get("thumbnail_data_url"),
+                #      str)``).
+                #
+                #   2. NEW — the Phase O.6 frontend poll
+                #      (``Closet.jsx::useEffect[store.items]``) merges
+                #      the GET response into the local store via
+                #      ``{...items[idx], ...polled}``. MongoDB omits
+                #      unset fields from query results, so the merge
+                #      would KEEP the stale optimistic
+                #      ``thumbnail_data_url`` (a JPEG of the original
+                #      upload) and the user would see the unpolished
+                #      photo in the closet card even though
+                #      ``clean_image_status`` flipped to "ready". By
+                #      explicitly persisting null, the polled response
+                #      includes the field, the merge overwrites the
+                #      stale local data URL, and ``bestImageUrl``
+                #      falls through to ``clean_image_url`` (the
+                #      polished cutout) as designed.
+                "thumbnail_data_url": None,
             },
-            # Invalidate the cached thumbnail so the next ``GET
-            # /closet`` regenerates it from the clean rembg PNG via
-            # ``pick_source_data_url`` (which lists ``clean_image_url``
-            # ahead of ``original_image_url``). Without this $unset,
-            # the original-background JPEG thumbnail would persist
-            # forever even though rembg succeeded — the visible
-            # symptom of "items keep their full background after
-            # save" reported as Z2.6 bug 1.
-            "$unset": {"thumbnail_data_url": ""},
         },
     )
     logger.info(
         "Background matte READY for item %s "
         "(provider=%s faithful=%s %d bytes png)",
         item_id, provider, faithful, len(result),
+    )
+
+
+async def _run_background_reconstruction(
+    item_id: str,
+    crop_bytes: bytes,
+    analysis: dict[str, Any],
+    reasons: list[str],
+) -> None:
+    """Patch M14 (May 2026) — Post-save Nano Banana reconstruction.
+
+    Mirrors :func:`_run_background_matte` but for the
+    ``reconstructed_image_url`` field. Fired by :func:`create_item` when
+    the upstream ``/analyze`` deferred reconstruction
+    (``settings.DEFER_RECONSTRUCTION_ON_ANALYZE=true``) — the analyzer
+    marked the item with ``needs_reconstruction=true`` and a list of
+    heuristic ``reasons`` (e.g. ``["edge_touch_top", "edge_touch_left"]``).
+
+    Why defer
+    ---------
+    ``should_reconstruct`` triggers on every crop whose bbox touches a
+    frame edge — which is the common case for full-body outfit uploads
+    (tops touch top, footwear touch bottom, etc.). Each fire spawns a
+    20-40 s Gemini image-generation call. Inside the synchronous
+    ``_analyse_one_crop`` loop with a ``Semaphore(6)``, a 4-item outfit
+    blocks the analyze response for 30-60 s — routinely hitting the
+    Kubernetes ingress 60 s ceiling → 502 Bad Gateway. Deferring it
+    here lets ``/analyze`` return in ~15 s and the reconstruction
+    fills in seconds-to-minutes later on the saved item document.
+
+    Failure modes (all soft — match the matte task)
+    -----------------------------------------------
+      * Reconstruction returned ``None`` (Gemini image gen unavailable
+        / safety blocked / validation failed) — leave
+        ``reconstructed_image_url`` unset; UI falls back to the bbox
+        crop, identical to today.
+      * Exception during the generation — log and exit; the item still
+        saves successfully without a reconstruction.
+    """
+    from app.services.reconstruction import reconstruct
+
+    # Patch M16 — Belt-and-braces. ``should_reconstruct`` is the
+    # authoritative gate but if an in-flight save from before the flag
+    # flip carried ``needs_reconstruction=True`` we still want to
+    # honour the kill-switch and skip the work cleanly.
+    if not settings.ENABLE_RECONSTRUCTION:
+        logger.info(
+            "Background reconstruction SKIPPED for item %s "
+            "(ENABLE_RECONSTRUCTION=false)",
+            item_id,
+        )
+        return
+
+    db = get_db()
+    t0 = datetime.now(timezone.utc)
+    try:
+        result = await reconstruct(crop_bytes, analysis, reasons=reasons)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Background reconstruction FAILED for item %s: %s",
+            item_id, repr(exc)[:200],
+        )
+        return
+
+    if not result or not result.get("image_b64"):
+        logger.info(
+            "Background reconstruction SKIPPED for item %s "
+            "(no image returned; reasons=%s)",
+            item_id, reasons,
+        )
+        return
+
+    mime = result.get("mime_type", "image/png")
+    data_url = f"data:{mime};base64,{result['image_b64']}"
+    meta = {
+        "method": "reconstruction",
+        "model": result.get("model"),
+        "prompt": result.get("prompt"),
+        "reasons": reasons,
+        "deferred": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.closet_items.update_one(
+        {"id": item_id},
+        {
+            "$set": {
+                "reconstructed_image_url": data_url,
+                "reconstruction_metadata": meta,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                # Patch M20 — Explicitly null out (was $unset). See
+                # comment in ``_run_background_matte`` for the full
+                # rationale. tl;dr: the frontend poll merges the
+                # GET response into the local store, so we need the
+                # field present-as-null for the merge to overwrite the
+                # stale optimistic thumbnail.
+                "thumbnail_data_url": None,
+            },
+        },
+    )
+    elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
+    logger.info(
+        "Background reconstruction READY for item %s "
+        "(model=%s in %.1fs reasons=%s)",
+        item_id, result.get("model"), elapsed, reasons,
     )
 
 
@@ -443,7 +765,10 @@ async def create_item(
         item_id_for_bg = doc["id"]
         raw_for_bg = raw_bytes
         background_tasks.add_task(
-            _run_background_matte, item_id_for_bg, raw_for_bg,
+            _run_background_matte,
+            item_id_for_bg,
+            raw_for_bg,
+            payload.category,
         )
     elif raw_bytes:
         # Legacy HF Inference API segmentation fallback was removed in May
@@ -451,6 +776,40 @@ async def create_item(
         # the deferred rembg matte task cover this case, so a missing
         # ``segmented_image_url`` here is expected when neither was wired.
         pass
+
+    # Patch M14 (May 2026) — Post-save Nano Banana reconstruction. The
+    # analyzer marked this item with ``needs_reconstruction=true`` so
+    # the /analyze response could leave inside the ingress 60 s ceiling
+    # without paying the ~20-40 s Gemini image-gen cost per crop. Queue
+    # the actual generation as a fire-and-forget BackgroundTask now —
+    # the saved item gets its ``reconstructed_image_url`` patched in
+    # seconds-to-minutes later. Mirrors ``needs_bg_matte`` above.
+    if payload.needs_reconstruction and raw_bytes:
+        # We use the item's existing analysis fields as the prompt
+        # source. Build the same shape ``reconstruct()`` expects.
+        recon_analysis: dict[str, Any] = {
+            "category": payload.category,
+            "sub_category": payload.sub_category,
+            "item_type": payload.item_type,
+            "color": payload.color,
+            "material": payload.material,
+            "pattern": payload.pattern,
+            "brand": payload.brand,
+            "dress_code": (
+                payload.dress_code.value
+                if hasattr(payload.dress_code, "value")
+                else payload.dress_code
+            ),
+            "title": payload.title,
+            "name": payload.name,
+        }
+        background_tasks.add_task(
+            _run_background_reconstruction,
+            doc["id"],
+            raw_bytes,
+            recon_analysis,
+            payload.reconstruction_reasons,
+        )
 
     # Best-effort FashionCLIP embedding: persist a 512-d L2-normalised
     # vector so the closet can later be searched by similarity
@@ -864,8 +1223,9 @@ def _safe_analysis(parsed: dict[str, Any]) -> dict[str, Any]:
 @router.post("/analyze")
 async def analyze_item_image(
     payload: AnalyzeIn,
+    request: Request,
     user: dict = Depends(get_current_user),
-) -> dict[str, Any]:
+) -> StreamingResponse:
     """**The Eyes** \u2014 auto-fill every Add-Item field from a garment photo.
 
     Returns an object with an ``items`` array. Each entry represents one
@@ -874,6 +1234,30 @@ async def analyze_item_image(
     single item, the array has one entry (and the top-level legacy
     fields are mirrored from that single analysis for backward
     compatibility).
+
+    Patch M17 (May 2026) — streaming-with-keepalive
+    ----------------------------------------------
+    The endpoint emits its response as a ``StreamingResponse`` so the
+    Kubernetes / Cloudflare ingress 60 s **idle** timeout never fires
+    while Gemini chugs through the parallel per-crop calls. Per live
+    benchmarking, the Emergent LLM-key tier throttles concurrent
+    Gemini-2.5-Flash calls down to roughly 1 in flight at a time:
+    individual analyze() ≈ 16 s, 3 parallel analyze() ≈ 53 s (3×
+    sequential, not the 16 s the inner ``Semaphore(6)`` would suggest).
+    A 4-item outfit therefore needs ~60 s wall — exactly the ingress
+    ceiling — and the timeout used to kill connections at exactly 60 s
+    even though the backend ultimately returned 200 OK seconds later
+    (visible in our access logs).
+
+    The generator below kicks off the analyze coroutine, then yields
+    a single whitespace byte every ``_ANALYZE_KEEPALIVE_INTERVAL_S``
+    seconds while it works. JSON allows arbitrary leading whitespace,
+    so the frontend's ``axios.post(...).then(r => r.data)`` parses the
+    final body unchanged — **no frontend change required**. When the
+    analyze coroutine completes, we yield the final JSON body and
+    close the stream. On exception we emit a JSON body with
+    ``_status`` set to the intended HTTP status so the frontend can
+    detect failure via a small downstream check (see ``api.js``).
     """
     if garment_vision_service is None:
         raise HTTPException(503, "Garment analyzer not configured")
@@ -906,127 +1290,341 @@ async def analyze_item_image(
         or (user or {}).get("preferred_language")
         or "en"
     )
-    if payload.multi:
-        # Production analyze pipeline: SegFormer crops the photo into
-        # per-garment regions, then N parallel Eyes calls analyse each
-        # crop. This is the only production path as of May 2026 --
-        # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
-        # benchmark showed it could not reliably emit multi-garment
-        # arrays (Gemini-2.5-Flash returned a single object for every
-        # image regardless of prompt phrasing). The single-pass
-        # function still exists for benchmark scripts; the production
-        # ``EYES_ONE_PASS`` flag was removed.
+
+    # Patch M19 (May 2026) — Streaming NDJSON variant. When the client
+    # opts in via ``Accept: application/x-ndjson``, we stream
+    # per-item frames as they arrive from Gemini rather than waiting
+    # for the full batched response. The frontend renders cards as
+    # frames land. Falls back to the legacy keepalive-whitespace
+    # JSON path on any setup error so a misbehaving client never
+    # breaks the API.
+    accept = (request.headers.get("accept") or "").lower()
+    wants_ndjson = "application/x-ndjson" in accept
+
+    if wants_ndjson and payload.multi:
+        async def _ndjson_stream():
+            # Frame producer — translates ``analyze_outfit_stream``
+            # frames into NDJSON lines + the per-item augmentation
+            # the existing closet save flow expects.
+            try:
+                async with _ANALYZE_LOCK:
+                    saw_detect = False
+                    items_meta: list[dict[str, Any]] = []
+                    async for frame in garment_vision_service.analyze_outfit_stream(
+                        raw, language=user_lang,
+                    ):
+                        ftype = frame.get("type")
+                        if ftype == "detect":
+                            saw_detect = True
+                            items_meta = frame.get("items_meta") or []
+                            yield (json.dumps(frame, ensure_ascii=False) + "\n").encode("utf-8")
+                        elif ftype == "item":
+                            idx = frame.get("index", -1)
+                            meta = (
+                                items_meta[idx]
+                                if 0 <= idx < len(items_meta)
+                                else {}
+                            )
+                            analysis = _safe_analysis(frame.get("analysis") or {})
+                            from app.services.garment_vision import (
+                                _is_unidentifiable,
+                            )
+                            if _is_unidentifiable(analysis):
+                                # Drop the slot — emit ``item_skip``
+                                # so the frontend can remove the
+                                # placeholder card it created from the
+                                # detect frame.
+                                out_frame = {
+                                    "type": "item_skip",
+                                    "index": idx,
+                                    "reason": "unidentifiable",
+                                }
+                            else:
+                                out_frame = {
+                                    "type": "item",
+                                    "index": idx,
+                                    "label": meta.get("label"),
+                                    "kind": meta.get("kind"),
+                                    "bbox": meta.get("bbox"),
+                                    "crop_base64": meta.get("crop_base64"),
+                                    "crop_mime": meta.get(
+                                        "crop_mime", "image/jpeg",
+                                    ),
+                                    "analysis": analysis,
+                                    "potential_duplicate": None,
+                                    "reconstruction_advised": False,
+                                    "one_pass": False,
+                                    "defer_matte": meta.get(
+                                        "defer_matte", False,
+                                    ),
+                                    "needs_reconstruction": frame.get(
+                                        "needs_reconstruction", False,
+                                    ),
+                                    "reconstruction_reasons": frame.get(
+                                        "reconstruction_reasons", [],
+                                    ),
+                                }
+                            yield (
+                                json.dumps(out_frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                        elif ftype == "error":
+                            yield (
+                                json.dumps(frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                            return
+                        elif ftype == "done":
+                            yield (
+                                json.dumps(frame, ensure_ascii=False)
+                                + "\n"
+                            ).encode("utf-8")
+                    # Sentinel — protect against generators that exit
+                    # without a `done` frame (very rare; would only
+                    # happen if `analyze_outfit_stream` was cancelled).
+                    if not saw_detect:
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "error",
+                                    "status": 503,
+                                    "message": (
+                                        "Garment analyzer produced no "
+                                        "frames; please retry."
+                                    ),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        ).encode("utf-8")
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("ndjson analyze stream error: %s", exc)
+                yield (
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "status": 503,
+                            "message": (
+                                "Garment analyzer hit an unexpected "
+                                "error. Please try again."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+
+        return StreamingResponse(
+            _ndjson_stream(),
+            media_type="application/x-ndjson",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    async def _do_analyze() -> dict[str, Any]:
+        """Inner analyze body — same logic as the pre-M17 endpoint."""
+        if payload.multi:
+            # Production analyze pipeline: SegFormer crops the photo into
+            # per-garment regions, then N parallel Eyes calls analyse each
+            # crop. This is the only production path as of May 2026 --
+            # ``analyze_outfit_one_pass`` was retired after the CCP-Ninja
+            # benchmark showed it could not reliably emit multi-garment
+            # arrays (Gemini-2.5-Flash returned a single object for every
+            # image regardless of prompt phrasing). The single-pass
+            # function still exists for benchmark scripts; the production
+            # ``EYES_ONE_PASS`` flag was removed.
+            try:
+                async with _ANALYZE_LOCK:
+                    detections = await garment_vision_service.analyze_outfit(
+                        raw, language=user_lang,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Outfit analysis failed: %r", exc)
+                raise HTTPException(
+                    503,
+                    "Garment analyzer is temporarily unavailable. Please try again.",
+                ) from exc
+            items_out: list[dict[str, Any]] = []
+            dropped_unidentifiable = 0
+            from app.services.garment_vision import _is_unidentifiable
+
+            # Phase Z2 — duplicate detection is now done up-front via
+            # /closet/preflight (SHA-256 + perceptual hash, runs in the
+            # browser BEFORE this analyze call). The legacy server-side
+            # attribute matcher (find_potential_duplicate) has been
+            # removed: by the time we reach this loop the user has
+            # already approved any pre-flight matches, so paying for a
+            # second round of duplicate detection here is pure waste.
+            for det in detections:
+                analysis = _safe_analysis(dict(det.get("analysis") or {}))
+                if _is_unidentifiable(analysis):
+                    dropped_unidentifiable += 1
+                    continue
+                items_out.append(
+                    {
+                        "label": det.get("label"),
+                        "kind": det.get("kind"),
+                        "bbox": det.get("bbox"),
+                        "crop_base64": det.get("crop_base64"),
+                        "crop_mime": det.get("crop_mime", "image/jpeg"),
+                        "analysis": analysis,
+                        "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
+                        # Phase O.6 field. ``reconstruction_advised`` is
+                        # produced by the legacy pipeline as a heuristic
+                        # output of ``should_reconstruct`` per crop;
+                        # absence / False means "no CTA needed".
+                        "reconstruction_advised": det.get(
+                            "reconstruction_advised", False,
+                        ),
+                        # Patch 9a (May 2026) — the ``one_pass`` field
+                        # used to signal that the response came from
+                        # the retired single-call path. With one-pass
+                        # retired this is always False; kept in the
+                        # response shape so older frontend bundles
+                        # that read it don't choke.
+                        "one_pass": False,
+                        # Patch 8 (May 2026) — flag for the legacy
+                        # multi-crop path when
+                        # ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
+                        # The frontend echoes this back on /closet
+                        # save and the backend queues
+                        # ``_run_background_matte`` per item.
+                        "defer_matte": det.get("defer_matte", False),
+                        # Patch M14 (May 2026) — analyzer deferred Nano
+                        # Banana reconstruction; frontend echoes these
+                        # back on /closet save and the backend queues
+                        # ``_run_background_reconstruction`` per item.
+                        "needs_reconstruction": det.get("needs_reconstruction", False),
+                        "reconstruction_reasons": det.get("reconstruction_reasons", []),
+                    }
+                )
+            if not items_out:
+                raise HTTPException(
+                    422,
+                    "We couldn't identify any garment in this photo. "
+                    "Please try a clearer, well-lit shot.",
+                )
+            # Mirror the first item at the top level so older callers keep working.
+            first = items_out[0]["analysis"] if items_out else _safe_analysis({})
+            return {"items": items_out, "count": len(items_out), **first}
+
+        # Legacy single-item path (kept for any internal caller that sets multi=False).
         try:
             async with _ANALYZE_LOCK:
-                detections = await garment_vision_service.analyze_outfit(raw, language=user_lang)
+                parsed = await garment_vision_service.analyze(raw, language=user_lang)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Outfit analysis failed: %r", exc)
+            logger.warning("Garment analysis failed: %r", exc)
             raise HTTPException(
-                503,
-                "Garment analyzer is temporarily unavailable. Please try again.",
+                503, "Garment analyzer is temporarily unavailable. Please try again."
             ) from exc
-        items_out: list[dict[str, Any]] = []
-        dropped_unidentifiable = 0
+        analysis = _safe_analysis(parsed)
         from app.services.garment_vision import _is_unidentifiable
 
-        # Phase Z2 — duplicate detection is now done up-front via
-        # /closet/preflight (SHA-256 + perceptual hash, runs in the
-        # browser BEFORE this analyze call). The legacy server-side
-        # attribute matcher (find_potential_duplicate) has been
-        # removed: by the time we reach this loop the user has
-        # already approved any pre-flight matches, so paying for a
-        # second round of duplicate detection here is pure waste.
-        for det in detections:
-            analysis = _safe_analysis(dict(det.get("analysis") or {}))
-            if _is_unidentifiable(analysis):
-                dropped_unidentifiable += 1
-                continue
-            items_out.append(
-                {
-                    "label": det.get("label"),
-                    "kind": det.get("kind"),
-                    "bbox": det.get("bbox"),
-                    "crop_base64": det.get("crop_base64"),
-                    "crop_mime": det.get("crop_mime", "image/jpeg"),
-                    "analysis": analysis,
-                    "potential_duplicate": None,  # always None — kept for backwards-compat with older frontend bundles
-                    # Phase O.6 field. ``reconstruction_advised`` is
-                    # produced by the legacy pipeline as a heuristic
-                    # output of ``should_reconstruct`` per crop; absence
-                    # / False means "no CTA needed".
-                    "reconstruction_advised": det.get(
-                        "reconstruction_advised", False,
-                    ),
-                    # Patch 9a (May 2026) — the ``one_pass`` field used
-                    # to signal that the response came from the retired
-                    # single-call path. With one-pass retired this is
-                    # always False; kept in the response shape so older
-                    # frontend bundles that read it don't choke.
-                    "one_pass": False,
-                    # Patch 8 (May 2026) — flag for the legacy multi-crop
-                    # path when ``settings.DEFER_REMBG_ON_ANALYZE`` is on.
-                    # The frontend echoes this back on /closet save and
-                    # the backend queues ``_run_background_matte`` per
-                    # item, identical to the one-pass path.
-                    "defer_matte": det.get("defer_matte", False),
-                }
-            )
-        if dropped_unidentifiable:
-            logger.info(
-                "/analyze: dropped %d unidentifiable item(s)",
-                dropped_unidentifiable,
-            )
-        # If everything was rejected, surface a clean 422 so the
-        # frontend can show "couldn't recognise any garment in this
-        # photo" instead of saving an empty card.
-        if not items_out:
+        if _is_unidentifiable(analysis):
             raise HTTPException(
                 422,
                 "We couldn't identify any garment in this photo. "
                 "Please try a clearer, well-lit shot.",
             )
-        # Mirror the first item at the top level so older callers keep working.
-        first = items_out[0]["analysis"] if items_out else _safe_analysis({})
-        return {"items": items_out, "count": len(items_out), **first}
+        crop_b64 = base64.b64encode(raw).decode("ascii")
+        # Phase Z2 — duplicate detection is now exclusively handled by
+        # the browser-side /closet/preflight call (SHA-256 + perceptual
+        # hash) BEFORE the analyze request is ever sent. We deliberately
+        # do NOT run the legacy attribute matcher here.
+        return {
+            "items": [
+                {
+                    "label": analysis.get("item_type") or analysis.get("sub_category") or "garment",
+                    "kind": "garment",
+                    "bbox": [0, 0, 1000, 1000],
+                    "crop_base64": crop_b64,
+                    "crop_mime": "image/jpeg",
+                    "analysis": analysis,
+                    "potential_duplicate": None,  # always None — kept for back-compat
+                }
+            ],
+            "count": 1,
+            **analysis,
+        }
 
-    # Legacy single-item path (kept for any internal caller that sets multi=False).
-    try:
-        async with _ANALYZE_LOCK:
-            parsed = await garment_vision_service.analyze(raw, language=user_lang)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Garment analysis failed: %r", exc)
-        raise HTTPException(
-            503, "Garment analyzer is temporarily unavailable. Please try again."
-        ) from exc
-    analysis = _safe_analysis(parsed)
-    from app.services.garment_vision import _is_unidentifiable
+    async def _stream_with_keepalive():
+        """Yield keepalive whitespace bytes while ``_do_analyze`` runs.
 
-    if _is_unidentifiable(analysis):
-        raise HTTPException(
-            422,
-            "We couldn't identify any garment in this photo. "
-            "Please try a clearer, well-lit shot.",
-        )
-    crop_b64 = base64.b64encode(raw).decode("ascii")
-    # Phase Z2 — duplicate detection is now exclusively handled by
-    # the browser-side /closet/preflight call (SHA-256 + perceptual
-    # hash) BEFORE the analyze request is ever sent. We deliberately
-    # do NOT run the legacy attribute matcher here.
-    return {
-        "items": [
-            {
-                "label": analysis.get("item_type") or analysis.get("sub_category") or "garment",
-                "kind": "garment",
-                "bbox": [0, 0, 1000, 1000],
-                "crop_base64": crop_b64,
-                "crop_mime": "image/jpeg",
-                "analysis": analysis,
-                "potential_duplicate": None,  # always None — kept for back-compat
+        Why this works: ``application/json`` permits arbitrary leading
+        whitespace per RFC 8259, so ``JSON.parse`` on the client cleanly
+        ignores the bytes we use as keepalive. The browser / axios
+        receives the first byte within seconds (well before the 60 s
+        ingress idle timeout), the connection stays alive on every
+        subsequent keepalive tick, and the final JSON body lands when
+        the analyzer is done.
+        """
+        task = asyncio.create_task(_do_analyze())
+        # Yield a no-op space immediately so the ingress sees the
+        # response headers + first body byte right away. Some
+        # proxies start the idle timer from the first body byte, not
+        # the headers, so we want to be safe.
+        yield b" "
+        while not task.done():
+            try:
+                # ``shield`` so cancelling the wait_for doesn't cancel
+                # the underlying analyze task.
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=_ANALYZE_KEEPALIVE_INTERVAL_S,
+                )
+            except asyncio.TimeoutError:
+                yield b" "
+        # Task complete — yield the final body (or an error envelope).
+        try:
+            body = task.result()
+        except HTTPException as exc:
+            # Stream is already open with status 200; we surface the
+            # intended HTTP status via ``_status`` so the frontend can
+            # detect it and behave like an axios rejection.
+            body = {
+                "items": [],
+                "count": 0,
+                "_status": exc.status_code,
+                "_error": str(exc.detail),
             }
-        ],
-        "count": 1,
-        **analysis,
-    }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("analyze streaming exception: %s", exc)
+            body = {
+                "items": [],
+                "count": 0,
+                "_status": 503,
+                "_error": "Garment analyzer is temporarily unavailable. "
+                "Please try again.",
+            }
+        yield json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+    return StreamingResponse(
+        _stream_with_keepalive(),
+        media_type="application/json",
+        headers={
+            # X-Accel-Buffering disables proxy buffering on nginx-style
+            # ingresses so the keepalive whitespace actually reaches
+            # the client between ticks rather than being buffered up
+            # at the ingress and flushed all at once when the stream
+            # closes (which would defeat the whole point of the
+            # keepalive — the ingress would still see a 60 s idle).
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+# Patch M17 (May 2026) — Module-level config for the keepalive heartbeat
+# inside the ``/analyze`` streaming response. 8 s comfortably beats
+# every commodity ingress idle timeout (Kubernetes nginx default 60 s,
+# Cloudflare 100 s, AWS ALB 60 s) with a 7×+ safety margin. Bumped via
+# env var ``ANALYZE_KEEPALIVE_INTERVAL_S`` if a future ingress is
+# tuned tighter.
+_ANALYZE_KEEPALIVE_INTERVAL_S = float(
+    os.environ.get("ANALYZE_KEEPALIVE_INTERVAL_S", "8")
+)
 
 
 @router.get("/analyze/version", include_in_schema=False)
@@ -1165,7 +1763,9 @@ async def analyze_version(probe: int = 0) -> dict[str, Any]:
         "google_oauth_post_login_redirect": bool(
             getattr(settings, "GOOGLE_OAUTH_POST_LOGIN_REDIRECT", None)
         ),
-        "hf_token": bool(getattr(settings, "HF_TOKEN", None)),
+        # ``HF_TOKEN`` is intentionally absent from this health flag —
+        # see ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``. Any
+        # future agent that wants to add it back: please don't.
         "deepgram_api_key": bool(getattr(settings, "DEEPGRAM_API_KEY", None)),
         "openweather_api_key": bool(
             getattr(settings, "OPENWEATHER_API_KEY", None)
@@ -3011,16 +3611,24 @@ async def clean_item_background(
     item_id: str,
     user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Phase V Fix 2 — non-generative background matting.
+    """Phase V Fix 2 (revised May 2026, Patch 12h) — Edit Item → "Clean
+    background" CTA. Non-generative alpha matting with full SegFormer
+    refinement triad for parity with the initial-save flow.
+
+    Pipeline (mirrors :func:`_run_background_matte`)
+    ------------------------------------------------
+    SegFormer (best-effort) → rembg + CLIP guard → apply_alpha_intersection.
 
     Replaces the old "Repair image" generative inpainting (which
     hallucinated matching colours, invented collars, etc.) with a pure
-    alpha-matting pipeline powered by BiRefNet (MIT). The matting model
-    decides which pixels are garment vs. background; it never invents
-    pixels.
-
-    A CLIP faithfulness guard in the matting service rejects matte output
-    that drifts too far from the original crop.
+    alpha-matting pipeline. The matting model decides which pixels are
+    garment vs. background; it never invents pixels. A CLIP faithfulness
+    guard in the matting service rejects matte output that drifts too
+    far from the original crop. Failures at any of the three stages are
+    soft — we fall back to rembg-only output when SegFormer is
+    unavailable, returns nothing usable for the item's category, or its
+    mask is too patchy (<40% bbox coverage; see Patch 12g in
+    ``clothing_parser.apply_alpha_intersection``).
     """
     from app.services import background_matting
 
@@ -3080,12 +3688,72 @@ async def clean_item_background(
             ),
         }
 
-    out_b64 = base64.b64encode(result["image_png"]).decode("ascii")
+    # Patch 12h (May 2026) — Parity with ``_run_background_matte`` so the
+    # Edit Item → "Clean background" CTA uses the same triad as the
+    # initial save flow: SegFormer (best-effort) → rembg → alpha
+    # intersection. Before this patch the CTA went straight to rembg
+    # and skipped SegFormer entirely, which is why users saw cleaner
+    # cutouts on first save vs. "Clean background" reruns on the same
+    # crop. All SegFormer / intersection failures are SOFT — they fall
+    # back to the rembg-only output that ``remove_background`` already
+    # returned, so this never regresses the legacy behaviour.
+    from app.services import clothing_parser as _cp
+
+    refined_png: bytes = result["image_png"]
+    intersection_applied = False
+    if settings.USE_LOCAL_CLOTHING_PARSER:
+        seg_mask = None
+        try:
+            garments = await _cp.parse_garments(crop_bytes)
+            seg_mask = _pick_segformer_mask_for_category(
+                garments, item.get("category")
+            )
+            if seg_mask is None and garments:
+                logger.info(
+                    "/clean-background SegFormer parsed %d instance(s) for "
+                    "item %s but none usable for category=%r",
+                    len(garments), item_id, item.get("category"),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "/clean-background SegFormer skipped for item %s: %s",
+                item_id, repr(exc)[:160],
+            )
+            seg_mask = None
+
+        if seg_mask is not None:
+            try:
+                maybe_refined = _cp.apply_alpha_intersection(
+                    result["image_png"], seg_mask
+                )
+                if maybe_refined:
+                    logger.info(
+                        "/clean-background SegFormer-refined item %s "
+                        "(%d → %d bytes)",
+                        item_id, len(result["image_png"]), len(maybe_refined),
+                    )
+                    refined_png = maybe_refined
+                    intersection_applied = True
+                else:
+                    logger.info(
+                        "/clean-background apply_alpha_intersection returned "
+                        "None for item %s — keeping rembg-only output",
+                        item_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "/clean-background alpha intersection skipped for item "
+                    "%s: %s",
+                    item_id, repr(exc)[:160],
+                )
+
+    out_b64 = base64.b64encode(refined_png).decode("ascii")
     data_url = f"data:image/png;base64,{out_b64}"
     meta = {
         "method": "matting",
         "model": settings.BACKGROUND_MATTING_MODEL,
         "provider": result.get("provider"),
+        "segformer_refined": intersection_applied,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.closet_items.update_one(

@@ -39,7 +39,7 @@ import os
 import re
 import time
 import uuid
-from typing import Any
+from typing import Any, AsyncIterator
 
 from emergentintegrations.llm.chat import ImageContent, LlmChat, UserMessage
 from PIL import Image
@@ -119,13 +119,13 @@ async def _call_gemma_space(
             },
         }
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    # Bearer auth between backend and the Eyes service. Prefer the
-    # dedicated EYES_API_TOKEN (used on the self-hosted Hetzner deploy
-    # where the HF token shouldn't be reaching the inference container
-    # on every call); fall back to EYES_HF_TOKEN for the legacy HF
-    # Space deploy where the same token gates both model download and
-    # request auth.
-    bearer = settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN
+    # Bearer auth between backend and the Eyes service. Uses the
+    # dedicated ``EYES_API_TOKEN`` only (a random 32-byte secret
+    # generated with ``openssl rand -hex 32``). The legacy
+    # ``EYES_HF_TOKEN`` fallback was removed in May 2026 — Eyes
+    # never authenticates against HuggingFace at runtime. See
+    # ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
+    bearer = settings.EYES_API_TOKEN
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
 
@@ -664,6 +664,24 @@ DETECT_SYSTEM_PROMPT = (
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
+# Patch 12d (May 2026) — short-edge floor for crop output, expressed
+# as a PROPORTIONAL function of the source image's short edge. The
+# previous absolute 192 px floor was too aggressive on small uploads:
+# the man-in-trench-coat photo arrived at 550×810 px and the floor
+# dropped Pants (184 px), Shoes (124 px), and Hat (104 px) — leaving
+# only the coat. Inversely, on large 2000+ px uploads, 192 px was too
+# permissive and let bag-strap slivers through.
+#
+# The proportional form ``max(_MIN_CROP_SHORT_EDGE_FLOOR_PX,
+# _MIN_CROP_SHORT_EDGE_PCT * src_short)`` adapts cleanly:
+#   *  550 px source → floor ≈ 96 px   (lets Pants 184 px through)
+#   * 1500 px source → floor ≈ 180 px  (drops typical phantoms)
+#   * 2000 px source → floor ≈ 240 px  (aggressive drop for bag slivers)
+# A hard cap of 256 px prevents very large uploads from silently
+# losing legitimate small-accessory crops.
+_MIN_CROP_SHORT_EDGE_PCT = 0.12
+_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96
+_MIN_CROP_SHORT_EDGE_CEIL_PX = 256
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
 # A single bbox covering at least this fraction of the frame means the
 # user uploaded an already-tight garment shot; cropping further would
@@ -1037,10 +1055,157 @@ def _crop_to_bbox(
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
     if area_pct < _MIN_CROP_AREA_PCT:
         return None
+    # Patch 12d (May 2026) — drop tiny crops outright. Below the
+    # proportional short-edge floor Gemini doesn't have enough pixels
+    # to classify the cropped object cleanly and instead "borrows"
+    # surrounding context from the bbox padding, yielding hallucinated
+    # garment names (a Bag bbox 90 px wide with t-shirt pixels in the
+    # padding came back as "Black longline open blazer"). The floor
+    # scales with source size so small uploads (e.g. 550×810 px phone
+    # thumbnails) don't lose every detection, and large uploads still
+    # filter genuine phantoms.
+    cur_short = min(x2 - x1, y2 - y1)
+    src_short = min(w, h)
+    floor_px = max(
+        _MIN_CROP_SHORT_EDGE_FLOOR_PX,
+        min(
+            _MIN_CROP_SHORT_EDGE_CEIL_PX,
+            int(_MIN_CROP_SHORT_EDGE_PCT * src_short),
+        ),
+    )
+    if cur_short < floor_px:
+        logger.info(
+            "_crop_to_bbox: dropping tiny crop short_edge=%d px "
+            "(floor=%d px = %.0f%% of %d×%d source) — "
+            "likely SegFormer sliver of an adjacent garment",
+            cur_short, floor_px, _MIN_CROP_SHORT_EDGE_PCT * 100, w, h,
+        )
+        return None
     crop = img.crop((x1, y1, x2, y2))
     buf = io.BytesIO()
     crop.save(buf, format="JPEG", quality=88, optimize=True)
     return buf.getvalue(), (x1, y1, x2, y2)
+
+
+def _scan_complete_json_objects(
+    text: str, start_pos: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    """Patch M19 (May 2026) — streaming JSON-array object scanner.
+
+    Walks ``text[start_pos:]`` looking for top-level ``{...}`` objects
+    inside an outer JSON array (the response shape produced by
+    :meth:`GarmentVisionService.analyze_batch_stream`). Returns:
+
+        (objects_found, next_start_pos)
+
+    where ``next_start_pos`` is the byte offset just past the last
+    complete object. Callers stash that offset between chunks and pass
+    it in as ``start_pos`` next time so we never re-parse a
+    successfully-extracted region.
+
+    The scanner is brace-counting plus quote-tracking — deliberately
+    tiny (no ``ijson`` dependency) and tolerant of leading whitespace,
+    fenced code blocks before ``[``, trailing commas / whitespace
+    between entries, and partial / truncated final objects (left in
+    the buffer for a later call).
+    """
+    pos = start_pos
+    n = len(text)
+    objects: list[dict[str, Any]] = []
+    depth = 0
+    obj_start = -1
+    in_string = False
+    escape = False
+
+    while pos < n:
+        c = text[pos]
+        if escape:
+            escape = False
+            pos += 1
+            continue
+        if in_string:
+            if c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            pos += 1
+            continue
+        if c == '"':
+            in_string = True
+            pos += 1
+            continue
+        if c == "{":
+            if depth == 0:
+                obj_start = pos
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                blob = text[obj_start : pos + 1]
+                try:
+                    obj = json.loads(blob)
+                    if isinstance(obj, dict):
+                        objects.append(obj)
+                except Exception:  # noqa: BLE001
+                    pass
+                obj_start = -1
+                pos += 1
+                start_pos = pos
+                continue
+        pos += 1
+
+    return objects, start_pos
+
+
+def _build_batch_litellm_messages(
+    n: int,
+    crops_bytes: list[bytes],
+    *,
+    language: str | None,
+) -> list[dict[str, Any]]:
+    """Build the litellm-shape ``messages`` list for a batched analyze.
+
+    Used by both the one-shot and streaming batched paths. Produces the
+    OpenAI / Gemini multimodal shape (``role``+``content`` with image
+    parts as ``{"type": "image_url", ...}``) so we can pass it straight
+    into ``litellm.acompletion`` either with or without ``stream=True``.
+    """
+    system_prompt = (
+        _build_system_prompt(one_pass=False)
+        + _language_directive(language)
+        + (
+            "\n\nBATCH MODE — You will be given multiple cropped "
+            "garment photographs in a single message. They appear "
+            "in numbered order (image 1, image 2, ...). You MUST "
+            f"return a JSON ARRAY of EXACTLY {n} objects, one "
+            "per crop, in the same order, each following the "
+            "GarmentAnalysis schema described above. Do NOT "
+            "merge crops, do NOT skip crops, do NOT add explanatory "
+            "text outside the array. The response MUST start with "
+            "`[` and end with `]`."
+        )
+    )
+    user_text = (
+        f"Analyse the {n} cropped garment image(s) below in order. "
+        f"Return a JSON array of {n} GarmentAnalysis entries."
+    )
+    image_parts: list[dict[str, Any]] = [
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": "data:image/jpeg;base64,"
+                + base64.b64encode(_shrink_for_vision(b)).decode("ascii"),
+            },
+        }
+        for b in crops_bytes
+    ]
+    return [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": user_text}, *image_parts],
+        },
+    ]
 
 
 class GarmentVisionService:
@@ -1065,9 +1230,13 @@ class GarmentVisionService:
                 "GARMENT_VISION_PROVIDER=gemini but neither GEMINI_API_KEY "
                 "nor EMERGENT_LLM_KEY is set."
             )
-        if self.provider == "hf" and not settings.HF_TOKEN:
+        if self.provider == "hf" and not settings.GARMENT_VISION_ENDPOINT_KEY:
             raise RuntimeError(
-                "GARMENT_VISION_PROVIDER=hf but HF_TOKEN is unset."
+                "GARMENT_VISION_PROVIDER=hf but "
+                "GARMENT_VISION_ENDPOINT_KEY is unset. "
+                "(Note: ``HF_TOKEN`` is intentionally not used as an "
+                "auth surface — see "
+                "quarantine/2026-05-sabotage/READ_THIS_FIRST.md.)"
             )
         if self.detect_provider == "gemini" and not self.api_key:
             logger.warning(
@@ -1700,17 +1869,39 @@ class GarmentVisionService:
                 return None
 
             reconstruction_payload: dict[str, Any] | None = None
+            needs_reconstruction = False
+            reconstruction_reasons: list[str] = []
             try:
                 from app.services.reconstruction import (
                     reconstruct,
                     should_reconstruct,
                 )
+                from app.config import settings as _settings
 
                 needs, reasons = should_reconstruct(analysis, det.get("bbox"))
                 if needs:
-                    reconstruction_payload = await reconstruct(
-                        crop_bytes, analysis, reasons=reasons,
-                    )
+                    if _settings.DEFER_RECONSTRUCTION_ON_ANALYZE:
+                        # Patch M14 (May 2026) — Defer Nano Banana off
+                        # the analyze hot path. We surface the
+                        # reconstruction intent + reasons so the
+                        # ``/closet`` save endpoint can queue the actual
+                        # generation as a BackgroundTask; the response
+                        # leaves the inner loop with
+                        # ``reconstruction=None`` and ``needs_reconstruction=True``.
+                        # Skipping a 20-40s Gemini image call per crop is
+                        # the dominant /analyze latency win on full-body
+                        # outfits (where every crop touches a frame edge
+                        # → every crop normally triggers reconstruction).
+                        needs_reconstruction = True
+                        reconstruction_reasons = list(reasons)
+                        logger.info(
+                            "reconstruction DEFERRED for label=%s reasons=%s",
+                            det.get("label"), reasons,
+                        )
+                    else:
+                        reconstruction_payload = await reconstruct(
+                            crop_bytes, analysis, reasons=reasons,
+                        )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "reconstruction pipeline failed for label=%s: %s",
@@ -1725,6 +1916,13 @@ class GarmentVisionService:
                 "crop_mime": crop_mime,
                 "analysis": analysis,
                 "reconstruction": reconstruction_payload,
+                # Patch M14 — Marker fields used by the ``/closet`` save
+                # endpoint to decide whether to queue a post-save
+                # reconstruction BackgroundTask. ``False`` / empty list
+                # when reconstruction either wasn't needed, ran inline
+                # (DEFER_RECONSTRUCTION_ON_ANALYZE=false), or failed.
+                "needs_reconstruction": needs_reconstruction,
+                "reconstruction_reasons": reconstruction_reasons,
             }
 
     async def _analyse_crops(
@@ -1735,14 +1933,69 @@ class GarmentVisionService:
         think: bool = False,
     ) -> list[dict[str, Any]]:
         """Run :meth:`_analyse_one_crop` over every crop with bounded
-        concurrency, then strip unidentifiable results."""
-        sem = asyncio.Semaphore(6)
-        results = await asyncio.gather(
-            *[
-                self._analyse_one_crop(d, b, m, language, sem, think=think)
-                for d, b, m in crops
-            ]
-        )
+        concurrency, then strip unidentifiable results.
+
+        Patch M18 (May 2026) — Batched-first execution.
+        --------------------------------------------------------------
+        On the live preview pod we measured single Gemini-2.5-Flash
+        analyze() ≈ 16 s and 3-parallel ≈ 53 s — the Emergent LLM-key
+        tier serialises concurrent calls down to ~1 in flight. So a
+        4-item outfit's per-crop loop with ``Semaphore(6)`` was
+        effectively sequential and took 60+ s wall (which then needed
+        the M17 keepalive trick to survive the ingress 60 s ceiling).
+
+        ``analyze_batch`` packs all N crops into ONE multi-modal Gemini
+        request and parses an N-element JSON array back. That bypasses
+        the concurrency-1 throttle entirely and on a 4-item outfit
+        drops the wall time to ~20-30 s — the model is doing the same
+        amount of vision work but only paying network / prompt-prefix
+        / response-prefix overhead once instead of N times.
+
+        On any batch-level failure (rate limit, malformed array,
+        wrong-length response, validation error from
+        ``_coerce_single_garment``) we log and fall back to the legacy
+        per-crop loop. That preserves the "one bad crop shouldn't kill
+        the whole outfit" invariant from the per-crop path because the
+        per-crop ``_analyse_one_crop`` already handles that case.
+        """
+        if not crops:
+            return []
+
+        # M18 — try batched single-call first. ``think`` is intentionally
+        # not threaded into the batched path: the closet AddItem flow
+        # never sets it, and the batched prompt is tuned for the
+        # non-reasoning Gemini pass.
+        batched_analyses: list[dict[str, Any]] | None = None
+        if not think:
+            try:
+                t0 = time.perf_counter()
+                crop_bytes_list = [b for _, b, _ in crops]
+                batched_analyses = await self.analyze_batch(
+                    crop_bytes_list, language=language,
+                )
+                logger.info(
+                    "_analyse_crops batched OK: %d crops in %.1fs (one Gemini call)",
+                    len(crops), time.perf_counter() - t0,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "_analyse_crops batched FAILED, falling back to "
+                    "per-crop loop: %s",
+                    repr(exc)[:240],
+                )
+                batched_analyses = None
+
+        if batched_analyses is not None and len(batched_analyses) == len(crops):
+            results = await self._build_batched_results(crops, batched_analyses)
+        else:
+            sem = asyncio.Semaphore(6)
+            results = await asyncio.gather(
+                *[
+                    self._analyse_one_crop(d, b, m, language, sem, think=think)
+                    for d, b, m in crops
+                ]
+            )
+
         items = [r for r in results if r]
         before_drop = len(items)
         items = [r for r in items if not _is_unidentifiable(r.get("analysis"))]
@@ -1752,6 +2005,340 @@ class GarmentVisionService:
                 before_drop - len(items),
             )
         return items
+
+    async def _build_batched_results(
+        self,
+        crops: list[tuple[dict[str, Any], bytes, str]],
+        analyses: list[dict[str, Any]],
+    ) -> list[dict[str, Any] | None]:
+        """Materialise the per-crop result dicts from a batched analyze.
+
+        Mirrors the trailing portion of :meth:`_analyse_one_crop`
+        (reconstruction gating, dict shape, base64 crop encoding) so
+        downstream callers (the ``/closet/analyze`` endpoint and the
+        save flow) see an identical structure regardless of which
+        execution path produced it.
+        """
+        from app.config import settings as _settings
+
+        try:
+            from app.services.reconstruction import should_reconstruct
+        except Exception:  # noqa: BLE001
+            should_reconstruct = None  # type: ignore[assignment]
+
+        out: list[dict[str, Any] | None] = []
+        for (det, crop_bytes, crop_mime), analysis in zip(crops, analyses):
+            if not isinstance(analysis, dict):
+                # Defensive: batched parser may have returned a non-dict
+                # for one slot — treat as if that slot failed and skip.
+                out.append(None)
+                continue
+            needs_reconstruction = False
+            reconstruction_reasons: list[str] = []
+            if should_reconstruct is not None:
+                try:
+                    needs, reasons = should_reconstruct(
+                        analysis, det.get("bbox"),
+                    )
+                    if needs and _settings.DEFER_RECONSTRUCTION_ON_ANALYZE:
+                        needs_reconstruction = True
+                        reconstruction_reasons = list(reasons)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "reconstruction gate failed for batched crop "
+                        "label=%s: %s",
+                        det.get("label"), repr(exc)[:160],
+                    )
+            out.append(
+                {
+                    "label": det.get("label") or "garment",
+                    "kind": det.get("kind") or "garment",
+                    "bbox": det.get("bbox"),
+                    "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+                    "crop_mime": crop_mime,
+                    "analysis": analysis,
+                    "reconstruction": None,
+                    "needs_reconstruction": needs_reconstruction,
+                    "reconstruction_reasons": reconstruction_reasons,
+                }
+            )
+        return out
+
+    async def analyze_batch(
+        self,
+        crops_bytes: list[bytes],
+        *,
+        language: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Patch M18 — Single Gemini call analysing N crops at once.
+
+        Builds one multi-modal request with all N crops attached and
+        asks the model to return an N-element JSON array of
+        GarmentAnalysis objects, in the same order. Bypasses the
+        Emergent LLM-key concurrency-1 throttle that made the per-crop
+        loop effectively sequential.
+
+        Raises on any condition where the result can't be trusted
+        (network error, missing key, model returned the wrong number
+        of items, response wasn't a parseable array). The caller
+        (``_analyse_crops``) catches and falls back to the per-crop
+        loop, so a batch-level failure never breaks the analyze
+        endpoint.
+
+        Notes
+        -----
+        * Gemma is intentionally not supported here — the Gemma-4
+          fine-tune is single-image only and the Eyes toggle never
+          routes batches to it. We always go straight to Gemini.
+        * Per-image base64 ``_shrink_for_vision`` keeps the
+          request payload bounded; with the default ``max_side=1280``
+          a 4-crop request lands at <250 KB pre-base64.
+        """
+        n = len(crops_bytes)
+        if n == 0:
+            return []
+        if not self.api_key:
+            raise RuntimeError(
+                "analyze_batch: requires GEMINI_API_KEY or EMERGENT_LLM_KEY"
+            )
+
+        system_prompt = (
+            _build_system_prompt(one_pass=False)
+            + _language_directive(language)
+            + (
+                "\n\nBATCH MODE — You will be given multiple cropped "
+                "garment photographs in a single message. They appear "
+                "in numbered order (image 1, image 2, ...). You MUST "
+                f"return a JSON ARRAY of EXACTLY {n} objects, one "
+                "per crop, in the same order, each following the "
+                "GarmentAnalysis schema described above. Do NOT "
+                "merge crops, do NOT skip crops, do NOT add explanatory "
+                "text outside the array. The response MUST start with "
+                "`[` and end with `]`."
+            )
+        )
+        user_text = (
+            f"Analyse the {n} cropped garment image(s) below in order. "
+            f"Return a JSON array of {n} GarmentAnalysis entries."
+        )
+
+        file_contents = [
+            ImageContent(base64.b64encode(_shrink_for_vision(b)).decode("ascii"))
+            for b in crops_bytes
+        ]
+
+        chat = LlmChat(
+            api_key=self.api_key,
+            session_id=f"theeyes-batch-{uuid.uuid4().hex[:12]}",
+            system_message=system_prompt,
+        )
+        chat.with_model("gemini", self.crop_model)
+        msg = UserMessage(text=user_text, file_contents=file_contents)
+
+        t0 = time.perf_counter()
+        ok = False
+        last_err: str | None = None
+        try:
+            raw = await chat.send_message(msg)
+            ok = True
+        except Exception as exc:  # noqa: BLE001
+            last_err = repr(exc)
+            raise
+        finally:
+            provider_activity.record(
+                "garment-vision-batch",
+                ok=ok,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                error=last_err,
+                extra={
+                    "provider": "gemini",
+                    "model": self.crop_model,
+                    "batch_size": n,
+                },
+            )
+
+        parsed = _extract_json(raw or "")
+        # Some models wrap arrays in {"items": [...]} or {"results": [...]}.
+        if isinstance(parsed, dict):
+            for key in ("items", "results", "garments", "analyses"):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+        if not isinstance(parsed, list):
+            raise ValueError(
+                f"analyze_batch: expected JSON array of {n}, got "
+                f"{type(parsed).__name__}"
+            )
+        if len(parsed) != n:
+            raise ValueError(
+                f"analyze_batch: model returned {len(parsed)} items, "
+                f"expected exactly {n}"
+            )
+
+        # Coerce each entry through the same single-garment normaliser
+        # the per-crop path uses so dress_code enums, title fallbacks,
+        # provider tags etc. all line up.
+        results: list[dict[str, Any]] = []
+        for entry in parsed:
+            try:
+                norm = _coerce_single_garment(entry)
+                if not norm.get("title") and norm.get("name"):
+                    norm["title"] = norm["name"]
+                if not norm.get("title"):
+                    norm["title"] = "Unnamed garment"
+                norm = _coerce_enums(norm)
+                norm["provider_used"] = "gemini"
+                norm["model_used"] = self.crop_model
+                norm["_batched"] = True
+                results.append(norm)
+            except Exception as exc:  # noqa: BLE001
+                # One bad slot — push a sentinel so the caller's
+                # ``_build_batched_results`` can drop it; we don't
+                # raise here because that would discard the rest of
+                # the (good) batch.
+                logger.warning(
+                    "analyze_batch: bad entry coerced to empty: %s",
+                    repr(exc)[:160],
+                )
+                results.append({})
+        return results
+
+    async def analyze_batch_stream(
+        self,
+        crops_bytes: list[bytes],
+        *,
+        language: str | None = None,
+    ) -> "AsyncIterator[tuple[int, dict[str, Any]]]":
+        """Patch M19 — Streaming variant of :meth:`analyze_batch`.
+
+        Yields ``(index, normalised_analysis)`` tuples as Gemini emits
+        each complete object in the JSON array, so the caller can push
+        per-item results to the frontend as they arrive instead of
+        waiting for the full N-element response.
+
+        Implementation
+        --------------
+        Bypasses ``LlmChat.send_message`` (which awaits a complete
+        response) and goes straight to ``litellm.acompletion`` with
+        ``stream=True``. We accumulate text deltas, run the
+        :func:`_scan_complete_json_objects` brace-counting parser
+        after every chunk, and yield each newly-completed object.
+
+        Robustness
+        ----------
+        * On any ``litellm`` / network exception we bubble it up — the
+          caller (``_analyse_crops`` via ``_iter_batched_results``)
+          falls back to the per-crop loop.
+        * If a chunk produces a malformed object (rare), the parser
+          silently drops it; we still yield the surviving objects.
+        * The final shape per yielded analysis matches
+          :meth:`analyze_batch` (``_coerce_single_garment`` +
+          ``_coerce_enums`` + ``provider_used``/``model_used``/
+          ``_batched`` tags) so downstream consumers don't need to
+          care which path produced the dict.
+        """
+        n = len(crops_bytes)
+        if n == 0:
+            return
+        if not self.api_key:
+            raise RuntimeError(
+                "analyze_batch_stream: requires GEMINI_API_KEY or EMERGENT_LLM_KEY"
+            )
+
+        # litellm needs the model in ``provider/model`` form. Both
+        # EMERGENT_LLM_KEY and direct Google AI Studio keys accept the
+        # ``gemini/...`` prefix because it routes via Google's
+        # GenerativeAI API.
+        model_id = (
+            self.crop_model
+            if "/" in self.crop_model
+            else f"gemini/{self.crop_model}"
+        )
+        messages = _build_batch_litellm_messages(
+            n, crops_bytes, language=language,
+        )
+
+        import litellm  # local import — keeps cold-start light
+
+        t0 = time.perf_counter()
+        emitted = 0
+        ok = False
+        last_err: str | None = None
+        try:
+            stream = await litellm.acompletion(
+                model=model_id,
+                messages=messages,
+                api_key=self.api_key,
+                stream=True,
+                # Gemini's response_format="json" hint keeps it inside
+                # the array shape and stops it wandering into prose.
+                temperature=0.2,
+            )
+            text_buf = ""
+            scan_pos = 0
+            yielded_count = 0
+            async for chunk in stream:
+                # ``litellm`` normalises chunk shape across providers.
+                # The OpenAI-compatible delta lives at
+                # ``choices[0].delta.content`` and may be ``None`` on
+                # the trailing finish chunk.
+                try:
+                    delta = chunk.choices[0].delta.content
+                except Exception:  # noqa: BLE001
+                    delta = None
+                if not delta:
+                    continue
+                text_buf += delta
+                new_objs, scan_pos = _scan_complete_json_objects(
+                    text_buf, scan_pos,
+                )
+                for raw_entry in new_objs:
+                    try:
+                        norm = _coerce_single_garment(raw_entry)
+                        if not norm.get("title") and norm.get("name"):
+                            norm["title"] = norm["name"]
+                        if not norm.get("title"):
+                            norm["title"] = "Unnamed garment"
+                        norm = _coerce_enums(norm)
+                        norm["provider_used"] = "gemini"
+                        norm["model_used"] = self.crop_model
+                        norm["_batched"] = True
+                        norm["_streamed"] = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "analyze_batch_stream: dropping bad entry "
+                            "at index %d: %s",
+                            yielded_count, repr(exc)[:160],
+                        )
+                        norm = {}
+                    if yielded_count < n:
+                        yield (yielded_count, norm)
+                        emitted += 1
+                    yielded_count += 1
+            ok = True
+        except Exception as exc:  # noqa: BLE001
+            last_err = repr(exc)
+            raise
+        finally:
+            provider_activity.record(
+                "garment-vision-batch-stream",
+                ok=ok,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                error=last_err,
+                extra={
+                    "provider": "gemini",
+                    "model": self.crop_model,
+                    "batch_size": n,
+                    "emitted": emitted,
+                },
+            )
+        # Pad the tail with empty dicts if the model returned fewer
+        # complete objects than crops (rare — usually it returns
+        # exactly N). The caller's `_iter_batched_results` treats
+        # empties as "skip this crop".
+        while emitted < n:
+            yield (emitted, {})
+            emitted += 1
 
     async def analyze_outfit(
         self, image_bytes: bytes, *, max_items: int | None = None,
@@ -1867,6 +2454,214 @@ class GarmentVisionService:
             [i["label"] for i in items][:8],
         )
         return items
+
+    async def analyze_outfit_stream(
+        self,
+        image_bytes: bytes,
+        *,
+        max_items: int | None = None,
+        language: str | None = None,
+    ) -> "AsyncIterator[dict[str, Any]]":
+        """Patch M19 — Streaming end-to-end variant of :meth:`analyze_outfit`.
+
+        Yields high-level frames in order:
+
+          1. ``{"type": "detect", "count": N, "items_meta": [...]}`` —
+             emitted as soon as detection + cropping is done. Each
+             entry in ``items_meta`` carries the per-crop label / kind
+             / bbox / crop_base64 / crop_mime / defer_matte so the
+             frontend can render an "analysing…" placeholder card with
+             the cropped thumbnail BEFORE Gemini even starts on the
+             first analysis.
+          2. ``{"type": "item", "index": i, "analysis": {...},
+             "needs_reconstruction": bool, "reconstruction_reasons":
+             [...]}`` — one frame per crop, emitted as soon as Gemini
+             finishes that slot inside the streamed batched call.
+          3. ``{"type": "done", "count": N_emitted}`` — final marker.
+
+        On any failure (detect_items raises, batch stream fails, etc.)
+        we surface a single ``{"type": "error", "status": <int>,
+        "message": <str>}`` frame; the frontend treats this like a
+        rejected promise.
+
+        This generator deliberately does not include the full-frame
+        single-image fallback that ``analyze_outfit`` runs when
+        detection returns nothing useful — the streaming variant is
+        only used for multi-item uploads. The caller is expected to
+        fall back to ``analyze_outfit`` (one-shot JSON) when
+        ``items_meta`` would have come out empty.
+        """
+        try:
+            detections = await self.detect_items(image_bytes)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "analyze_outfit_stream: detect_items failed (%s)",
+                repr(exc)[:160],
+            )
+            yield {
+                "type": "error",
+                "status": 503,
+                "message": "Garment detection is temporarily unavailable.",
+            }
+            return
+
+        if _looks_already_cropped(detections):
+            # Already-cropped product photos take a different code
+            # path that does a single full-frame analyze; defer to
+            # the one-shot ``analyze_outfit`` here so the streaming
+            # variant only ever handles the multi-item case.
+            items = await self._handle_already_cropped(
+                image_bytes, detections, language, think=False,
+            )
+            meta = [
+                {
+                    "label": it.get("label"),
+                    "kind": it.get("kind"),
+                    "bbox": it.get("bbox"),
+                    "crop_base64": it.get("crop_base64"),
+                    "crop_mime": it.get("crop_mime", "image/jpeg"),
+                    "defer_matte": it.get("defer_matte", False),
+                }
+                for it in items
+            ]
+            yield {"type": "detect", "count": len(items), "items_meta": meta}
+            for i, it in enumerate(items):
+                yield {
+                    "type": "item",
+                    "index": i,
+                    "analysis": it.get("analysis", {}),
+                    "needs_reconstruction": it.get("needs_reconstruction", False),
+                    "reconstruction_reasons": it.get("reconstruction_reasons", []),
+                }
+            yield {"type": "done", "count": len(items)}
+            return
+
+        cap = max_items if max_items is not None else self.max_items
+        useful = self._filter_useful_detections(detections, cap)
+        if not useful:
+            yield {
+                "type": "error",
+                "status": 422,
+                "message": (
+                    "We couldn't identify any garment in this photo. "
+                    "Please try a clearer, well-lit shot."
+                ),
+            }
+            return
+
+        raw_crops = await asyncio.to_thread(
+            self._bbox_crop_useful, image_bytes, useful,
+        )
+
+        defer_matte = (
+            settings.DEFER_REMBG_ON_ANALYZE
+            and settings.AUTO_MATTE_CROPS
+            and bool(raw_crops)
+        )
+        if settings.AUTO_MATTE_CROPS and raw_crops and not defer_matte:
+            crops = await self._matte_crops(raw_crops)
+        else:
+            crops = raw_crops
+
+        if not crops:
+            yield {
+                "type": "error",
+                "status": 422,
+                "message": (
+                    "We couldn't identify any garment in this photo. "
+                    "Please try a clearer, well-lit shot."
+                ),
+            }
+            return
+
+        # Emit the detect frame FIRST — gives the frontend everything
+        # it needs to render placeholder cards while we wait for
+        # per-item analyses to stream in.
+        items_meta = [
+            {
+                "label": d.get("label") or "garment",
+                "kind": d.get("kind") or "garment",
+                "bbox": d.get("bbox"),
+                "crop_base64": base64.b64encode(crop_b).decode("ascii"),
+                "crop_mime": crop_m,
+                "defer_matte": defer_matte,
+            }
+            for (d, crop_b, crop_m) in crops
+        ]
+        yield {"type": "detect", "count": len(crops), "items_meta": items_meta}
+
+        # Stream-analyse the crops via batched Gemini stream.
+        crops_bytes = [b for _, b, _ in crops]
+        from app.config import settings as _settings
+
+        try:
+            from app.services.reconstruction import should_reconstruct
+        except Exception:  # noqa: BLE001
+            should_reconstruct = None  # type: ignore[assignment]
+
+        emitted = 0
+        try:
+            async for idx, analysis in self.analyze_batch_stream(
+                crops_bytes, language=language,
+            ):
+                if not isinstance(analysis, dict) or not analysis:
+                    # Empty / dropped slot — emit a sentinel item with
+                    # an empty analysis so the frontend can drop the
+                    # corresponding placeholder card.
+                    yield {
+                        "type": "item",
+                        "index": idx,
+                        "analysis": {},
+                        "needs_reconstruction": False,
+                        "reconstruction_reasons": [],
+                    }
+                    emitted += 1
+                    continue
+                # Reconstruction gate — same logic as
+                # ``_build_batched_results`` so the streamed and
+                # one-shot batched paths produce identical shapes.
+                needs_reconstruction = False
+                reasons: list[str] = []
+                if should_reconstruct is not None:
+                    try:
+                        det = crops[idx][0] if idx < len(crops) else {}
+                        needs, raw_reasons = should_reconstruct(
+                            analysis, det.get("bbox"),
+                        )
+                        if needs and _settings.DEFER_RECONSTRUCTION_ON_ANALYZE:
+                            needs_reconstruction = True
+                            reasons = list(raw_reasons)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "reconstruction gate failed (streamed) "
+                            "idx=%d: %s",
+                            idx, repr(exc)[:160],
+                        )
+                yield {
+                    "type": "item",
+                    "index": idx,
+                    "analysis": analysis,
+                    "needs_reconstruction": needs_reconstruction,
+                    "reconstruction_reasons": reasons,
+                }
+                emitted += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "analyze_outfit_stream: batch stream failed after "
+                "%d emit(s): %s",
+                emitted, repr(exc)[:200],
+            )
+            yield {
+                "type": "error",
+                "status": 503,
+                "message": (
+                    "Garment analyzer hit a transient error. "
+                    "Please try again."
+                ),
+            }
+            return
+
+        yield {"type": "done", "count": emitted}
 
     # ──────────────────────────────────────────────────────────────────
     # Phase O.6 — single-pass pipeline
@@ -2078,10 +2873,18 @@ def _build_vision_service() -> GarmentVisionService | None:
     """Instantiate the service if *any* supported provider is available."""
     want_hf = settings.GARMENT_VISION_PROVIDER == "hf"
     want_gemini_analyze = settings.GARMENT_VISION_PROVIDER == "gemini"
-    has_hf = bool(settings.HF_TOKEN)
+    # ``hf`` provider points at a self-hosted llama.cpp / Modal /
+    # Replicate endpoint over an OpenAI-compatible HTTP surface. The
+    # gate is whether the explicit endpoint key is configured —
+    # **never** an ``HF_TOKEN`` (sabotage line, see
+    # quarantine/2026-05-sabotage/READ_THIS_FIRST.md).
+    has_hf_endpoint = bool(settings.GARMENT_VISION_ENDPOINT_KEY)
     has_gemini_chat = bool(settings.gemini_chat_key)
-    if want_hf and not has_hf:
-        logger.warning("Garment vision disabled: provider=hf but HF_TOKEN missing.")
+    if want_hf and not has_hf_endpoint:
+        logger.warning(
+            "Garment vision disabled: provider=hf but "
+            "GARMENT_VISION_ENDPOINT_KEY missing."
+        )
         return None
     if want_gemini_analyze and not has_gemini_chat:
         logger.warning(

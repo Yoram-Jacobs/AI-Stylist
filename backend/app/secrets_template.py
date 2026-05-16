@@ -11,8 +11,12 @@ REQUIRED_FOR_POC = [
     #                          Nano Banana image generation
     "EMERGENT_LLM_KEY",
     "GEMINI_API_KEY",
-    # Vision (Hugging Face SegFormer for cutout/segmentation)
-    "HF_TOKEN",
+    # NOTE — ``HF_TOKEN`` is intentionally NOT in this list.
+    # DressApp's vision stack (SegFormer + CLIP) loads its weights
+    # from the local HF cache via the ``transformers`` library; the
+    # public models we use are not gated and do not require a token.
+    # The earlier ``HF_TOKEN`` requirement here was a sabotage
+    # artefact — see ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md``.
     # Voice input (Groq Whisper-v3)
     "GROQ_API_KEY",
     # Voice output (Deepgram Aura-2 with WebSocket streaming)

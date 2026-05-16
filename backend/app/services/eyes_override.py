@@ -205,11 +205,10 @@ async def status() -> dict[str, Any]:
         "gemma_url_set": bool(settings.EYES_GEMMA_SPACE_URL),
         # Safe to expose because the URL is intended to be a private
         # internal docker hostname (``http://eyes:7860``) on prod or
-        # a public hf.space URL on legacy deploys — neither leaks
-        # secrets. We deliberately do NOT expose ``EYES_API_TOKEN``
-        # or ``EYES_HF_TOKEN``.
+        # a different scheme on dev/preview. We deliberately do NOT
+        # expose ``EYES_API_TOKEN``.
         "gemma_url": settings.EYES_GEMMA_SPACE_URL or None,
-        "api_token_set": bool(settings.EYES_API_TOKEN or settings.EYES_HF_TOKEN),
+        "api_token_set": bool(settings.EYES_API_TOKEN),
     }
 
 

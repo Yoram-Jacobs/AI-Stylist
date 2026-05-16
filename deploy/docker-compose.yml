@@ -55,9 +55,11 @@ services:
   # the dress network. Caddy never proxies it. Lifts the Qwen-VL
   # leg of garment_vision.py when EYES_PROVIDER=gemma in .env.
   #
-  # First boot pulls a 3.4 GB GGUF from HuggingFace (private repo,
-  # auth via EYES_HF_TOKEN). Cached afterwards in eyes-cache, so
-  # subsequent restarts take ~30 s for model load only.
+  # Model artefacts: the container loads its GGUF + mmproj from a
+  # bind-mounted local directory (see ``volumes:`` below). It does
+  # NOT download from HuggingFace at runtime — see
+  # ``quarantine/2026-05-sabotage/READ_THIS_FIRST.md`` for why the
+  # earlier HF-download bootstrap was removed.
   # ---------------------------------------------------------------
   eyes:
     build:
@@ -67,7 +69,6 @@ services:
     container_name: dressapp-eyes
     restart: unless-stopped
     environment:
-      EYES_HF_TOKEN: ${EYES_HF_TOKEN:-}
       EYES_API_TOKEN: ${EYES_API_TOKEN:-}
       # Optional: set in .env once you push the vision projector to
       # enable the LLaVA chat handler. Until then, Phase 1 is text-only.
