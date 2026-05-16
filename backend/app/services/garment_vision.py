@@ -707,7 +707,21 @@ _BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[float, float, float, float]] = {
     # ``_postprocess_mask`` is uniform — the outer 1.5 % of mask
     # pixels are the noisy/uncertain ones; the dominant garment body
     # is well inside.
-    "top":        (0.04, 0.02, -0.015, 0.02),
+    #
+    # Patch 12l (May 2026, "delicate borderline") — bottom edge
+    # dialled another 1.0 pp to **-2.5 %**. The 12k value left a
+    # faint dark rim of skirt-waistband on the blouse card in the
+    # May 2026 test photo because the SegFormer over-claim there
+    # was ~2 % of frame height (turtleneck blouse with a fitted
+    # bottom hem worn over a high-waisted skirt — the
+    # blouse-skirt transition was a single high-contrast pixel
+    # line that SegFormer happily classified either way). Going
+    # from -1.5 % to -2.5 % erases the rim without cropping into
+    # the actual blouse hem (the garment body has another ~5 %+
+    # of vertical breathing room below before the SegFormer
+    # confidence drops). Skirt + footwear cards untouched —
+    # they were already clean per the user screenshot.
+    "top":        (0.04, 0.02, -0.025, 0.02),
     # Bottom: waistline AND hem are both adjacent to other body
     # regions (top above, footwear/skin below). Both edges go
     # negative; the hem edge is the more aggressive one because the

@@ -984,6 +984,18 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch 12l — Delicate-borderline twink on Top.bottom (-1.5 % → -2.5 %) — SHIPPED
+
+User screenshot after 12k showed the skirt + boots cards clean but
+the blouse card still had a faint dark rim of skirt-waistband at the
+bottom edge. Root cause: this particular outfit (turtleneck blouse
+with fitted bottom hem worn over a high-waisted skirt) had a
+~2 % over-claim on the SegFormer bbox; the 12k value of -1.5 % was
+short of that. Dialled `top.bottom` from `-1.5 %` to `-2.5 %`. No
+other categories touched (skirt and footwear cards were already
+clean). Single-line table-only diff in
+`_BBOX_PAD_TRBL_BY_CATEGORY`. Ruff lint clean, backend boots clean.
+
 ## ✅ Patch 12k — "One more twink": negative padding at boundary edges — SHIPPED
 
 **Bug:** After Patch 12j (asymmetric per-category bbox padding, with
