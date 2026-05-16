@@ -604,6 +604,46 @@ lands, the cached thumbnail is invalidated (`$unset thumbnail_data_url`)
 so the next read regenerates from the freshly reconstructed image.
 No frontend change needed; the React store already polls deferred work.
 
+## ✅ Patch M15 — Raise `_ANALYZE_LOCK` semaphore from 1 → 3 (SHIPPED)
+
+**Diagnosis from live preview logs after M14:** Single-request
+`/analyze` dropped from 50-60 s → **17-31 s** as designed. But user
+DevTools screenshots still showed 502s on **bulk uploads** (multiple
+photos at once). Root cause: a hard `asyncio.Semaphore(1)` lock
+inside `closet.py` was serialising every `/analyze` call across the
+whole process — so on 4-photo bulk upload, the 4th call waited
+~70-90 s behind the queue and the Kubernetes ingress killed it with
+a 502, even though the backend ultimately returned 200 OK seconds
+later.
+
+**The lock's original rationale was OBSOLETE:**
+- It was added to prevent OOM from two concurrent `rembg` onnxruntime
+  sessions on a 3 GB Hetzner box.
+- Patch 8 (`DEFER_REMBG_ON_ANALYZE=true`) already removed rembg from
+  the analyze hot path → it's a post-save BackgroundTask now.
+- Patch M14 (`DEFER_RECONSTRUCTION_ON_ANALYZE=true`) just removed
+  Nano Banana from the same hot path → also a post-save BackgroundTask.
+- What remains inside `/analyze`: SegFormer (one short CPU spike,
+  ~2-4 s) + Gemini API calls (network-bound, no local memory).
+  Both safely parallelisable.
+
+**Implementation:**
+- New env var `ANALYZE_CONCURRENCY` (default `3`), read at module
+  import time.
+- `_ANALYZE_LOCK = asyncio.Semaphore(_ANALYZE_CONCURRENCY)`.
+- All four existing `async with _ANALYZE_LOCK` call sites unchanged —
+  they just block fewer requests now.
+
+**Effect on bulk uploads:**
+- Before: 4 photos × 25 s serial = 100 s → 4th hits 502.
+- After: 4 photos × 25 s with concurrency-3 = max ≈ 50 s wall
+  (3 concurrent + 1 queued briefly) → all complete under the 60 s
+  ceiling.
+
+**Kill switch:** Set `ANALYZE_CONCURRENCY=1` on RAM-constrained
+production deploys (e.g. 1 GB Emergent host pod) to restore the
+legacy single-lane behaviour without a code change.
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops

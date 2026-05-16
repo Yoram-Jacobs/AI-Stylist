@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,14 +47,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/closet", tags=["closet"])
 
 # Process-wide guard around the heavy analyze pipeline (SegFormer +
-# rembg + Gemini). On RAM-constrained production VPSs (e.g. 3 GB
-# Hetzner box) running two of these in parallel reliably OOMs the
-# second one inside rembg's onnxruntime session — symptom: the second
-# upload silently "lands as-is" with blank fields. Serialising at the
-# endpoint layer makes the API safe regardless of how many tabs /
-# parallel clients hit it. Sub-crops within a single call still run
-# concurrently via the inner Semaphore in `analyze_outfit`.
-_ANALYZE_LOCK = asyncio.Semaphore(1)
+# Gemini API calls). Historically this was a hard Semaphore(1) because
+# rembg ran INSIDE ``/analyze`` and two concurrent onnxruntime sessions
+# reliably OOM-killed the second one on the 3 GB Hetzner box (symptom:
+# the second upload silently "lands as-is" with blank fields).
+#
+# Patch M15 (May 2026) — that motivation is gone. ``/analyze`` no
+# longer runs rembg (Patch 8 deferred it to a post-save BackgroundTask
+# via ``DEFER_REMBG_ON_ANALYZE``) and no longer runs Nano Banana
+# reconstruction either (Patch M14 deferred it via
+# ``DEFER_RECONSTRUCTION_ON_ANALYZE``). What remains inside the hot
+# path is SegFormer (one short CPU spike) + Gemini API calls (network-
+# bound, no local memory). Both are safely parallelisable.
+#
+# Keeping the semaphore at 1 was the *real* cause of "Analysis failed
+# on second/third bulk upload" 502s: with each call taking 17-31 s
+# post-M14, the 3rd-4th queued request waited >60 s and the Kubernetes
+# ingress killed it with a 502 — even though the backend ultimately
+# returned 200 OK seconds later.
+#
+# Default raised to 3 concurrent analyses. Tunable via
+# ``ANALYZE_CONCURRENCY`` env var so RAM-constrained deploys can dial
+# it back to 1 without a code change.
+_ANALYZE_CONCURRENCY = max(1, int(os.environ.get("ANALYZE_CONCURRENCY", "3")))
+_ANALYZE_LOCK = asyncio.Semaphore(_ANALYZE_CONCURRENCY)
+logger.info(
+    "closet: analyze concurrency = %d (env ANALYZE_CONCURRENCY)",
+    _ANALYZE_CONCURRENCY,
+)
 
 
 class CreateItemIn(BaseModel):
