@@ -515,6 +515,26 @@ export default function AddItem() {
       // missing silently.
       skippedDuplicates: skippedDuplicates || 0,
     });
+    // Patch M20.4 (May 2026) — Single batch-level workStore job
+    // (was one job per file in M20.3, which made the floater read
+    // "Analysing 1 item" per row instead of "Analysing N/M files"
+    // for the whole batch). Now we register ONE job with
+    // ``total = files.length``, bump ``items`` after every file
+    // completes, and ``completeAnalyze`` after the worker loop
+    // exits. Counter reads "Analysing 2/6 files" → "3/6" → ...
+    // → cleared.
+    const batchAnalyzeJobId =
+      `bg-batch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const batchLabel =
+      files.length === 1
+        ? files[0]?.name || '1 photo'
+        : `${files.length} photos`;
+    workStore.registerAnalyze(batchAnalyzeJobId, batchLabel);
+    workStore.updateAnalyze(batchAnalyzeJobId, {
+      items: 0,
+      total: files.length,
+    });
+    let filesDone = 0;
     toast.success(
       t('addItem.bgUpload.started', {
         count: files.length,
@@ -553,17 +573,10 @@ export default function AddItem() {
       let failedHere = 0;
       let analyzeFailedHere = 0;
       let b64 = null;
-      // Patch M20.3 (May 2026) — Wire the silent batch path into the
-      // global ``workStore`` so the cross-page floater + completion
-      // toast that the interactive ``analyzeCard`` flow already gets
-      // also fire for >5-photo uploads. Each file gets a unique
-      // analyze job id so concurrent labels render cleanly on the
-      // floater. ``completeAnalyze`` runs in the ``finally`` block
-      // below so a thrown error / OOM doesn't leave a phantom job
-      // ticking forever.
-      const analyzeJobId =
-        `bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      workStore.registerAnalyze(analyzeJobId, file?.name || null);
+      // Patch M20.4 — collect polish candidates per file; registered
+      // with workStore at the bottom of processOne so the global
+      // polish tracker fires "Polishing N/M photos" + "You have news
+      // in your closet" toast at the right times.
       const polishCandidates = [];
       // Phase Z2 — recompute the fingerprint here so each saved item
       // carries source_sha256/filename/size in the DB, even on the
@@ -592,7 +605,11 @@ export default function AddItem() {
         b64 = await fileToBase64(file);
       } catch (_) {
         failedHere += 1;
-        workStore.completeAnalyze(analyzeJobId);
+        filesDone += 1;
+        workStore.updateAnalyze(batchAnalyzeJobId, {
+          items: filesDone,
+          total: files.length,
+        });
         setBgBatch((b) => (b ? { ...b, processed: b.processed + 1, failed: b.failed + failedHere } : null));
         return;
       }
@@ -608,17 +625,6 @@ export default function AddItem() {
           Array.isArray(resp?.items) && resp.items.length > 0
             ? resp.items
             : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
-        // Patch M20.3 — Update the floater so the user sees how many
-        // garments this photo decomposed into (a single shot can
-        // yield 1-4 items via SegFormer detection). For a 6-photo
-        // batch, the floater walks through e.g. "Analysing 1/3" for
-        // the first photo, then "Analysing 1/2" when the next one
-        // starts. Each ``analyzeJobId`` is independent, so the
-        // floater renders one row per file in flight.
-        workStore.updateAnalyze(analyzeJobId, {
-          items: analysisItems.length,
-          total: analysisItems.length,
-        });
       } catch (_) {
         analyzeFailedHere += 1;
         analysisItems = [
@@ -633,6 +639,19 @@ export default function AddItem() {
           file: null,
           fields: hydrate(it.analysis || {}, user),
           useReconstructed: false,
+          // Patch M20.4 (May 2026) — forward the analyzer's
+          // ``defer_matte`` flag so ``buildCreatePayload`` sets
+          // ``defer_matte: true`` on the /closet POST. The backend's
+          // ``create_item`` then leaves ``clean_image_status =
+          // "pending"`` on the response and queues
+          // ``_run_background_matte`` as a fire-and-forget BackgroundTask.
+          // Without this, the silent batch path's items were saved
+          // with synchronous matte already done → status='ready' on
+          // creation → workStore never saw them as "pending" → no
+          // "Polishing N/M photos" row on the floater → no
+          // "You have news in your closet" toast. Bug visible on
+          // the May 2026 6-photo silent batch test ("No Polishing").
+          deferMatte: !!it.defer_matte,
           // Phase Z2 — fingerprint passthrough into buildCreatePayload
           // so the row stored in Mongo carries source_sha256 etc. and
           // future uploads of the same file get caught by the
@@ -708,14 +727,18 @@ export default function AddItem() {
         }
       }
 
-      // Patch M20.3 — Release the floater slot for this file BEFORE
-      // bumping ``bgBatch.processed`` so the floater's "Analysing"
-      // counter ticks down as each file finishes, regardless of
-      // success/failure. Done in finally-style flow (no actual
-      // try/finally because the await chain above is already
-      // exception-safe — caught errors are counted in failedHere /
-      // analyzeFailedHere, not re-raised).
-      workStore.completeAnalyze(analyzeJobId);
+      // Patch M20.4 — bump the SHARED batch-level workStore counter
+      // (was a per-file ``completeAnalyze(analyzeJobId)`` in M20.3
+      // which made the floater show "Analysing 1 item" per row
+      // instead of the proper "N/M files" aggregate). Done in
+      // finally-style flow — no try/finally needed because the
+      // await chain above is already exception-safe (caught errors
+      // are counted in failedHere / analyzeFailedHere, not re-raised).
+      filesDone += 1;
+      workStore.updateAnalyze(batchAnalyzeJobId, {
+        items: filesDone,
+        total: files.length,
+      });
       // Register any pending-matte items with the global polish
       // tracker so the floater shows "Polishing N/M photos" and the
       // ``WorkBatchDoneToast`` fires once the last one drains.
@@ -748,6 +771,14 @@ export default function AddItem() {
         await processOne(next);
       }
     }
+
+    // Patch M20.4 — Worker loop done. Clear the batch-level analyze
+    // job so the floater's "Analysing N/M files" row disappears.
+    // The polish tracker (registered per-file via
+    // ``workStore.registerPolishItems``) keeps running independently
+    // until each pending item drains; ``WorkBatchDoneToast`` then
+    // fires the "You have news in your closet" toast.
+    workStore.completeAnalyze(batchAnalyzeJobId);
 
     // Read final counts from state via functional update so we don't
     // race with React batching.

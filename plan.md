@@ -984,6 +984,61 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.4 — Silent batch UX fixes (counter aggregate + deferMatte + polishing) — SHIPPED
+
+User feedback after M20.3 surfaced three concrete issues with the
+silent batch path:
+
+### Issue 1 — "Analysing 1 item" instead of "1/N files"
+The M20.3 wiring registered ONE workStore job per file with
+`updateAnalyze(jobId, {items: N, total: N})` set immediately to the
+per-photo decomposition count. Result on the floater:
+"Analysing 1 item" per row, no aggregate batch progress.
+
+**Fix:** Replaced N per-file jobs with ONE batch-level job at
+`handleBatchBackground` entry:
+```jsworkStore.registerAnalyze(batchAnalyzeJobId, "6 photos");
+workStore.updateAnalyze(batchAnalyzeJobId, { items: 0, total: 6 });
+```
+A shared `filesDone` counter is bumped inside `processOne` after
+each file completes (success or failure), and the job is
+`completeAnalyze`d once the worker loop exits. Floater now reads
+"Analysing N/M files" → ticks down → cleared.
+
+### Issue 2 — "13 cards from 6 complex photos, expected 20-30"
+**Not addressed in this patch — requires backend investigation.**
+Suspicion: a combination of (a) `_MIN_CROP_AREA_PCT=0.008` floor
+dropping small accessories/jewellery detected by SegFormer, plus
+(b) Patch 12k/12l's negative bbox padding pushing borderline items
+below that floor on tight crops. Need to add detection-count
+telemetry to `analyze_outfit` and run a controlled test before
+tuning. Filed as a separate backlog item.
+
+### Issue 3 — "No Polishing"
+The silent path's `cardLike` (built per analyzed item before
+`api.createItem`) was missing the `deferMatte` flag. Backend
+`create_item` therefore ran the matte synchronously → returned
+`clean_image_status='ready'` directly → workStore never saw any
+"pending" items → no "Polishing N/M photos" row, no
+"You have news in your closet" toast.
+
+**Fix:** Threaded `deferMatte: !!it.defer_matte` into `cardLike` so
+`buildCreatePayload` sets the flag on the POST body. Backend
+queues `_run_background_matte` as a BackgroundTask, returns
+`clean_image_status='pending'`, and the existing
+`polishCandidates.push(created)` collection now actually fires.
+Floater shows "Polishing N/M photos" and `WorkBatchDoneToast`
+fires when the last item drains.
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBatchBackground` +
+  `processOne` — replaced per-file workStore jobs with one
+  batch-level job, added `deferMatte` to `cardLike`, added
+  batch-level `completeAnalyze` after the worker loop)
+- `plan.md` (this entry)
+
+**Lint:** ESLint clean, esbuild clean.
+
 ## ✅ Patch M20.3 — Silent batch path wired into `workStore` (UX parity) — SHIPPED
 
 **Gap:** The interactive `analyzeCard` flow (≤5 photos) was wired
