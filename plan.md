@@ -978,11 +978,11 @@ keeps showing Polishing photo…".
   polish batch resolves; the toast has an "Open closet" action that
   navigates to /closet.
 - `Closet.jsx::ItemCardInner` — the per-card "Polishing photo…"
-  text badge is RETIRED. Replaced with a subtle full-card
-  `ring-1 animate-pulse` overlay + a 30 % opacity dim on the
-  thumbnail so the user can still identify WHICH cards are
-  mid-polish, but the global floater + toast carry the textual
-  progress.
+  text badge is KEPT (user feedback Patch M20.1 — useful to know
+  WHICH cards are still mid-polish). The badge and the global
+  floater coexist by design: the floater shows aggregate progress
+  ("Polishing N/M photos") and the per-card badge identifies the
+  specific in-flight items.
 
 **Both `WorkProgressFloater` and `WorkBatchDoneToast` are mounted at
 App root** (already scaffolded), so they render on every authenticated

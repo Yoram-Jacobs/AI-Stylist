@@ -879,37 +879,35 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
                   // for tiny crops, indistinguishable from cover on
                   // garment-shaped portrait images that already match
                   // ~3:4.
-                  className={
-                    'w-full h-full object-contain transition-opacity duration-300 '
-                    + (polishing ? 'opacity-70' : 'opacity-100')
-                  }
+                  className="w-full h-full object-contain"
                   data-testid="closet-item-thumb"
                 />
                 {polishing && (
-                  // Patch M20 (May 2026) — Per-card "Polishing photo…"
-                  // badge retired in favour of the global
-                  // ``WorkProgressFloater`` mounted at App root, which
-                  // shows a single "Polishing N/M photos" pill with a
-                  // progress bar across all in-flight items. The
-                  // floater pairs with the "You have news in your
-                  // closet" toast (``WorkBatchDoneToast``) that fires
-                  // once when the last item drains.
+                  // Phase O.6 — subtle "polishing photo…" affordance
+                  // while the backend's background rembg matte is
+                  // running. The closet poll (Closet.jsx top-level)
+                  // will swap the image in-place when status flips
+                  // to "ready".
                   //
-                  // We KEEP a subtle per-card affordance so the user
-                  // can visually identify WHICH items are mid-polish
-                  // when there are several in flight — a faint
-                  // top-left animated shimmer ring on the thumb,
-                  // rendered via a thin translucent overlay instead
-                  // of a textual badge. The ``polishing`` opacity dim
-                  // applied to the <img> above is the primary signal;
-                  // this absolute overlay just adds the pulse so the
-                  // user knows "this card is updating" without the
-                  // blinking-tab noise of the old text badge.
+                  // Patch M20.1 (May 2026, user feedback) — Kept as
+                  // a per-card textual badge alongside the global
+                  // ``WorkProgressFloater``. The floater shows
+                  // aggregate "Polishing N/M photos" progress; this
+                  // badge identifies WHICH specific cards are still
+                  // mid-polish so the user can scan and know what's
+                  // about to update. Both indicators co-exist by
+                  // design.
                   <div
-                    className="absolute inset-0 ring-1 ring-inset ring-[hsl(var(--accent))]/30 animate-pulse pointer-events-none"
+                    className="absolute inset-0 flex items-end justify-start p-2 pointer-events-none"
                     data-testid="closet-item-polishing"
-                    aria-label={t('item.polishingPhoto', { defaultValue: 'Polishing photo…' })}
-                  />
+                  >
+                    <Badge
+                      variant="outline"
+                      className="bg-background/85 backdrop-blur text-[10px] border-[hsl(var(--accent))]/40 animate-pulse"
+                    >
+                      {t('item.polishingPhoto', { defaultValue: 'Polishing photo…' })}
+                    </Badge>
+                  </div>
                 )}
               </>
             );
