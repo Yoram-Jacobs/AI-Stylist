@@ -663,6 +663,121 @@ DETECT_SYSTEM_PROMPT = (
 
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
+# Patch 12j (May 2026) — per-category asymmetric bbox padding. The
+# flat 4 % budget above is now the BACKWARD-COMPAT default for callers
+# that don't pass a category. When category is known we use a
+# per-edge ``(top, right, bottom, left)`` tuple so:
+#
+#   * The torso boundary (waistline = top's bottom edge + bottom's top
+#     edge) gets 0.5 % padding — just enough to avoid Pillow rounding
+#     glitches but tight enough that the adjacent garment never makes
+#     it into the crop frame.
+#   * The ankle boundary (bottom's bottom edge + footwear's top edge)
+#     gets the same 0.5 % treatment.
+#   * "Free" edges (top's collar/face, dress's neckline, footwear's
+#     ground side, hat's free top) keep a generous 3-4 % so puffy
+#     cuffs / boot heels / floppy brims aren't clipped.
+#
+# This is the second half of the "tighten the margin" fix. Patch 12i
+# tightened the SegFormer alpha dilation per-category; this patch
+# tightens the BBOX CROP itself per-category, which is the more
+# important defence because the dilation can only work with pixels
+# that survived the bbox crop. On the May 2026 outfit screenshot
+# (blouse + skirt + thigh-high boots) the previous 4 % bottom padding
+# on the blouse bbox dragged 4 % × ~1500 px = 60 px of skirt into the
+# blouse crop; SegFormer flagged those pixels as "not Upper-clothes"
+# and the dilated intersection still admitted them because rembg
+# kept them as foreground (it was after all part of the original
+# matte). Tightening the bottom edge to 0.5 % (≈ 7 px) makes the
+# bbox stop AT the waistline; the skirt never enters the frame.
+_BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[float, float, float, float]] = {
+    # Top / Outerwear-like upper garment: face-side loose, waistline
+    # tight. Sides slightly tight too (avoid pulling in adjacent
+    # hands / bags).
+    #
+    # Patch 12k (May 2026, "one more twink") — bottom edge bumped
+    # from +0.5 % to **-1.5 %**, i.e. the crop now ends 1.5 % INSIDE
+    # the SegFormer-derived bbox at the waistline. The 0.5 % positive
+    # margin from Patch 12j wasn't enough on the May 2026 test photo:
+    # the SegFormer mask itself was over-claiming a few percent of
+    # waistband/skirt-top pixels as "Upper-clothes", so the bbox was
+    # already too tall before any padding was added. Negative padding
+    # bites INTO the bbox and trims that over-claim. The real blouse
+    # body still survives because morphological closing in
+    # ``_postprocess_mask`` is uniform — the outer 1.5 % of mask
+    # pixels are the noisy/uncertain ones; the dominant garment body
+    # is well inside.
+    #
+    # Patch 12l (May 2026, "delicate borderline") — bottom edge
+    # dialled another 1.0 pp to **-2.5 %**. The 12k value left a
+    # faint dark rim of skirt-waistband on the blouse card in the
+    # May 2026 test photo because the SegFormer over-claim there
+    # was ~2 % of frame height (turtleneck blouse with a fitted
+    # bottom hem worn over a high-waisted skirt — the
+    # blouse-skirt transition was a single high-contrast pixel
+    # line that SegFormer happily classified either way). Going
+    # from -1.5 % to -2.5 % erases the rim without cropping into
+    # the actual blouse hem (the garment body has another ~5 %+
+    # of vertical breathing room below before the SegFormer
+    # confidence drops). Skirt + footwear cards untouched —
+    # they were already clean per the user screenshot.
+    "top":        (0.04, 0.02, -0.025, 0.02),
+    # Bottom: waistline AND hem are both adjacent to other body
+    # regions (top above, footwear/skin below). Both edges go
+    # negative; the hem edge is the more aggressive one because the
+    # skirt-vs-thigh / skirt-vs-boot boundary is where SegFormer is
+    # least confident on the May 2026 test photo (visible leak of
+    # legs + boot tops bottom of skirt card).
+    "bottom":     (-0.015, 0.02, -0.025, 0.02),
+    # Dress / Full Body: same logic — neckline tight, hem tight (no
+    # floor / shoes / mat).
+    "dress":      (0.02, 0.02, -0.020, 0.02),
+    "fullbody":   (0.02, 0.02, -0.020, 0.02),
+    "full body":  (0.02, 0.02, -0.020, 0.02),
+    # Outerwear: collar overlaps neckline of underlying top — tighten
+    # top edge. Hem of an open coat shows pants behind — tighten
+    # bottom too. Sides loose to keep the silhouette.
+    "outerwear":  (0.01, 0.03, -0.010, 0.03),
+    # Footwear: top edge tight (avoid trouser hem leaking) — now
+    # negative so we bite past the SegFormer bbox top. Bottom / sides
+    # loose so the heel + sole stay in frame.
+    "footwear":   (-0.015, 0.03, 0.03, 0.03),
+    # Headwear: free-edge garment — generous padding all around so
+    # the brim / pom-pom isn't clipped.
+    "headwear":   (0.04, 0.04, 0.03, 0.04),
+    # Accessory: tight all-around. Most accessories (belts, scarves,
+    # sunglasses, bags) sit against another garment and benefit from
+    # a minimum-padding crop.
+    "accessory":  (0.015, 0.015, 0.015, 0.015),
+    "accessories": (0.015, 0.015, 0.015, 0.015),
+    "underwear":  (0.015, 0.015, 0.015, 0.015),
+}
+_BBOX_PAD_TRBL_DEFAULT = (
+    _BBOX_PADDING_PCT, _BBOX_PADDING_PCT,
+    _BBOX_PADDING_PCT, _BBOX_PADDING_PCT,
+)
+
+
+def _resolve_bbox_pad_trbl_for_category(
+    category: str | None,
+) -> tuple[float, float, float, float]:
+    """Look up the per-category bbox padding as ``(top, right, bottom, left)``.
+
+    Case-insensitive, whitespace-insensitive. Falls back to
+    ``_BBOX_PAD_TRBL_DEFAULT`` (4 % all-around — the original Patch 12
+    budget) when the category is missing or not in the table.
+    """
+    if not category:
+        return _BBOX_PAD_TRBL_DEFAULT
+    key = str(category).strip().lower()
+    if not key:
+        return _BBOX_PAD_TRBL_DEFAULT
+    if key in _BBOX_PAD_TRBL_BY_CATEGORY:
+        return _BBOX_PAD_TRBL_BY_CATEGORY[key]
+    key_collapsed = key.replace(" ", "")
+    return _BBOX_PAD_TRBL_BY_CATEGORY.get(key_collapsed, _BBOX_PAD_TRBL_DEFAULT)
+
+
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
 # Patch 12d (May 2026) — short-edge floor for crop output, expressed
 # as a PROPORTIONAL function of the source image's short edge. The
@@ -1026,13 +1141,171 @@ def _coerce_enums(parsed: dict[str, Any]) -> dict[str, Any]:
     return parsed
 
 
+# ---------------------------------------------------------------------------
+# Patch M21 (May 2026) — SegFormer-anchored category enforcement.
+# ---------------------------------------------------------------------------
+# SegFormer (``clothing_parser.parse_garments``) returns a per-pixel
+# garment classification that we use to crop the source photo into
+# per-garment images. The internal category it assigns (top, bottom,
+# dress, footwear, accessory, headwear) is HIGHLY reliable on the
+# pixels it claims — it's trained on the ATR clothes-parsing dataset
+# and rarely confuses pant-leg pixels for a coat sleeve at the mask
+# level.
+#
+# Gemini, on the other hand, is a free-form vision LLM that classifies
+# the WHOLE CROP. When a bbox is loose and a sliver of an adjacent
+# garment leaks in (e.g. coat tails over pants), Gemini can be lured
+# into mis-labeling. Real example from the May 2026 closet test:
+# pants crop with charcoal coat tails leaking into the top edge →
+# Gemini returned ``{"category": "Outerwear", "sub_category":
+# "Overcoat"}`` → user saw a "Charcoal Overcoat" card in their closet
+# that was actually pants.
+#
+# Fix: anchor Gemini's ``category`` to the SegFormer ``kind``. For
+# unambiguous SegFormer kinds (bottom, dress, footwear, accessory,
+# headwear) we REJECT any Gemini category outside the compatible set
+# and overwrite it. For ambiguous kinds (``top`` — could legitimately
+# be Top or Outerwear) we leave Gemini's classification alone so it
+# can still distinguish a t-shirt from a parka.
+#
+# Two-layer defence:
+#   1. PROMPT HINT — every batched Gemini call now embeds the per-
+#      crop SegFormer kind in the system prompt so the model has the
+#      hint up-front. Cheaper than overriding; usually enough.
+#   2. POST-VALIDATION — applied after _coerce_enums on every analysis
+#      coming back from Gemini, regardless of which path produced it.
+#      Catches the cases where Gemini ignored the hint.
+
+# Internal SegFormer kind → set of acceptable Gemini ``category`` values
+# (case-insensitive match). Any Gemini answer OUTSIDE this set is
+# treated as an error and overridden.
+_SEGFORMER_KIND_TO_ALLOWED_CATEGORIES: dict[str, set[str]] = {
+    # SegFormer's "top" covers everything upper-body — shirts, tees,
+    # blouses, sweaters, jackets, coats. We let Gemini decide between
+    # Top and Outerwear because it has the vocabulary to distinguish
+    # a t-shirt from a parka, and either is a legitimate match for
+    # the SegFormer kind.
+    "top": {"top", "outerwear"},
+    # SegFormer's "bottom" covers pants / skirts / shorts — unambiguous.
+    "bottom": {"bottom"},
+    # SegFormer's "dress" is a full-body garment.
+    "dress": {"full body", "dress"},
+    "footwear": {"footwear"},
+    "accessory": {"accessories", "accessory"},
+    "headwear": {"accessories", "accessory"},
+}
+
+# When we have to overwrite a bad Gemini answer, what should the
+# canonical ``category`` value be? Same rule as a human reading the
+# SegFormer kind: if SegFormer said "bottom", set category="Bottom".
+_SEGFORMER_KIND_TO_DEFAULT_CATEGORY: dict[str, str] = {
+    "top": "Top",
+    "bottom": "Bottom",
+    "dress": "Full Body",
+    "footwear": "Footwear",
+    "accessory": "Accessories",
+    "headwear": "Accessories",
+}
+
+# Human-readable label injected into the Gemini system prompt as a
+# hint. Phrased as the *category the user would expect on the closet
+# card*, not the raw SegFormer label, so Gemini interprets it in the
+# same vocabulary as its ``category`` field.
+_SEGFORMER_KIND_HUMAN_LABEL: dict[str, str] = {
+    "top": "Top or Outerwear (upper-body garment)",
+    "bottom": "Bottom (pants / skirt / shorts)",
+    "dress": "Full Body (dress / jumpsuit)",
+    "footwear": "Footwear (shoes / boots / sneakers)",
+    "accessory": "Accessories (belt / scarf / sunglasses / bag)",
+    "headwear": "Accessories (hat / cap / beanie)",
+}
+
+
+def _enforce_segformer_category(
+    analysis: dict[str, Any] | None,
+    *,
+    segformer_kind: str | None,
+    label: str | None = None,
+) -> dict[str, Any] | None:
+    """Anchor Gemini's category classification to the SegFormer kind.
+
+    Mutates and returns ``analysis``. If SegFormer's kind is in the
+    enforcement table AND Gemini's category is outside the allowed
+    set, we:
+
+    * Overwrite ``analysis["category"]`` with the table default.
+    * Clear ``analysis["sub_category"]`` so a stale value like
+      "Overcoat" doesn't survive on a now-"Bottom" item — the user
+      can re-name in /closet if needed; better an empty sub_category
+      than a wrong one.
+    * Stamp ``analysis["_category_overridden_by"] = "segformer"`` for
+      triage / observability.
+    * Log a WARNING with before/after.
+
+    For ambiguous kinds (``top``) we leave Gemini alone — both Top
+    and Outerwear are legitimate matches for a SegFormer "top" mask.
+
+    Idempotent: calling on an already-correct or already-overridden
+    analysis is a no-op.
+    """
+    if not isinstance(analysis, dict):
+        return analysis
+    if not segformer_kind:
+        return analysis
+    kind = segformer_kind.strip().lower()
+    allowed = _SEGFORMER_KIND_TO_ALLOWED_CATEGORIES.get(kind)
+    if not allowed:
+        # Unknown SegFormer kind (e.g. "garment" from the Gemini-only
+        # detection fallback) — no anchor available, bail out.
+        return analysis
+    current = (analysis.get("category") or "").strip()
+    if not current:
+        # Gemini didn't assign one — fill in from SegFormer rather
+        # than leaving a blank category that would default to "Top"
+        # in the frontend.
+        default = _SEGFORMER_KIND_TO_DEFAULT_CATEGORY.get(kind)
+        if default:
+            analysis["category"] = default
+            analysis["_category_overridden_by"] = "segformer-fill"
+        return analysis
+    if current.lower() in allowed:
+        # Gemini's classification is compatible with SegFormer.
+        return analysis
+    # Override.
+    default = _SEGFORMER_KIND_TO_DEFAULT_CATEGORY.get(kind, current)
+    old_subcategory = analysis.get("sub_category")
+    logger.warning(
+        "garment_vision: SegFormer-anchored category override "
+        "label=%r kind=%r gemini_category=%r gemini_subcategory=%r "
+        "-> category=%r (sub_category cleared)",
+        label, kind, current, old_subcategory, default,
+    )
+    analysis["category"] = default
+    # Wipe sub_category — if Gemini said "Overcoat" but the SegFormer
+    # mask is unambiguously a bottom, an "Overcoat" sub_category makes
+    # no sense and would mis-render in the closet card.
+    analysis["sub_category"] = None
+    analysis["_category_overridden_by"] = "segformer"
+    return analysis
+
+
 def _crop_to_bbox(
-    image_bytes: bytes, bbox_norm: list[int]
+    image_bytes: bytes,
+    bbox_norm: list[int],
+    *,
+    category: str | None = None,
 ) -> tuple[bytes, tuple[int, int, int, int]] | None:
     """Return (cropped_jpeg_bytes, (x1,y1,x2,y2)) for a 0\u20131000 bbox.
 
     ``bbox_norm`` is ``[ymin, xmin, ymax, xmax]`` on a 0\u20131000 scale.
     Adds a small padding and clamps to the image bounds.
+
+    Patch 12j (May 2026) — ``category`` selects the per-edge padding
+    budget from :data:`_BBOX_PAD_TRBL_BY_CATEGORY`. Without a category
+    we use the symmetric 4 % default (the Patch 12 budget) for
+    backward compat. With a category, tight torso boundaries (top's
+    bottom edge = waistline; bottom's top edge = waistline) shrink to
+    0.5 % so the adjacent garment never enters the frame.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -1046,10 +1319,11 @@ def _crop_to_bbox(
     # Validate scale \u2014 expect 0..1000
     if not (0 <= xmin < xmax <= 1000 and 0 <= ymin < ymax <= 1000):
         return None
-    x1 = max(0, int(xmin / 1000.0 * w - w * _BBOX_PADDING_PCT))
-    y1 = max(0, int(ymin / 1000.0 * h - h * _BBOX_PADDING_PCT))
-    x2 = min(w, int(xmax / 1000.0 * w + w * _BBOX_PADDING_PCT))
-    y2 = min(h, int(ymax / 1000.0 * h + h * _BBOX_PADDING_PCT))
+    pad_t, pad_r, pad_b, pad_l = _resolve_bbox_pad_trbl_for_category(category)
+    x1 = max(0, int(xmin / 1000.0 * w - w * pad_l))
+    y1 = max(0, int(ymin / 1000.0 * h - h * pad_t))
+    x2 = min(w, int(xmax / 1000.0 * w + w * pad_r))
+    y2 = min(h, int(ymax / 1000.0 * h + h * pad_b))
     if x2 - x1 <= 4 or y2 - y1 <= 4:
         return None
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
@@ -1162,6 +1436,7 @@ def _build_batch_litellm_messages(
     crops_bytes: list[bytes],
     *,
     language: str | None,
+    kind_hints: list[str | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the litellm-shape ``messages`` list for a batched analyze.
 
@@ -1169,7 +1444,47 @@ def _build_batch_litellm_messages(
     OpenAI / Gemini multimodal shape (``role``+``content`` with image
     parts as ``{"type": "image_url", ...}``) so we can pass it straight
     into ``litellm.acompletion`` either with or without ``stream=True``.
+
+    Patch M21 (May 2026) — ``kind_hints`` is a list of per-crop
+    SegFormer kind strings (or ``None`` for crops without a hint).
+    When provided, the system prompt is decorated with a numbered
+    "CROP CATEGORY HINTS" block telling Gemini what each image has
+    been pre-classified as. This is layer 1 of the SegFormer-anchored
+    category enforcement — layer 2 is the post-validation in
+    :func:`_enforce_segformer_category` which catches the cases where
+    Gemini ignores the hint.
     """
+    # Patch M21 — Build the per-crop hint block when SegFormer hints
+    # are supplied. We deliberately only emit the block when there's
+    # at least one usable hint, so legacy callers (no hints) don't see
+    # an empty bullet list confusing the model.
+    hint_block = ""
+    if kind_hints and len(kind_hints) == n:
+        bullets: list[str] = []
+        for i, k in enumerate(kind_hints, 1):
+            if not k:
+                continue
+            human = _SEGFORMER_KIND_HUMAN_LABEL.get(k.strip().lower())
+            if not human:
+                continue
+            bullets.append(f"  - Image {i}: pre-classified as {human}.")
+        if bullets:
+            hint_block = (
+                "\n\nCROP CATEGORY HINTS — Each image below has been "
+                "pre-classified by a per-pixel garment segmentation "
+                "model that is highly reliable on the dominant pixels "
+                "of each crop. Use these hints to anchor your "
+                "`category` assignment when adjacent garments leak "
+                "into the crop frame:\n"
+                + "\n".join(bullets)
+                + "\n\nIf a hint says 'Bottom', the dominant garment "
+                "IS a bottom (pants / skirt / shorts), even if a "
+                "sleeve, hem, or coat tail from an adjacent garment "
+                "is partially visible. Same logic applies to "
+                "Footwear, Full Body, Headwear, and Accessory hints. "
+                "Honour these hints; choose `sub_category` from "
+                "within the hinted top-level category."
+            )
     system_prompt = (
         _build_system_prompt(one_pass=False)
         + _language_directive(language)
@@ -1184,6 +1499,7 @@ def _build_batch_litellm_messages(
             "text outside the array. The response MUST start with "
             "`[` and end with `]`."
         )
+        + hint_block
     )
     user_text = (
         f"Analyse the {n} cropped garment image(s) below in order. "
@@ -1776,7 +2092,17 @@ class GarmentVisionService:
             box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
             if not box_px:
                 continue
-            result = _crop_to_bbox(image_bytes, det["bbox"])
+            # Patch 12j — pass the SegFormer kind so the bbox crop
+            # uses the per-edge padding budget. Tightens the
+            # waistline-side edge for tops/bottoms so adjacent
+            # garments never enter the crop frame in the first place
+            # (the most important defence against blouse-skirt rim
+            # bleed; SegFormer + dilation cleanup are downstream
+            # cleanups, but they can only work with the pixels the
+            # bbox crop hands them).
+            result = _crop_to_bbox(
+                image_bytes, det["bbox"], category=det.get("kind"),
+            )
             if not result:
                 continue
             crop_bytes, _xy = result
@@ -1822,7 +2148,17 @@ class GarmentVisionService:
             if seg_mask_bbox is not None:
                 try:
                     refined = _cp.apply_alpha_intersection(
-                        matted, seg_mask_bbox
+                        matted,
+                        seg_mask_bbox,
+                        # Patch 12i — pass the SegFormer kind so the
+                        # intersection uses the per-category dilation
+                        # budget. Tops/bottoms/dresses get the
+                        # tightened budget (1.5-1.8 %) to stop the
+                        # blouse-skirt rim overlap on shared
+                        # waistlines; footwear/headwear keep the
+                        # original 2.5 % to preserve puffy-cuff /
+                        # low-contrast-shoe recovery.
+                        category=det.get("kind"),
                     )
                     if refined:
                         matted = refined
@@ -1859,6 +2195,21 @@ class GarmentVisionService:
                     model=self.crop_model,
                     language=language,
                     think=think,
+                )
+                # Patch M21 — Apply SegFormer-anchored category
+                # enforcement on the per-crop path too, so any caller
+                # of ``_analyse_one_crop`` (per-crop loop, batched-
+                # failure fallback, single-item analyze) gets the same
+                # category sanity check as the batched paths. Layer 1
+                # (prompt hint) isn't available here because
+                # ``self.analyze`` is single-crop and we don't decorate
+                # its system prompt yet — but layer 2 (post-validate)
+                # is enough on its own; the prompt hint is just an
+                # optimisation.
+                _enforce_segformer_category(
+                    analysis,
+                    segformer_kind=det.get("kind"),
+                    label=det.get("label"),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -1970,8 +2321,21 @@ class GarmentVisionService:
             try:
                 t0 = time.perf_counter()
                 crop_bytes_list = [b for _, b, _ in crops]
+                # Patch M21 — Thread the per-crop SegFormer kind into
+                # the batched Gemini call. Layer 1 of the category
+                # enforcement: Gemini sees a "CROP CATEGORY HINTS"
+                # block in the system prompt naming each crop's
+                # pre-classified category, which steers it away from
+                # the "coat tails leaking into pants crop → Overcoat"
+                # failure mode. Layer 2 (the override in
+                # ``_enforce_segformer_category``) fires inside
+                # ``analyze_batch`` on the parsed result.
+                kind_hints = [
+                    (d.get("kind") if isinstance(d, dict) else None)
+                    for d, _b, _m in crops
+                ]
                 batched_analyses = await self.analyze_batch(
-                    crop_bytes_list, language=language,
+                    crop_bytes_list, language=language, kind_hints=kind_hints,
                 )
                 logger.info(
                     "_analyse_crops batched OK: %d crops in %.1fs (one Gemini call)",
@@ -2069,6 +2433,7 @@ class GarmentVisionService:
         crops_bytes: list[bytes],
         *,
         language: str | None = None,
+        kind_hints: list[str | None] | None = None,
     ) -> list[dict[str, Any]]:
         """Patch M18 — Single Gemini call analysing N crops at once.
 
@@ -2102,6 +2467,38 @@ class GarmentVisionService:
                 "analyze_batch: requires GEMINI_API_KEY or EMERGENT_LLM_KEY"
             )
 
+        # Patch M21 — Build the SegFormer kind hint block (layer 1 of
+        # the category enforcement). Mirrors
+        # :func:`_build_batch_litellm_messages` so the one-shot and
+        # streaming paths emit equivalent prompts.
+        hint_block = ""
+        if kind_hints and len(kind_hints) == n:
+            bullets: list[str] = []
+            for i, k in enumerate(kind_hints, 1):
+                if not k:
+                    continue
+                human = _SEGFORMER_KIND_HUMAN_LABEL.get(k.strip().lower())
+                if not human:
+                    continue
+                bullets.append(f"  - Image {i}: pre-classified as {human}.")
+            if bullets:
+                hint_block = (
+                    "\n\nCROP CATEGORY HINTS — Each image below has been "
+                    "pre-classified by a per-pixel garment segmentation "
+                    "model that is highly reliable on the dominant pixels "
+                    "of each crop. Use these hints to anchor your "
+                    "`category` assignment when adjacent garments leak "
+                    "into the crop frame:\n"
+                    + "\n".join(bullets)
+                    + "\n\nIf a hint says 'Bottom', the dominant garment "
+                    "IS a bottom (pants / skirt / shorts), even if a "
+                    "sleeve, hem, or coat tail from an adjacent garment "
+                    "is partially visible. Same logic applies to "
+                    "Footwear, Full Body, Headwear, and Accessory hints. "
+                    "Honour these hints; choose `sub_category` from "
+                    "within the hinted top-level category."
+                )
+
         system_prompt = (
             _build_system_prompt(one_pass=False)
             + _language_directive(language)
@@ -2116,6 +2513,7 @@ class GarmentVisionService:
                 "text outside the array. The response MUST start with "
                 "`[` and end with `]`."
             )
+            + hint_block
         )
         user_text = (
             f"Analyse the {n} cropped garment image(s) below in order. "
@@ -2179,7 +2577,7 @@ class GarmentVisionService:
         # the per-crop path uses so dress_code enums, title fallbacks,
         # provider tags etc. all line up.
         results: list[dict[str, Any]] = []
-        for entry in parsed:
+        for slot_idx, entry in enumerate(parsed):
             try:
                 norm = _coerce_single_garment(entry)
                 if not norm.get("title") and norm.get("name"):
@@ -2187,6 +2585,15 @@ class GarmentVisionService:
                 if not norm.get("title"):
                     norm["title"] = "Unnamed garment"
                 norm = _coerce_enums(norm)
+                # Patch M21 — Layer 2 SegFormer-anchored category
+                # enforcement. Applied AFTER ``_coerce_enums`` so we
+                # only override values that survived enum coercion.
+                if kind_hints and slot_idx < len(kind_hints):
+                    _enforce_segformer_category(
+                        norm,
+                        segformer_kind=kind_hints[slot_idx],
+                        label=norm.get("name") or norm.get("title"),
+                    )
                 norm["provider_used"] = "gemini"
                 norm["model_used"] = self.crop_model
                 norm["_batched"] = True
@@ -2208,6 +2615,7 @@ class GarmentVisionService:
         crops_bytes: list[bytes],
         *,
         language: str | None = None,
+        kind_hints: list[str | None] | None = None,
     ) -> "AsyncIterator[tuple[int, dict[str, Any]]]":
         """Patch M19 — Streaming variant of :meth:`analyze_batch`.
 
@@ -2255,7 +2663,7 @@ class GarmentVisionService:
             else f"gemini/{self.crop_model}"
         )
         messages = _build_batch_litellm_messages(
-            n, crops_bytes, language=language,
+            n, crops_bytes, language=language, kind_hints=kind_hints,
         )
 
         import litellm  # local import — keeps cold-start light
@@ -2300,6 +2708,20 @@ class GarmentVisionService:
                         if not norm.get("title"):
                             norm["title"] = "Unnamed garment"
                         norm = _coerce_enums(norm)
+                        # Patch M21 — Layer 2 SegFormer-anchored category
+                        # enforcement on the streaming path. Applied
+                        # after ``_coerce_enums`` so we only override
+                        # enum-valid values. ``yielded_count`` is the
+                        # zero-based slot index, which matches the
+                        # ``kind_hints`` ordering by construction
+                        # (one hint per crop, same order as
+                        # ``crops_bytes``).
+                        if kind_hints and yielded_count < len(kind_hints):
+                            _enforce_segformer_category(
+                                norm,
+                                segformer_kind=kind_hints[yielded_count],
+                                label=norm.get("name") or norm.get("title"),
+                            )
                         norm["provider_used"] = "gemini"
                         norm["model_used"] = self.crop_model
                         norm["_batched"] = True
@@ -2592,6 +3014,13 @@ class GarmentVisionService:
 
         # Stream-analyse the crops via batched Gemini stream.
         crops_bytes = [b for _, b, _ in crops]
+        # Patch M21 — extract SegFormer kinds in crop order so the
+        # streaming batched call can embed them as prompt hints AND
+        # post-validate Gemini's category against them per crop.
+        kind_hints = [
+            (d.get("kind") if isinstance(d, dict) else None)
+            for d, _b, _m in crops
+        ]
         from app.config import settings as _settings
 
         try:
@@ -2602,7 +3031,7 @@ class GarmentVisionService:
         emitted = 0
         try:
             async for idx, analysis in self.analyze_batch_stream(
-                crops_bytes, language=language,
+                crops_bytes, language=language, kind_hints=kind_hints,
             ):
                 if not isinstance(analysis, dict) or not analysis:
                     # Empty / dropped slot — emit a sentinel item with
@@ -2791,7 +3220,17 @@ class GarmentVisionService:
             if is_full_frame or bbox == [0, 0, 1000, 1000]:
                 crop_bytes = image_bytes
             else:
-                cropped = _crop_to_bbox(image_bytes, bbox)
+                # Patch 12j — pass the Gemini-assigned category so the
+                # one-pass single-call path also benefits from the
+                # per-edge padding budget. ``g.get("category")``
+                # holds the Gemini answer (Top / Bottom / Outerwear /
+                # Full Body / Footwear / Accessories) and
+                # :func:`_resolve_bbox_pad_trbl_for_category` accepts
+                # both that vocabulary and the SegFormer-kind
+                # vocabulary case-insensitively.
+                cropped = _crop_to_bbox(
+                    image_bytes, bbox, category=g.get("category"),
+                )
                 # ``_crop_to_bbox`` returns None when the bbox is degenerate
                 # or below the min-area floor. In those cases we still want
                 # an item record \u2014 just fall back to the full frame so

@@ -984,6 +984,325 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch 12l — Delicate-borderline twink on Top.bottom (-1.5 % → -2.5 %) — SHIPPED
+
+User screenshot after 12k showed the skirt + boots cards clean but
+the blouse card still had a faint dark rim of skirt-waistband at the
+bottom edge. Root cause: this particular outfit (turtleneck blouse
+with fitted bottom hem worn over a high-waisted skirt) had a
+~2 % over-claim on the SegFormer bbox; the 12k value of -1.5 % was
+short of that. Dialled `top.bottom` from `-1.5 %` to `-2.5 %`. No
+other categories touched (skirt and footwear cards were already
+clean). Single-line table-only diff in
+`_BBOX_PAD_TRBL_BY_CATEGORY`. Ruff lint clean, backend boots clean.
+
+## ✅ Patch 12k — "One more twink": negative padding at boundary edges — SHIPPED
+
+**Bug:** After Patch 12j (asymmetric per-category bbox padding, with
+0.5 % padding on tight-boundary edges), the May 2026 outfit screenshot
+showed clear improvement — but residual leak persisted:
+
+- Blouse card: faint rim of skirt waistband visible at the very bottom.
+- Skirt card: visible band of legs + boot tops at the bottom.
+- Boots card: ✅ already clean.
+
+Root cause: **SegFormer's own bbox over-claims** a few percent of
+adjacent-garment pixels as the target class. The morphological
+closing in `_postprocess_mask` smooths the boundary but doesn't trim
+overshoot. By the time we add even a tiny 0.5 % positive padding, the
+bbox already extends past the natural garment edge — and rembg keeps
+those pixels as foreground because they ARE in the photo.
+
+**Fix:** Negative padding at boundary edges (the crop bites INSIDE
+the SegFormer bbox to compensate for the mask's natural overshoot).
+Updated `_BBOX_PAD_TRBL_BY_CATEGORY`:
+
+| Cat        | top         | right | bottom        | left  | Δ from 12j                  |
+|------------|-------------|-------|---------------|-------|-----------------------------|
+| top        | 4.0 %       | 2.0 % | **−1.5 %**    | 2.0 % | bottom +0.5 % → −1.5 %      |
+| bottom     | **−1.5 %**  | 2.0 % | **−2.5 %**    | 2.0 % | both edges flip negative; hem more aggressive than waist |
+| dress      | 2.0 %       | 2.0 % | **−2.0 %**    | 2.0 % | hem flips negative; top loosened slightly (3 % → 2 %)    |
+| Full Body  | same as dress                                                                           |
+| outerwear  | 1.0 %       | 3.0 % | **−1.0 %**    | 3.0 % | hem flips negative                                       |
+| footwear   | **−1.5 %**  | 3.0 % | 3.0 %         | 3.0 % | top flips negative; heel stays loose                     |
+| headwear   | 4.0 %       | 4.0 % | 3.0 %         | 4.0 % | unchanged                                                |
+| accessory  | 1.5 %       | 1.5 % | 1.5 %         | 1.5 % | unchanged                                                |
+| unknown    | 4.0 %       | 4.0 % | 4.0 %         | 4.0 % | unchanged (backward-compat)                              |
+
+**Mechanics:** `_crop_to_bbox`'s formula was already negative-safe:
+
+```python
+y1 = max(0, int(ymin/1000*h - h * pad_t))   # pad_t<0 → y1 moves DOWN (inside bbox)
+y2 = min(h, int(ymax/1000*h + h * pad_b))   # pad_b<0 → y2 moves UP (inside bbox)
+```
+
+The `max(0, ...)` / `min(h, ...)` clamps prevent out-of-bounds; the
+existing `if x2-x1<=4 or y2-y1<=4: return None` guard handles
+degenerate cases (caller falls back to full frame).
+
+**Verification:** updated smoke tests pass:
+- Resolver returns the new tuples for top / bottom / footwear with
+  the expected sign pattern (top.bottom<0, bot.top<0, bot.bottom<0
+  more than bot.top, foot.top<0, foot.bottom≥0.03).
+- End-to-end synthetic crop on 1000×1500 image with a 400-800
+  normalised bottom-category bbox: default 4 % padding produces a
+  720 px tall crop (y=540..1260); 12k negative padding produces a
+  **540 px tall crop (y=622..1162) — 25 % shorter** with the top
+  edge moved DOWN by 82 px (no blouse leak) and the bottom edge
+  moved UP by 98 px (no boot leak). Exactly the "one more twink"
+  the user requested.
+- Edge case: a 0.64 % area bbox (below `_MIN_CROP_AREA_PCT=0.008`
+  floor) returns None with bottom-category. This is the existing
+  Patch 12d behaviour preserving against tiny-bbox hallucinations —
+  unrelated to the negative-padding change.
+- Top-category bbox: bottom edge trimmed 83 px more than default,
+  top edge unchanged (face/collar still loose). Asymmetric profile
+  preserved.
+
+**Why this works on the user's photo:**
+- Blouse waistband: blouse bbox bottom edge now at −1.5 % of frame
+  height (≈ −22 px on a 1500 px source) INSIDE the SegFormer bbox.
+  The over-claimed waistband pixels are dropped along with any 0.5 %
+  positive padding from 12j.
+- Skirt leg/boot leak: skirt bbox bottom at −2.5 % (≈ −37 px). The
+  over-claimed thigh/boot-top pixels are dropped.
+- Boots: untouched (top edge already meant to be tight; bottom +
+  sides loose so heel/sole/silhouette stay in frame).
+
+**Files touched:**
+- `backend/app/services/garment_vision.py` — only the
+  `_BBOX_PAD_TRBL_BY_CATEGORY` table values; no signature changes,
+  no logic changes elsewhere. The smallest-possible "twink" diff.
+- `plan.md` (this entry)
+
+## ✅ Patch 12j — Per-category asymmetric bbox padding (Tighten the margin) — SHIPPED
+
+**Bug:** Even after Patch 12i tightened the SegFormer alpha dilation
+per-category, the **bbox crop itself** was still loose. The flat 4 %
+symmetric padding from Patch 12 dragged adjacent garments INTO the
+crop frame before SegFormer / rembg even saw it. Real screenshot
+(May 2026 outfit test):
+
+- ✅ Boots card — clean.
+- ❌ White blouse card — black skirt visible at the bottom (blouse
+  bbox extended 4 % below the waistline → ~60 px of skirt fabric
+  cropped in).
+- ❌ Black skirt card — boots visible at the bottom (skirt bbox
+  extended 4 % below the hem → boot tops cropped in).
+
+The downstream SegFormer alpha intersection can only work with
+pixels the bbox crop hands it. If the skirt pixels are inside the
+blouse crop AND rembg keeps them as foreground (which it does — it's
+all part of the original photo), no amount of mask dilation tuning
+will hide them.
+
+**Fix:** Per-category **asymmetric** bbox padding. Replaced the
+`_BBOX_PADDING_PCT = 0.04` scalar with
+`_BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[top, right, bottom, left]]`
+in `app/services/garment_vision.py`:
+
+| Category   | top   | right | bottom | left  | Rationale                                       |
+|------------|-------|-------|--------|-------|-------------------------------------------------|
+| top        | 4.0 % | 2.0 % | **0.5 %** | 2.0 % | bottom = waistline → tight; collar/face loose |
+| bottom     | **0.5 %** | 2.0 % | **0.5 %** | 2.0 % | waistline tight (top) + hem tight (no boots) |
+| dress / Full Body | 3.0 % | 2.0 % | 1.0 % | 2.0 % | top loose; bottom tight (no floor/shoes)  |
+| outerwear  | 1.5 % | 3.0 % | 1.0 % | 3.0 % | collar tight; hem tight; sides loose for silhouette |
+| footwear   | **0.5 %** | 3.0 % | 3.0 % | 3.0 % | top tight (no trouser hem leak); ground/heel loose |
+| headwear   | 4.0 % | 4.0 % | 3.0 % | 4.0 % | free-edge — keep generous brim padding         |
+| accessory / Underwear | 1.5 % | 1.5 % | 1.5 % | 1.5 % | tight all-around (belt/scarf/sunglasses) |
+| unknown    | 4.0 % | 4.0 % | 4.0 % | 4.0 % | backward-compat — Patch 12 default            |
+
+`_crop_to_bbox` now accepts `category: str | None = None` (keyword-only).
+`_resolve_bbox_pad_trbl_for_category()` does case-insensitive,
+whitespace-insensitive lookup with both SegFormer-kind and
+Gemini-category vocabularies, falling back to the 4 % default.
+
+**Wiring (2 callers):**
+1. `detect_items` batched path (`for det in useful` loop) — passes
+   `det.get("kind")` (the SegFormer label).
+2. One-pass single-call path (`_one_pass_extract`) — passes
+   `g.get("category")` (the Gemini-assigned category, since
+   SegFormer isn't run on this path).
+
+**Verification:** 24/24 unit-style smoke tests pass:
+- Resolver lookups (case-insensitive, space-collapsed,
+  fallback-on-unknown).
+- 7 critical semantic invariants — top's bottom edge tighter than
+  default; bottom's both edges tighter; footwear's top tighter
+  while bottom stays loose; top's bottom < top's top (asymmetric
+  signature).
+- 2 end-to-end synthetic crops on 1000×1500 image: top-category
+  crop is 53 px shorter than default (bottom edge moved up from
+  y=960 → y=907); bottom-category crop is 105 px shorter (top
+  edge y=540 → y=592, bottom edge y=1260 → y=1207).
+- Backward-compat: positional-only legacy call still works.
+
+**Why this fixes the user's screenshot:**
+- *White blouse card*: bbox now stops 0.5 % below the SegFormer-
+  detected waistline (≈ 7 px instead of 60 px) → no skirt fabric
+  enters the crop frame → SegFormer + rembg + dilation downstream
+  never have the chance to leak.
+- *Black skirt card*: bbox top edge tightens to 0.5 % above the
+  waistline; bottom edge tightens to 0.5 % below the hem → no
+  blouse leak above, no boot leak below.
+- *Boots card*: unchanged behaviour (top edge tight already wanted,
+  bottom/sides loose to keep heel + sole in frame).
+
+**Files touched:**
+- `backend/app/services/garment_vision.py` (new table + resolver +
+  `_crop_to_bbox` signature + 2 call sites + 56-line module-level
+  docstring block explaining the rationale)
+- `plan.md` (this entry)
+
+## ✅ Patch 12i — Per-category dilation budget for tight torso crops (P1) — SHIPPED
+
+**Bug:** The flat 2.5 % dilation budget introduced by Patch 12f
+("DILATE the SegFormer mask before blending") was tuned for free-edge
+garments (footwear / hats / low-contrast accessories) where the mask
+is patchy and there is no adjacent garment to leak into. On tight
+torso outfit photos where a blouse and a skirt share the waistline,
+2.5 % = 25 px on a 1000 px crop extended each mask 25 px INTO the
+other garment's region. With rembg keeping both garments as
+foreground, the resulting blouse cutout inherited a 25 px rim of
+skirt fabric at its bottom edge (and vice versa) — visible as a
+coloured strip in the closet thumbnail.
+
+**Fix:** New `_DILATE_PCT_BY_CATEGORY` lookup in
+`app/services/clothing_parser.py` keyed by both SegFormer-kind
+vocabulary (top, bottom, dress, …) and Gemini-category vocabulary
+(Top, Bottom, Full Body, …), case- and whitespace-insensitive:
+
+| Category                            | Old (12f) | New (12i) | Why                                                                       |
+|-------------------------------------|-----------|-----------|---------------------------------------------------------------------------|
+| top / Top                           | 2.5 %     | **1.5 %** | shares waistline with bottom/dress — stop rim bleed                       |
+| bottom / Bottom                     | 2.5 %     | **1.5 %** | symmetric — shares waistline with top/dress                               |
+| dress / Full Body                   | 2.5 %     | **1.8 %** | top edge tight, bottom free — slightly looser than top/bottom             |
+| accessory / Accessories / Underwear | 2.5 %     | **1.5 %** | belts/scarves frequently abut other garments                              |
+| outerwear / Outerwear               | 2.5 %     | **2.0 %** | jackets/coats — collar tight, hem free, middle ground                     |
+| footwear / Footwear                 | 2.5 %     | **2.5 %** | UNCHANGED — patchy on low-contrast shoes, no adjacent-garment risk        |
+| headwear                            | 2.5 %     | **2.5 %** | UNCHANGED — hat brim halo                                                 |
+| unknown / missing                   | 2.5 %     | **2.5 %** | backward-compat — legacy callers without `category` get the Patch 12f budget |
+
+`_DILATE_MIN_PX=4` and `_DILATE_MAX_PX=64` clamps are preserved.
+
+**Wiring:** `apply_alpha_intersection` now accepts `category: str |
+None = None` (keyword-only). Three call sites updated:
+
+1. `garment_vision.py::_matte_crops` — passes `det.get("kind")`
+2. `closet.py::_run_background_matte` — passes the item's `category`
+   parameter (user-facing string from create_item)
+3. `closet.py` `/clean-background` endpoint — passes
+   `item.get("category")` from the saved closet record
+
+The single-crop / per-crop fallback path (`_analyse_one_crop`) does
+NOT call `apply_alpha_intersection` directly — it goes through
+`_matte_crops` which already routes `category` through. The Phase O.6
+``_run_background_matte`` covers the create_item path. All four
+production codepaths now route per-category budgets.
+
+**Verification:** 32/32 unit-style smoke tests pass:
+- 19 resolver lookups (case-insensitivity, whitespace collapsing,
+  fallback to default for unknown / None / empty / SegFormer-only
+  `garment` kind).
+- 7 end-to-end `apply_alpha_intersection` runs on a 1000×1000
+  synthetic PNG, one per category — all return valid PNG bytes.
+- Backward-compat: legacy 2-positional-arg call (no `category`)
+  returns the same output as before.
+- Semantic invariants: top / bottom / dress all have smaller
+  dilation pct than footwear — i.e. the fix moves the budget in the
+  right direction.
+
+**Files touched:**
+- `backend/app/services/clothing_parser.py` (new table + resolver
+  helper + docstring overhaul + replaced flat budget with
+  category lookup)
+- `backend/app/services/garment_vision.py` (`_matte_crops` passes
+  `category=det.get("kind")`)
+- `backend/app/api/v1/closet.py` (2 sites: `_run_background_matte`
+  passes `category=category`; `/clean-background` passes
+  `category=item.get("category")`)
+- `plan.md` (this entry)
+
+## ✅ Patch M21 — SegFormer-anchored category enforcement (P0 fix) — SHIPPED
+
+**Bug:** User uploads an outfit photo; SegFormer correctly segments the
+pants region into a `bottom`-kind crop, but the bbox is loose enough
+that a sliver of an adjacent coat's tails leaks into the top edge of
+the pants crop. Gemini classifies the whole crop and decides it's
+"Outerwear / Overcoat" because of the coat pixels. User ends up with
+a "Charcoal Overcoat" card in their closet that is actually a pair of
+pants. Same failure mode reproduced on the issue tracker for
+footwear, accessories, and dresses — any time Gemini wanders outside
+the SegFormer-anchored category set.
+
+**Fix:** Two-layer defence in `app/services/garment_vision.py`:
+
+### Layer 1 — Prompt hint
+Every batched Gemini call now embeds a "CROP CATEGORY HINTS" block in
+the system prompt naming each crop's SegFormer pre-classification:
+
+> Image 1: pre-classified as Bottom (pants / skirt / shorts).
+> Image 2: pre-classified as Top or Outerwear (upper-body garment).
+> ...
+>
+> If a hint says 'Bottom', the dominant garment IS a bottom (...),
+> even if a sleeve, hem, or coat tail from an adjacent garment is
+> partially visible. Honour these hints; choose sub_category from
+> within the hinted top-level category.
+
+Threaded through `analyze_batch` + `analyze_batch_stream` via a new
+`kind_hints: list[str | None]` parameter; the inline system-prompt
+build in `analyze_batch` and `_build_batch_litellm_messages` (used by
+the streaming path) both emit identical hint blocks so the one-shot
+and streaming code paths produce equivalent prompts.
+
+### Layer 2 — Post-validation override
+New `_enforce_segformer_category(analysis, *, segformer_kind, label)`
+runs after `_coerce_enums` on every Gemini result, regardless of
+which path produced it. Logic:
+
+- For unambiguous SegFormer kinds (`bottom`, `dress`, `footwear`,
+  `accessory`, `headwear`): if Gemini's `category` is outside the
+  compatible set, log a WARNING with before/after, overwrite the
+  category with the canonical default, clear `sub_category` (so a
+  stale "Overcoat" doesn't survive on a now-"Bottom" item), and
+  stamp `_category_overridden_by="segformer"` for observability.
+- For ambiguous `top` kind: allow both `Top` and `Outerwear` (a
+  SegFormer "top" mask can legitimately be either a t-shirt or a
+  parka, and Gemini has the vocabulary to distinguish them).
+- For unknown kinds (`garment` from the Gemini-only fallback) or
+  missing kind: no-op (no anchor available).
+- Empty / missing Gemini `category` with a known SegFormer kind:
+  fill in with the SegFormer default and stamp
+  `_category_overridden_by="segformer-fill"`.
+
+### Wiring
+- `_analyse_crops`: builds `kind_hints` from `crops[i][0]["kind"]`
+  and passes to `analyze_batch` (one-shot batched path).
+- `analyze_outfit_stream`: builds `kind_hints` from the same source
+  and passes to `analyze_batch_stream` (NDJSON streaming path).
+- `_analyse_one_crop`: applies layer-2 enforcement after every
+  per-crop `self.analyze(...)` (the legacy single-crop path, also
+  used as the fallback when the batched call fails).
+- All three coercion sites (`analyze_batch` parsed-array loop,
+  `analyze_batch_stream` per-object yield, `_analyse_one_crop`
+  analysis result) now call `_enforce_segformer_category` with the
+  matching `kind`.
+
+### Verification
+13/13 unit-style smoke tests pass, including the exact "pants crop
+labeled Overcoat" failure: Gemini's
+`{"category": "Outerwear", "sub_category": "Overcoat"}` on a
+`segformer_kind="bottom"` is overridden to
+`{"category": "Bottom", "sub_category": null,
+"_category_overridden_by": "segformer"}` and the override is logged
+at WARNING level. Backend boots clean with no regressions.
+
+### Files touched
+- `backend/app/services/garment_vision.py` (new helper + 3 call sites
+  + 2 signature extensions + 2 prompt-hint blocks)
+- `plan.md` (this entry)
+
 ## ✅ Patch M20.2 — Save-while-scanning auto-save queue (SHIPPED)
 
 **Bug:** User uploads N photos, presses Save the moment the FIRST
@@ -1033,6 +1352,44 @@ App root** (already scaffolded), so they render on every authenticated
 page including /add, /closet, /home, /stylist, etc.
 
 ## Still open after this session (in priority order)
+
+> 📌 **Session wrap-up — May 16 2026.** This session shipped **Patches
+> M20, M20.1, M20.2** — a unified UX wave around the Phase O.6
+> background polish pipeline. Everything below was already documented
+> when the session started; nothing on this list was touched this
+> session.
+>
+> **Shipped this session (recap, for the next agent):**
+> - **M20.a (P0 bug)** — "Last item stuck on Polishing photo…": fixed
+>   by changing `$unset thumbnail_data_url` → `$set thumbnail_data_url:
+>   None` in `_run_background_matte` (+ defensive `closetStore.upsert`
+>   thumb clear + robust `Closet.jsx` polling rewrite with live
+>   snapshot, ref-based backoff, 30-attempt cap, `incrementalSync`
+>   fallback). Verified via direct Python smoke test against live DB.
+> - **M20.b (P1 feature)** — Cross-page "Analysis in progress" floater:
+>   wired `AddItem.jsx::analyzeCard` into the pre-existing global
+>   `workStore` (registerAnalyze/updateAnalyze/completeAnalyze). The
+>   `WorkProgressFloater` was already mounted at App root.
+> - **M20.c (P1 feature)** — Global "Polishing" progress + "You have
+>   news in your closet" toast: wired `saveAll::settle` to
+>   `workStore.registerPolishItems`. Closet.jsx also self-registers
+>   any pending items it discovers (covers reload-from-prev-session).
+>   `WorkBatchDoneToast` already existed.
+> - **M20.1** — REVERSAL of an aspect of M20.c: the per-card
+>   "Polishing photo…" textual `Badge` is KEPT (user feedback —
+>   useful to know which specific cards are mid-polish). It now
+>   coexists with the global floater.
+> - **M20.2 (P1 bug)** — Save-while-scanning auto-save queue: pressing
+>   Save mid-batch no longer drops the still-scanning cards. Stays
+>   on /add, persists the ready ones, sets `pendingAutoSave=true`,
+>   re-fires `saveAll` via an effect once all cards reach a terminal
+>   state.
+>
+> **All ESLint + esbuild clean, backend smoke-tested, frontend live-
+> tested by user. ENABLE_RECONSTRUCTION still off (Nano Banana
+> auto-pipe disabled by design).**
+>
+> **Next agent: start here.**
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
    with coat tails visible in the top get classified as "Overcoat".

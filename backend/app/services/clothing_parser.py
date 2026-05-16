@@ -971,6 +971,8 @@ def slice_mask_to_bbox(
 def apply_alpha_intersection(
     matted_png_bytes: bytes,
     seg_mask_bbox: np.ndarray,
+    *,
+    category: str | None = None,
 ) -> bytes | None:
     """Refine a rembg-matted PNG by AND-ing its alpha with a SegFormer mask.
 
@@ -996,6 +998,57 @@ def apply_alpha_intersection(
     rembg's correct foreground pixels in the halo region — while still
     relying on rembg's verdict as the upper bound, so background junk
     that rembg correctly rejects stays rejected.
+
+    Patch 12i (May 2026) — per-category dilation budget. The flat 2.5%
+    of Patch 12f was tuned for free-edge garments (footwear, hats —
+    where the SegFormer mask is often patchy and there is no adjacent
+    garment to leak into). On tight torso crops where a blouse and a
+    skirt share the waistline, 2.5% (= 25 px on a 1000 px crop)
+    extended each garment's mask 25 px into the other's region. With
+    rembg keeping both garments as foreground, the blouse cutout
+    inherited a 25 px rim of skirt fabric at its bottom edge (and vice
+    versa). Visible as a coloured strip in the closet thumbnail.
+
+    The fix splits the budget by ``category``:
+
+    +----------------+---------+--------------------------------------+
+    | Category       | DilPct  | Reason                               |
+    +================+=========+======================================+
+    | top / Top      | 1.5 %   | shares waistline with bottom/dress;  |
+    |                |         | reduced from 2.5 % to stop skirt     |
+    |                |         | bleed at the hem. Still recovers     |
+    |                |         | most puffy sleeves on 800-1500 px    |
+    |                |         | crops (1.5 % = 12-22 px).            |
+    +----------------+---------+--------------------------------------+
+    | bottom / Bottom| 1.5 %   | symmetric — shares waistline with    |
+    |                |         | top/dress.                           |
+    +----------------+---------+--------------------------------------+
+    | dress /        | 1.8 %   | top edge tight (neckline near        |
+    | full body      |         | jacket lapels); bottom edge free     |
+    |                |         | (hem). Slightly looser than          |
+    |                |         | top/bottom to preserve flowing       |
+    |                |         | skirt shapes.                        |
+    +----------------+---------+--------------------------------------+
+    | accessory      | 1.5 %   | belts share waistline; scarves       |
+    |                |         | share neckline; bags hang free but   |
+    |                |         | err on tight to avoid bleed.         |
+    +----------------+---------+--------------------------------------+
+    | outerwear      | 2.0 %   | jackets/coats over t-shirts: collar  |
+    |                |         | shares neckline with top, hem        |
+    |                |         | usually free. Middle ground.         |
+    +----------------+---------+--------------------------------------+
+    | footwear       | 2.5 %   | UNCHANGED — patchy mask coverage on  |
+    |                |         | low-contrast shoes, no               |
+    |                |         | adjacent-garment risk.               |
+    +----------------+---------+--------------------------------------+
+    | headwear       | 2.5 %   | UNCHANGED — hats have free top edge  |
+    |                |         | and the hair/brim transition needs   |
+    |                |         | the wider halo.                      |
+    +----------------+---------+--------------------------------------+
+    | <unknown>      | 2.5 %   | backward compat — callers that don't |
+    |                |         | pass ``category`` get the Patch 12f  |
+    |                |         | budget.                              |
+    +----------------+---------+--------------------------------------+
 
     Returns refined PNG bytes, or ``None`` on failure (caller should keep
     the rembg-only output).
@@ -1060,17 +1113,11 @@ def apply_alpha_intersection(
         )
         return None
 
-    # Patch 12f — proportional dilation. 2.5% of the crop's short edge
-    # is the empirical sweet-spot from the May 2026 closet tests:
-    #   * Tiny crops (200 px): ~5 px dilation — keeps small accessories
-    #     from gaining a halo of background.
-    #   * Medium crops (1000 px): ~25 px — recovers puffy-sleeve overspill.
-    #   * Large crops (2000 px): ~50 px — recovers low-contrast shoe edges.
-    # Hard min/max protect either extreme.
-    _DILATE_PCT = 0.025
+    # Patch 12i — per-category dilation budget. See docstring table.
+    _dilate_pct = _resolve_dilate_pct_for_category(category)
     _DILATE_MIN_PX = 4
     _DILATE_MAX_PX = 64
-    dilate_px = max(_DILATE_MIN_PX, min(_DILATE_MAX_PX, int(_DILATE_PCT * min(Hc, Wc))))
+    dilate_px = max(_DILATE_MIN_PX, min(_DILATE_MAX_PX, int(_dilate_pct * min(Hc, Wc))))
     try:
         from PIL import ImageFilter
 
@@ -1096,3 +1143,58 @@ def apply_alpha_intersection(
     buf = io.BytesIO()
     out.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Patch 12i — per-category dilation budget table.
+# ---------------------------------------------------------------------------
+# Keyed by the *normalised* category string (lowercase, spaces → none).
+# Accepts both the SegFormer kind vocabulary (top, bottom, dress,
+# footwear, accessory, headwear) AND the Gemini Garment category
+# vocabulary (Top, Bottom, Outerwear, Full Body, Footwear, Accessories,
+# Underwear) so callers can pass whichever they have in scope without a
+# pre-mapping step.
+_DILATE_PCT_BY_CATEGORY: dict[str, float] = {
+    # Tight-boundary garments (1.2-1.8 %): share an edge with an
+    # adjacent garment that rembg also kept as foreground; over-
+    # dilating bleeds the adjacent fabric into this cutout.
+    "top": 0.015,
+    "bottom": 0.015,
+    "dress": 0.018,
+    "fullbody": 0.018,
+    "full body": 0.018,
+    "accessory": 0.015,
+    "accessories": 0.015,
+    "underwear": 0.015,
+    # Outerwear is the middle ground — jackets / coats often have a
+    # collar that overlaps a top's neckline but a free-hanging hem.
+    "outerwear": 0.020,
+    # Free-edge garments (2.5 %): no adjacent-garment risk; the
+    # original Patch 12f budget is preserved to keep the puffy-cuff
+    # / low-contrast-shoe recovery working.
+    "footwear": 0.025,
+    "headwear": 0.025,
+}
+_DILATE_PCT_DEFAULT = 0.025  # backward-compat for unknown / missing categories.
+
+
+def _resolve_dilate_pct_for_category(category: str | None) -> float:
+    """Look up the per-category dilation budget.
+
+    Case-insensitive, whitespace-insensitive. Falls back to
+    ``_DILATE_PCT_DEFAULT`` (2.5 % — the Patch 12f flat budget) when
+    the category is missing or not in the table. Backward-compatible
+    with callers that don't pass ``category``.
+    """
+    if not category:
+        return _DILATE_PCT_DEFAULT
+    key = str(category).strip().lower()
+    if not key:
+        return _DILATE_PCT_DEFAULT
+    # Try exact match first, then collapsed-whitespace ("full body" →
+    # "fullbody") so both spellings of the Gemini category land on
+    # the same budget.
+    if key in _DILATE_PCT_BY_CATEGORY:
+        return _DILATE_PCT_BY_CATEGORY[key]
+    key_collapsed = key.replace(" ", "")
+    return _DILATE_PCT_BY_CATEGORY.get(key_collapsed, _DILATE_PCT_DEFAULT)

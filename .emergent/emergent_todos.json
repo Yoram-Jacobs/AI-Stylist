@@ -1,34 +1,30 @@
 [
   {
-    "content": "Phase 1: Fix bug — Last polished item stuck on 'Polishing photo…'",
+    "content": "Patch 12j: per-category asymmetric bbox padding (Tighten the margin)",
     "status": "completed"
   },
   {
-    "content": "Backend: $unset → $set null in _run_background_matte (M20.a)",
+    "content": "Replace _BBOX_PADDING_PCT scalar with _BBOX_PAD_TRBL_BY_CATEGORY (top,right,bottom,left) table",
     "status": "completed"
   },
   {
-    "content": "Frontend closetStore.upsert defensive thumb clear (M20.a)",
+    "content": "Add _resolve_bbox_pad_trbl_for_category() helper",
     "status": "completed"
   },
   {
-    "content": "Frontend Closet.jsx robust polling rewrite (M20.a)",
+    "content": "Update _crop_to_bbox signature to accept category kwarg, apply asymmetric pads",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Cross-page Analysis-in-progress floater (M20.b)",
+    "content": "Update 2 callers: detect_items batched path + one-pass single-call path",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Global Polishing progress bar + 'You have news' toast (M20.c)",
+    "content": "Smoke test: 24/24 PASS — resolver lookups + critical invariants + end-to-end synthetic crops + backward-compat",
     "status": "completed"
   },
   {
-    "content": "Backend smoke test for M20.a — PASSED (thumbnail_data_url=None confirmed in DB after BG matte ready)",
-    "status": "completed"
-  },
-  {
-    "content": "Backend integration test via testing_agent — PASSED (60%, test artifacts blocked rest)",
+    "content": "Lint clean + plan.md updated",
     "status": "completed"
   }
 ]
