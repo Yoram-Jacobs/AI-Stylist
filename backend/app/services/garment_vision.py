@@ -663,6 +663,90 @@ DETECT_SYSTEM_PROMPT = (
 
 
 _BBOX_PADDING_PCT = 0.04  # relative padding around each detected bbox
+# Patch 12j (May 2026) — per-category asymmetric bbox padding. The
+# flat 4 % budget above is now the BACKWARD-COMPAT default for callers
+# that don't pass a category. When category is known we use a
+# per-edge ``(top, right, bottom, left)`` tuple so:
+#
+#   * The torso boundary (waistline = top's bottom edge + bottom's top
+#     edge) gets 0.5 % padding — just enough to avoid Pillow rounding
+#     glitches but tight enough that the adjacent garment never makes
+#     it into the crop frame.
+#   * The ankle boundary (bottom's bottom edge + footwear's top edge)
+#     gets the same 0.5 % treatment.
+#   * "Free" edges (top's collar/face, dress's neckline, footwear's
+#     ground side, hat's free top) keep a generous 3-4 % so puffy
+#     cuffs / boot heels / floppy brims aren't clipped.
+#
+# This is the second half of the "tighten the margin" fix. Patch 12i
+# tightened the SegFormer alpha dilation per-category; this patch
+# tightens the BBOX CROP itself per-category, which is the more
+# important defence because the dilation can only work with pixels
+# that survived the bbox crop. On the May 2026 outfit screenshot
+# (blouse + skirt + thigh-high boots) the previous 4 % bottom padding
+# on the blouse bbox dragged 4 % × ~1500 px = 60 px of skirt into the
+# blouse crop; SegFormer flagged those pixels as "not Upper-clothes"
+# and the dilated intersection still admitted them because rembg
+# kept them as foreground (it was after all part of the original
+# matte). Tightening the bottom edge to 0.5 % (≈ 7 px) makes the
+# bbox stop AT the waistline; the skirt never enters the frame.
+_BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[float, float, float, float]] = {
+    # Top / Outerwear-like upper garment: face-side loose, waistline
+    # tight. Sides slightly tight too (avoid pulling in adjacent
+    # hands / bags).
+    "top":        (0.04, 0.02, 0.005, 0.02),
+    # Bottom: waistline tight (top edge), hem tight (avoids leaking
+    # shoes / floor reflections). Sides slightly tight.
+    "bottom":     (0.005, 0.02, 0.005, 0.02),
+    # Dress / Full Body: top edge can crop a little of the collar
+    # because dresses often photograph head-on with neck visible;
+    # bottom edge tight (avoid floor / shoes).
+    "dress":      (0.03, 0.02, 0.01, 0.02),
+    "fullbody":   (0.03, 0.02, 0.01, 0.02),
+    "full body":  (0.03, 0.02, 0.01, 0.02),
+    # Outerwear: collar overlaps neckline of underlying top — tighten
+    # top edge. Hem of an open coat shows pants behind — tighten
+    # bottom too. Sides loose to keep the silhouette.
+    "outerwear":  (0.015, 0.03, 0.01, 0.03),
+    # Footwear: top edge tight to avoid trouser hem leaking;
+    # everything else loose so the heel + sole stay in frame.
+    "footwear":   (0.005, 0.03, 0.03, 0.03),
+    # Headwear: free-edge garment — generous padding all around so
+    # the brim / pom-pom isn't clipped.
+    "headwear":   (0.04, 0.04, 0.03, 0.04),
+    # Accessory: tight all-around. Most accessories (belts, scarves,
+    # sunglasses, bags) sit against another garment and benefit from
+    # a minimum-padding crop.
+    "accessory":  (0.015, 0.015, 0.015, 0.015),
+    "accessories": (0.015, 0.015, 0.015, 0.015),
+    "underwear":  (0.015, 0.015, 0.015, 0.015),
+}
+_BBOX_PAD_TRBL_DEFAULT = (
+    _BBOX_PADDING_PCT, _BBOX_PADDING_PCT,
+    _BBOX_PADDING_PCT, _BBOX_PADDING_PCT,
+)
+
+
+def _resolve_bbox_pad_trbl_for_category(
+    category: str | None,
+) -> tuple[float, float, float, float]:
+    """Look up the per-category bbox padding as ``(top, right, bottom, left)``.
+
+    Case-insensitive, whitespace-insensitive. Falls back to
+    ``_BBOX_PAD_TRBL_DEFAULT`` (4 % all-around — the original Patch 12
+    budget) when the category is missing or not in the table.
+    """
+    if not category:
+        return _BBOX_PAD_TRBL_DEFAULT
+    key = str(category).strip().lower()
+    if not key:
+        return _BBOX_PAD_TRBL_DEFAULT
+    if key in _BBOX_PAD_TRBL_BY_CATEGORY:
+        return _BBOX_PAD_TRBL_BY_CATEGORY[key]
+    key_collapsed = key.replace(" ", "")
+    return _BBOX_PAD_TRBL_BY_CATEGORY.get(key_collapsed, _BBOX_PAD_TRBL_DEFAULT)
+
+
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
 # Patch 12d (May 2026) — short-edge floor for crop output, expressed
 # as a PROPORTIONAL function of the source image's short edge. The
@@ -1175,12 +1259,22 @@ def _enforce_segformer_category(
 
 
 def _crop_to_bbox(
-    image_bytes: bytes, bbox_norm: list[int]
+    image_bytes: bytes,
+    bbox_norm: list[int],
+    *,
+    category: str | None = None,
 ) -> tuple[bytes, tuple[int, int, int, int]] | None:
     """Return (cropped_jpeg_bytes, (x1,y1,x2,y2)) for a 0\u20131000 bbox.
 
     ``bbox_norm`` is ``[ymin, xmin, ymax, xmax]`` on a 0\u20131000 scale.
     Adds a small padding and clamps to the image bounds.
+
+    Patch 12j (May 2026) — ``category`` selects the per-edge padding
+    budget from :data:`_BBOX_PAD_TRBL_BY_CATEGORY`. Without a category
+    we use the symmetric 4 % default (the Patch 12 budget) for
+    backward compat. With a category, tight torso boundaries (top's
+    bottom edge = waistline; bottom's top edge = waistline) shrink to
+    0.5 % so the adjacent garment never enters the frame.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -1194,10 +1288,11 @@ def _crop_to_bbox(
     # Validate scale \u2014 expect 0..1000
     if not (0 <= xmin < xmax <= 1000 and 0 <= ymin < ymax <= 1000):
         return None
-    x1 = max(0, int(xmin / 1000.0 * w - w * _BBOX_PADDING_PCT))
-    y1 = max(0, int(ymin / 1000.0 * h - h * _BBOX_PADDING_PCT))
-    x2 = min(w, int(xmax / 1000.0 * w + w * _BBOX_PADDING_PCT))
-    y2 = min(h, int(ymax / 1000.0 * h + h * _BBOX_PADDING_PCT))
+    pad_t, pad_r, pad_b, pad_l = _resolve_bbox_pad_trbl_for_category(category)
+    x1 = max(0, int(xmin / 1000.0 * w - w * pad_l))
+    y1 = max(0, int(ymin / 1000.0 * h - h * pad_t))
+    x2 = min(w, int(xmax / 1000.0 * w + w * pad_r))
+    y2 = min(h, int(ymax / 1000.0 * h + h * pad_b))
     if x2 - x1 <= 4 or y2 - y1 <= 4:
         return None
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
@@ -1966,7 +2061,17 @@ class GarmentVisionService:
             box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
             if not box_px:
                 continue
-            result = _crop_to_bbox(image_bytes, det["bbox"])
+            # Patch 12j — pass the SegFormer kind so the bbox crop
+            # uses the per-edge padding budget. Tightens the
+            # waistline-side edge for tops/bottoms so adjacent
+            # garments never enter the crop frame in the first place
+            # (the most important defence against blouse-skirt rim
+            # bleed; SegFormer + dilation cleanup are downstream
+            # cleanups, but they can only work with the pixels the
+            # bbox crop hands them).
+            result = _crop_to_bbox(
+                image_bytes, det["bbox"], category=det.get("kind"),
+            )
             if not result:
                 continue
             crop_bytes, _xy = result
@@ -3084,7 +3189,17 @@ class GarmentVisionService:
             if is_full_frame or bbox == [0, 0, 1000, 1000]:
                 crop_bytes = image_bytes
             else:
-                cropped = _crop_to_bbox(image_bytes, bbox)
+                # Patch 12j — pass the Gemini-assigned category so the
+                # one-pass single-call path also benefits from the
+                # per-edge padding budget. ``g.get("category")``
+                # holds the Gemini answer (Top / Bottom / Outerwear /
+                # Full Body / Footwear / Accessories) and
+                # :func:`_resolve_bbox_pad_trbl_for_category` accepts
+                # both that vocabulary and the SegFormer-kind
+                # vocabulary case-insensitively.
+                cropped = _crop_to_bbox(
+                    image_bytes, bbox, category=g.get("category"),
+                )
                 # ``_crop_to_bbox`` returns None when the bbox is degenerate
                 # or below the min-area floor. In those cases we still want
                 # an item record \u2014 just fall back to the full frame so

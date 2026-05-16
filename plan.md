@@ -984,6 +984,85 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch 12j — Per-category asymmetric bbox padding (Tighten the margin) — SHIPPED
+
+**Bug:** Even after Patch 12i tightened the SegFormer alpha dilation
+per-category, the **bbox crop itself** was still loose. The flat 4 %
+symmetric padding from Patch 12 dragged adjacent garments INTO the
+crop frame before SegFormer / rembg even saw it. Real screenshot
+(May 2026 outfit test):
+
+- ✅ Boots card — clean.
+- ❌ White blouse card — black skirt visible at the bottom (blouse
+  bbox extended 4 % below the waistline → ~60 px of skirt fabric
+  cropped in).
+- ❌ Black skirt card — boots visible at the bottom (skirt bbox
+  extended 4 % below the hem → boot tops cropped in).
+
+The downstream SegFormer alpha intersection can only work with
+pixels the bbox crop hands it. If the skirt pixels are inside the
+blouse crop AND rembg keeps them as foreground (which it does — it's
+all part of the original photo), no amount of mask dilation tuning
+will hide them.
+
+**Fix:** Per-category **asymmetric** bbox padding. Replaced the
+`_BBOX_PADDING_PCT = 0.04` scalar with
+`_BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[top, right, bottom, left]]`
+in `app/services/garment_vision.py`:
+
+| Category   | top   | right | bottom | left  | Rationale                                       |
+|------------|-------|-------|--------|-------|-------------------------------------------------|
+| top        | 4.0 % | 2.0 % | **0.5 %** | 2.0 % | bottom = waistline → tight; collar/face loose |
+| bottom     | **0.5 %** | 2.0 % | **0.5 %** | 2.0 % | waistline tight (top) + hem tight (no boots) |
+| dress / Full Body | 3.0 % | 2.0 % | 1.0 % | 2.0 % | top loose; bottom tight (no floor/shoes)  |
+| outerwear  | 1.5 % | 3.0 % | 1.0 % | 3.0 % | collar tight; hem tight; sides loose for silhouette |
+| footwear   | **0.5 %** | 3.0 % | 3.0 % | 3.0 % | top tight (no trouser hem leak); ground/heel loose |
+| headwear   | 4.0 % | 4.0 % | 3.0 % | 4.0 % | free-edge — keep generous brim padding         |
+| accessory / Underwear | 1.5 % | 1.5 % | 1.5 % | 1.5 % | tight all-around (belt/scarf/sunglasses) |
+| unknown    | 4.0 % | 4.0 % | 4.0 % | 4.0 % | backward-compat — Patch 12 default            |
+
+`_crop_to_bbox` now accepts `category: str | None = None` (keyword-only).
+`_resolve_bbox_pad_trbl_for_category()` does case-insensitive,
+whitespace-insensitive lookup with both SegFormer-kind and
+Gemini-category vocabularies, falling back to the 4 % default.
+
+**Wiring (2 callers):**
+1. `detect_items` batched path (`for det in useful` loop) — passes
+   `det.get("kind")` (the SegFormer label).
+2. One-pass single-call path (`_one_pass_extract`) — passes
+   `g.get("category")` (the Gemini-assigned category, since
+   SegFormer isn't run on this path).
+
+**Verification:** 24/24 unit-style smoke tests pass:
+- Resolver lookups (case-insensitive, space-collapsed,
+  fallback-on-unknown).
+- 7 critical semantic invariants — top's bottom edge tighter than
+  default; bottom's both edges tighter; footwear's top tighter
+  while bottom stays loose; top's bottom < top's top (asymmetric
+  signature).
+- 2 end-to-end synthetic crops on 1000×1500 image: top-category
+  crop is 53 px shorter than default (bottom edge moved up from
+  y=960 → y=907); bottom-category crop is 105 px shorter (top
+  edge y=540 → y=592, bottom edge y=1260 → y=1207).
+- Backward-compat: positional-only legacy call still works.
+
+**Why this fixes the user's screenshot:**
+- *White blouse card*: bbox now stops 0.5 % below the SegFormer-
+  detected waistline (≈ 7 px instead of 60 px) → no skirt fabric
+  enters the crop frame → SegFormer + rembg + dilation downstream
+  never have the chance to leak.
+- *Black skirt card*: bbox top edge tightens to 0.5 % above the
+  waistline; bottom edge tightens to 0.5 % below the hem → no
+  blouse leak above, no boot leak below.
+- *Boots card*: unchanged behaviour (top edge tight already wanted,
+  bottom/sides loose to keep heel + sole in frame).
+
+**Files touched:**
+- `backend/app/services/garment_vision.py` (new table + resolver +
+  `_crop_to_bbox` signature + 2 call sites + 56-line module-level
+  docstring block explaining the rationale)
+- `plan.md` (this entry)
+
 ## ✅ Patch 12i — Per-category dilation budget for tight torso crops (P1) — SHIPPED
 
 **Bug:** The flat 2.5 % dilation budget introduced by Patch 12f

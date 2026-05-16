@@ -1,26 +1,30 @@
 [
   {
-    "content": "Patch 12i: per-category dilation budget for tight torso crops",
+    "content": "Patch 12j: per-category asymmetric bbox padding (Tighten the margin)",
     "status": "completed"
   },
   {
-    "content": "Define _DILATE_PCT_BY_CATEGORY table in clothing_parser.py with tight budgets for top/bottom/dress/accessory and free budgets for footwear/headwear",
+    "content": "Replace _BBOX_PADDING_PCT scalar with _BBOX_PAD_TRBL_BY_CATEGORY (top,right,bottom,left) table",
     "status": "completed"
   },
   {
-    "content": "Add category param to apply_alpha_intersection() with backward-compat default",
+    "content": "Add _resolve_bbox_pad_trbl_for_category() helper",
     "status": "completed"
   },
   {
-    "content": "Update 3 production call sites: garment_vision._matte_crops, closet._run_background_matte, closet /clean-background",
+    "content": "Update _crop_to_bbox signature to accept category kwarg, apply asymmetric pads",
     "status": "completed"
   },
   {
-    "content": "Unit smoke test: 32/32 passed (19 resolver + 7 end-to-end + 1 backward-compat + 5 semantic)",
+    "content": "Update 2 callers: detect_items batched path + one-pass single-call path",
     "status": "completed"
   },
   {
-    "content": "Lint + plan.md update",
+    "content": "Smoke test: 24/24 PASS — resolver lookups + critical invariants + end-to-end synthetic crops + backward-compat",
+    "status": "completed"
+  },
+  {
+    "content": "Lint clean + plan.md updated",
     "status": "completed"
   }
 ]
