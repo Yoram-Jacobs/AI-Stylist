@@ -902,6 +902,92 @@ across the whole batch within ~8-15 s, all fill over the next
 - Frontend axios path still works for any caller that doesn't pass
   callbacks.
 
+## ✅ Patch M20 — Cross-page work tracker + last-item polish bug fix (SHIPPED)
+
+**Three things this patch ships, all motivated by user feedback after M19:**
+
+### M20.a — "Last item stuck on Polishing photo…" bug fix
+**Root cause:** The Phase O.6 frontend poll in `Closet.jsx` was
+calling `closetStore.upsert(polledItem)` to merge the freshly-fetched
+GET response into the local store. The backend's
+`_run_background_matte` used `$unset thumbnail_data_url` (intentionally
+— it invalidates the cached optimistic JPEG so the lazy backfill
+regenerates from the polished cutout). But MongoDB **omits unset
+fields from query results entirely**, so the merge
+`{...items[idx], ...polledItem}` KEPT the stale optimistic
+`thumbnail_data_url` and `bestImageUrl` resolved to the
+not-yet-polished JPEG. User saw the badge briefly clear, then the
+thumbnail stayed unprocessed-looking — interpreted as "the last item
+keeps showing Polishing photo…".
+
+**Fix (3-layer defence):**
+1. **Backend (`closet.py::_run_background_matte` + `_run_background_reconstruction`):**
+   replaced `$unset thumbnail_data_url` with `$set thumbnail_data_url: None`.
+   MongoDB now returns the field as null, the frontend merge
+   overwrites the stale local data URL, and the resolver falls
+   through to `clean_image_url` (the polished cutout).
+2. **Frontend (`closetStore.upsert`):** defensive — when an incoming
+   patch flips `clean_image_status` to `'ready'` (or supplies a fresh
+   `clean_image_url` / `reconstructed_image_url`) and the incoming
+   patch doesn't carry its own `thumbnail_data_url`, null the local
+   one so the fix works on older backends too.
+3. **Frontend (`Closet.jsx` polling):** robustness rewrite.
+   - Read `closetStore.getSnapshot().items` inside `tick` instead of
+     the stale closure's `store.items`.
+   - Persist `attempt` + `signature` in refs so the backoff actually
+     backs off across upsert-triggered re-mounts (was resetting to
+     3 s flat on every items mutation).
+   - Cap polling lifetime at `POLL_MAX_ATTEMPTS = 30` (~5 min wall
+     clock); on exhaustion fire one final `incrementalSync()` and
+     give up.
+   - Apply upserts even if the effect was cancelled mid-await (data
+     is fresh, dropping it would force the next mount to refetch).
+
+### M20.b — Cross-page "Analysis in progress" floater (Task 1)
+**Implementation:**
+- `lib/workStore.js` — singleton work tracker (useSyncExternalStore
+  pattern). Tracks active `/analyze` jobs (`analyzeJobs` keyed by
+  card id) and pending polish items (`polishPendingIds` set with a
+  per-item 5-minute timeout). Owns a single global poller running
+  every 3 s — starts when items are registered, stops when the set
+  drains. So the work survives navigation away from /add.
+- `components/WorkProgressFloater.jsx` — bottom-right pill,
+  glass-morphism style. Subscribes to `workStore` via
+  `useSyncExternalStore`, shows compact "Analysing N/M items" +
+  "Polishing N/M photos" rows with thin progress bars. Auto-hides
+  ~1.2 s after the last job drains for a visible "done" beat.
+- `AddItem.jsx::analyzeCard` calls `workStore.registerAnalyze` at
+  entry, `updateAnalyze({items, total})` on each NDJSON frame, and
+  `completeAnalyze` in `finally` (clears phantom jobs on error too).
+
+### M20.c — Global "Polishing" progress + "You have news" toast (Task 2)
+**Implementation:**
+- `AddItem.jsx::saveAll::settle()` — after each successful
+  `api.createItem`, items returned with `clean_image_status:
+  "pending"` are collected and passed to
+  `workStore.registerPolishItems()`. The store's global poller picks
+  them up and updates `closetStore` as each transitions out of
+  "pending".
+- `Closet.jsx` polling effect now ALSO calls
+  `workStore.registerPolishItems(pendingIds)` on every effect mount
+  so items inherited from a previous session (user closes the tab
+  mid-polish, reopens later) also surface on the floater.
+- `components/WorkBatchDoneToast.jsx` — subscribes to
+  `workStore.onBatchDone`. Fires a single sonner toast titled "You
+  have news in your closet" the moment the last item in the current
+  polish batch resolves; the toast has an "Open closet" action that
+  navigates to /closet.
+- `Closet.jsx::ItemCardInner` — the per-card "Polishing photo…"
+  text badge is RETIRED. Replaced with a subtle full-card
+  `ring-1 animate-pulse` overlay + a 30 % opacity dim on the
+  thumbnail so the user can still identify WHICH cards are
+  mid-polish, but the global floater + toast carry the textual
+  progress.
+
+**Both `WorkProgressFloater` and `WorkBatchDoneToast` are mounted at
+App root** (already scaffolded), so they render on every authenticated
+page including /add, /closet, /home, /stylist, etc.
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops

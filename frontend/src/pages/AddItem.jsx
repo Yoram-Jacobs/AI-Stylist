@@ -23,6 +23,7 @@ import { api } from '@/lib/api';
 import { sha256File, aHashFile, colorSignatureFile } from '@/lib/utils';
 import { findDuplicatesInCloset } from '@/lib/duplicateDetection';
 import { closetStore } from '@/lib/closetStore';
+import { workStore } from '@/lib/workStore';
 import DuplicatePreflightDialog from '@/components/DuplicatePreflightDialog';
 import { DppScanner } from '@/components/DppScanner';
 import { WeightedList } from '@/components/WeightedList';
@@ -772,6 +773,13 @@ export default function AddItem() {
       return;
     }
     analyzeInFlight.current.add(card.id);
+    // Patch M20 (May 2026) — Register this analyze job with the
+    // global ``workStore`` so the cross-page progress floater
+    // (``WorkProgressFloater`` mounted at App root) can show "Analysing
+    // N photos…" even if the user navigates away from /add mid-batch.
+    // The label uses the source filename when available so a multi-
+    // upload batch shows recognisable progress.
+    workStore.registerAnalyze(card.id, card.sourceFilename || card.file?.name || null);
     // Faux-progress timer so the scanning animation paces with the API call.
     const startedAt = Date.now();
     const tick = setInterval(() => {
@@ -840,6 +848,10 @@ export default function AddItem() {
           // handler below will set card status=error.
           return;
         }
+        // Patch M20 — surface the expected item count on the global
+        // floater so the user can see "Analysing 0/N items" tick
+        // up as the per-item frames arrive.
+        workStore.updateAnalyze(card.id, { items: 0, total: metas.length });
         const newIds = metas.map((m, i) => `${card.id}-${i}`);
         perCardIds = newIds;
         const newCards = metas.map((m, i) => buildBaseCard(m, newIds[i]));
@@ -854,6 +866,15 @@ export default function AddItem() {
       const handleItem = (frame) => {
         const slotId = perCardIds[frame.index];
         if (!slotId) return;
+        // Patch M20 — bump the global analyze progress one tick.
+        // We use a functional update on the local job snapshot so
+        // concurrent uploads don't clobber each other.
+        const job = workStore.getSnapshot().analyzeJobs[card.id];
+        if (job) {
+          workStore.updateAnalyze(card.id, {
+            items: Math.min((job.items || 0) + 1, job.total || (job.items + 1)),
+          });
+        }
         // Reconstruction (Nano Banana) is disabled by the backend
         // (ENABLE_RECONSTRUCTION=false), but echo the metadata
         // forward so re-enabling it later is a no-op on this side.
@@ -945,6 +966,11 @@ export default function AddItem() {
       // Patch 12 — release in-flight slot regardless of success/failure
       // so the user can legitimately retry via the "Try again" button.
       analyzeInFlight.current.delete(card.id);
+      // Patch M20 — clear the global floater entry for this job.
+      // Done in ``finally`` so a thrown stream error (network blip,
+      // 4xx, malformed frame) doesn't leave a phantom job ticking
+      // forever on the floater.
+      workStore.completeAnalyze(card.id);
     }
   };
 
@@ -1131,6 +1157,7 @@ export default function AddItem() {
         tempIds.map((tid) => api.createItem(ghosts.get(tid).body)),
       );
       const failures = [];
+      const polishCandidates = [];
       for (let i = 0; i < results.length; i += 1) {
         const tid = tempIds[i];
         const g = ghosts.get(tid);
@@ -1141,6 +1168,15 @@ export default function AddItem() {
           // server mints its own — but defensive) doesn't collide.
           closetStore.remove(tid);
           closetStore.upsert(r.value);
+          // Patch M20 — items returned with ``clean_image_status:
+          // "pending"`` have a deferred matte BackgroundTask running
+          // on the backend. Register them with the global workStore
+          // so the cross-page floater + the completion toast
+          // ("You have news in your closet") fire when the last one
+          // drains, regardless of which page the user is on.
+          if (r.value.clean_image_status === 'pending') {
+            polishCandidates.push(r.value);
+          }
         } else {
           closetStore.remove(tid);
           const detail =
@@ -1154,6 +1190,9 @@ export default function AddItem() {
             error: detail,
           });
         }
+      }
+      if (polishCandidates.length) {
+        workStore.registerPolishItems(polishCandidates);
       }
       if (failures.length) {
         closetStore.recordSaveFailures(failures);

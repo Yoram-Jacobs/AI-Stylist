@@ -265,7 +265,57 @@ export const closetStore = {
     let nextItems;
     let nextTotal = _state.total;
     if (idx >= 0) {
-      const merged = { ...items[idx], ...item };
+      // Patch M20 (May 2026) — Defensive thumbnail invalidation on
+      // Phase O.6 background-matte completion.
+      //
+      // Problem: the closet poll in ``Closet.jsx`` calls
+      // ``api.getItem(id)`` to refresh a still-``pending`` item and
+      // upserts the fresh response. The backend's
+      // ``_run_background_matte`` writes ``clean_image_status=
+      // "ready"`` AND ``clean_image_url=<polished PNG>`` simultaneously,
+      // and also nulls ``thumbnail_data_url`` so the lazy backfill
+      // regenerates it from the polished cutout.
+      //
+      // Older builds used ``$unset thumbnail_data_url`` here, which
+      // MongoDB omits from query results entirely → the spread merge
+      // below KEPT the stale optimistic JPEG in ``thumbnail_data_url``
+      // → ``bestImageUrl`` returned the unprocessed photo → user saw
+      // both the "Polishing photo…" badge gone AND the original
+      // background still in the card. We patched the backend to
+      // ``$set thumbnail_data_url: null`` so the merge propagates,
+      // BUT we also defensively force-clear here so the fix works on
+      // older backends and on the polled CTA path.
+      //
+      // Trigger condition: incoming patch flips ``clean_image_status``
+      // from anything-not-ready to ``"ready"`` (or supplies a fresh
+      // ``clean_image_url`` / ``reconstructed_image_url``). When that
+      // happens, the local optimistic ``thumbnail_data_url`` is by
+      // definition stale (it predates the polished cutout) and the
+      // resolver should fall through to the new ``clean_image_url``.
+      const prev = items[idx];
+      const flipsToReady =
+        item.clean_image_status === 'ready'
+        && prev.clean_image_status !== 'ready';
+      const gainedCleanImage =
+        typeof item.clean_image_url === 'string'
+        && item.clean_image_url
+        && item.clean_image_url !== prev.clean_image_url;
+      const gainedReconstruction =
+        typeof item.reconstructed_image_url === 'string'
+        && item.reconstructed_image_url
+        && item.reconstructed_image_url !== prev.reconstructed_image_url;
+      const merged = { ...prev, ...item };
+      if (
+        (flipsToReady || gainedCleanImage || gainedReconstruction)
+        && merged.thumbnail_data_url
+        // Only nuke a stale OPTIMISTIC thumbnail; if the polled
+        // response carried an explicit non-empty value (rare today
+        // but possible if a future backend rev re-bakes the
+        // thumbnail eagerly) leave it alone.
+        && !item.thumbnail_data_url
+      ) {
+        merged.thumbnail_data_url = null;
+      }
       nextItems = [
         ...items.slice(0, idx),
         merged,

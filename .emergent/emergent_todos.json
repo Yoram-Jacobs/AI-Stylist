@@ -1,30 +1,46 @@
 [
   {
-    "content": "Create lib/workStore.js — global store for analyze jobs + polish-pending IDs with continuous poller",
+    "content": "Phase 1: Fix bug — Last polished item stuck on 'Polishing photo…'",
+    "status": "completed"
+  },
+  {
+    "content": "Backend: Change $unset thumbnail_data_url to $set null in _run_background_matte so polled GET response propagates correctly through frontend upsert merge",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend (closetStore.upsert): Defensive — clear stale thumbnail_data_url when polled item has clean_image_status='ready'",
+    "status": "completed"
+  },
+  {
+    "content": "Frontend (Closet.jsx): Robust polling — use live snapshot via closetStore.getSnapshot(), cap polling lifetime, force incrementalSync as last-resort fallback",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Cross-page 'Analysis in progress' floating progress bar",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Wire AddItem analyze flow to workStore.registerAnalyze/updateAnalyze/completeAnalyze",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Wire AddItem save flow to workStore.registerPolishItems for pending-matte items",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: Global 'Polishing photos' progress bar + completion toast (replaces per-card badge)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: Replace per-card 'Polishing photo…' Badge with subtle pulse ring overlay (global floater takes over textual progress)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 3: Register Closet-discovered pending items with workStore so floater + toast also cover reload scenarios",
+    "status": "completed"
+  },
+  {
+    "content": "Final testing via testing agent (backend + frontend)",
     "status": "in_progress"
-  },
-  {
-    "content": "Create components/WorkProgressFloater.jsx — fixed bottom-right pill, shows analyze + polish progress",
-    "status": "pending"
-  },
-  {
-    "content": "Mount the floater in App.jsx so it survives navigation",
-    "status": "pending"
-  },
-  {
-    "content": "Wire AddItem.jsx to register analyze jobs + polish items with workStore",
-    "status": "pending"
-  },
-  {
-    "content": "Fire 'You have news in your closet' toast when polish batch completes",
-    "status": "pending"
-  },
-  {
-    "content": "Add i18n strings + lint + smoke-test by saving multiple items + navigating",
-    "status": "pending"
-  },
-  {
-    "content": "Update plan.md + finish",
-    "status": "pending"
   }
 ]

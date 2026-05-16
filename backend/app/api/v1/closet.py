@@ -490,16 +490,35 @@ async def _run_background_matte(
                 "clean_image_url": data_url,
                 "clean_image_status": "ready",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
+                # Patch M20 (May 2026) — Explicitly null out the cached
+                # thumbnail INSTEAD of $unset. Two reasons:
+                #
+                #   1. Original rationale (preserved) — invalidate the
+                #      stale thumbnail so the next ``GET /closet``
+                #      lazy-backfill regenerates it from
+                #      ``clean_image_url`` via
+                #      ``pick_source_data_url``. Both null and unset
+                #      trigger the backfill (it checks
+                #      ``isinstance(it.get("thumbnail_data_url"),
+                #      str)``).
+                #
+                #   2. NEW — the Phase O.6 frontend poll
+                #      (``Closet.jsx::useEffect[store.items]``) merges
+                #      the GET response into the local store via
+                #      ``{...items[idx], ...polled}``. MongoDB omits
+                #      unset fields from query results, so the merge
+                #      would KEEP the stale optimistic
+                #      ``thumbnail_data_url`` (a JPEG of the original
+                #      upload) and the user would see the unpolished
+                #      photo in the closet card even though
+                #      ``clean_image_status`` flipped to "ready". By
+                #      explicitly persisting null, the polled response
+                #      includes the field, the merge overwrites the
+                #      stale local data URL, and ``bestImageUrl``
+                #      falls through to ``clean_image_url`` (the
+                #      polished cutout) as designed.
+                "thumbnail_data_url": None,
             },
-            # Invalidate the cached thumbnail so the next ``GET
-            # /closet`` regenerates it from the clean rembg PNG via
-            # ``pick_source_data_url`` (which lists ``clean_image_url``
-            # ahead of ``original_image_url``). Without this $unset,
-            # the original-background JPEG thumbnail would persist
-            # forever even though rembg succeeded — the visible
-            # symptom of "items keep their full background after
-            # save" reported as Z2.6 bug 1.
-            "$unset": {"thumbnail_data_url": ""},
         },
     )
     logger.info(
@@ -595,11 +614,14 @@ async def _run_background_reconstruction(
                 "reconstructed_image_url": data_url,
                 "reconstruction_metadata": meta,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
+                # Patch M20 — Explicitly null out (was $unset). See
+                # comment in ``_run_background_matte`` for the full
+                # rationale. tl;dr: the frontend poll merges the
+                # GET response into the local store, so we need the
+                # field present-as-null for the merge to overwrite the
+                # stale optimistic thumbnail.
+                "thumbnail_data_url": None,
             },
-            # Invalidate the cached thumbnail so the next /closet read
-            # regenerates it from the freshly reconstructed image via
-            # ``pick_source_data_url``.
-            "$unset": {"thumbnail_data_url": ""},
         },
     )
     elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
