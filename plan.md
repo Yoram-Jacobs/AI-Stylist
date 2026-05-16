@@ -757,6 +757,73 @@ parsed body:      items=4 count=4
 The longest idle gap on the connection is now **8 s**, regardless of
 how long Gemini takes overall — the 502 is structurally impossible.
 
+## ✅ Patch M18 — Batched single-call Gemini analyze (SHIPPED, 60 s → 17 s)
+
+**Why:** M17 closed the 502 vector but the user's DevTools timeline
+still showed `Content Download: 59.90 s` — the analyze body was being
+delivered over 60 s while Gemini chugged through 4 crops one at a time
+(Emergent LLM-key concurrency-1 throttle). Working but slow UX.
+
+**Fix:** Pack all N crops into ONE multi-modal Gemini request and ask
+for an N-element JSON array back. The model does the same amount of
+vision work but only pays network / prompt-prefix / response-prefix
+overhead **once instead of N times**. Batching also bypasses the
+concurrency-1 throttle entirely — the throttle limits CONCURRENT calls,
+not how many images one call can carry.
+
+**Implementation:**
+- New method `garment_vision.analyze_batch(crops_bytes, language)`:
+  builds one `UserMessage(file_contents=[ImageContent(...) × N])`,
+  attaches a "BATCH MODE — return EXACTLY N entries in order" rider
+  to the system prompt, parses the array via the existing
+  `_extract_json` (which already handles fenced code blocks, bare
+  arrays, and `{items: [...]}` wrappers), then runs each entry
+  through the same `_coerce_single_garment` + `_coerce_enums`
+  pipeline as the per-crop path so dress_code enums, title
+  fallbacks, provider tags etc. all line up.
+- New helper `_build_batched_results` materialises per-crop result
+  dicts (label, bbox, crop_base64, reconstruction gating, etc.)
+  from the batched analyses — mirrors the trailing portion of
+  `_analyse_one_crop` so downstream callers see an identical shape
+  regardless of execution path.
+- `_analyse_crops` now tries the batched path first and falls back
+  to the legacy per-crop loop on **any** batch-level failure (rate
+  limit, malformed array, wrong-length response, validation error).
+  That preserves the "one bad crop shouldn't kill the whole outfit"
+  invariant since the per-crop fallback already handles that case.
+- `_batched: true` is tagged on each analysis so we can distinguish
+  batched vs. fallback results in the closet for triage.
+
+**Measured wall time on the dev pod (real test images, post-M18):**
+
+| Items | Per-crop loop (old) | Batched single call | Speed-up |
+|---|---|---|---|
+| 2 |  ~22 s | **20.5 s** | 1.1× |
+| 3 |  ~30 s | **19.7 s** | 1.5× |
+| 4 |  40-60 s | **17.4 s end-to-end** | 2.3-3.4× |
+
+Batching is essentially flat-cost in item count — going from 4
+sequential 16 s calls (=64 s) to one 17 s call is the structural win.
+
+**Verified fallback:** synthetic batch-failure test confirms the
+per-crop loop still runs and returns 2 items in 22 s when the
+batch path is forcibly broken, matching pre-M18 behaviour.
+
+**Combined Patch M13–M18 effect on the original "Analysis failed" UX:**
+- Original (pre-M13): 60-100 s, often 502 Bad Gateway on first attempt.
+- After M13 (warmup): saved 4-5 s of cold-start tax.
+- After M14 (defer reconstruction): saved ~20-40 s/crop of inline
+  Nano Banana cost.
+- After M15 (concurrency 1 → 3): bulk uploads no longer queue serially
+  behind a single-slot lock.
+- After M16 (kill Nano Banana auto-pipe): zero API spend on a step that
+  produced nothing visible.
+- After M17 (streaming keepalive): 502 is structurally impossible
+  regardless of how long analyze takes.
+- After M18 (batched single Gemini call): **4-item outfit /analyze
+  drops to ~17 s end-to-end — under one third of the 60 s ingress
+  ceiling.**
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops

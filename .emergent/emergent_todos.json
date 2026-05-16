@@ -1,10 +1,14 @@
 [
   {
-    "content": "Wrap /analyze in StreamingResponse with keepalive bytes to bypass ingress 60s idle timeout",
+    "content": "Add analyze_batch() method that does one Gemini call with N images and returns N parsed analyses",
     "status": "completed"
   },
   {
-    "content": "Lint + restart + verify keepalive emits during a 27s+ analyze",
+    "content": "Refactor _analyse_crops to call analyze_batch first, fall back to per-crop on failure",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + restart + measure new analyze_outfit duration vs the 40s baseline",
     "status": "completed"
   },
   {

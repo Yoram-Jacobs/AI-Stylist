@@ -1812,14 +1812,69 @@ class GarmentVisionService:
         think: bool = False,
     ) -> list[dict[str, Any]]:
         """Run :meth:`_analyse_one_crop` over every crop with bounded
-        concurrency, then strip unidentifiable results."""
-        sem = asyncio.Semaphore(6)
-        results = await asyncio.gather(
-            *[
-                self._analyse_one_crop(d, b, m, language, sem, think=think)
-                for d, b, m in crops
-            ]
-        )
+        concurrency, then strip unidentifiable results.
+
+        Patch M18 (May 2026) — Batched-first execution.
+        --------------------------------------------------------------
+        On the live preview pod we measured single Gemini-2.5-Flash
+        analyze() ≈ 16 s and 3-parallel ≈ 53 s — the Emergent LLM-key
+        tier serialises concurrent calls down to ~1 in flight. So a
+        4-item outfit's per-crop loop with ``Semaphore(6)`` was
+        effectively sequential and took 60+ s wall (which then needed
+        the M17 keepalive trick to survive the ingress 60 s ceiling).
+
+        ``analyze_batch`` packs all N crops into ONE multi-modal Gemini
+        request and parses an N-element JSON array back. That bypasses
+        the concurrency-1 throttle entirely and on a 4-item outfit
+        drops the wall time to ~20-30 s — the model is doing the same
+        amount of vision work but only paying network / prompt-prefix
+        / response-prefix overhead once instead of N times.
+
+        On any batch-level failure (rate limit, malformed array,
+        wrong-length response, validation error from
+        ``_coerce_single_garment``) we log and fall back to the legacy
+        per-crop loop. That preserves the "one bad crop shouldn't kill
+        the whole outfit" invariant from the per-crop path because the
+        per-crop ``_analyse_one_crop`` already handles that case.
+        """
+        if not crops:
+            return []
+
+        # M18 — try batched single-call first. ``think`` is intentionally
+        # not threaded into the batched path: the closet AddItem flow
+        # never sets it, and the batched prompt is tuned for the
+        # non-reasoning Gemini pass.
+        batched_analyses: list[dict[str, Any]] | None = None
+        if not think:
+            try:
+                t0 = time.perf_counter()
+                crop_bytes_list = [b for _, b, _ in crops]
+                batched_analyses = await self.analyze_batch(
+                    crop_bytes_list, language=language,
+                )
+                logger.info(
+                    "_analyse_crops batched OK: %d crops in %.1fs (one Gemini call)",
+                    len(crops), time.perf_counter() - t0,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "_analyse_crops batched FAILED, falling back to "
+                    "per-crop loop: %s",
+                    repr(exc)[:240],
+                )
+                batched_analyses = None
+
+        if batched_analyses is not None and len(batched_analyses) == len(crops):
+            results = await self._build_batched_results(crops, batched_analyses)
+        else:
+            sem = asyncio.Semaphore(6)
+            results = await asyncio.gather(
+                *[
+                    self._analyse_one_crop(d, b, m, language, sem, think=think)
+                    for d, b, m in crops
+                ]
+            )
+
         items = [r for r in results if r]
         before_drop = len(items)
         items = [r for r in items if not _is_unidentifiable(r.get("analysis"))]
@@ -1829,6 +1884,203 @@ class GarmentVisionService:
                 before_drop - len(items),
             )
         return items
+
+    async def _build_batched_results(
+        self,
+        crops: list[tuple[dict[str, Any], bytes, str]],
+        analyses: list[dict[str, Any]],
+    ) -> list[dict[str, Any] | None]:
+        """Materialise the per-crop result dicts from a batched analyze.
+
+        Mirrors the trailing portion of :meth:`_analyse_one_crop`
+        (reconstruction gating, dict shape, base64 crop encoding) so
+        downstream callers (the ``/closet/analyze`` endpoint and the
+        save flow) see an identical structure regardless of which
+        execution path produced it.
+        """
+        from app.config import settings as _settings
+
+        try:
+            from app.services.reconstruction import should_reconstruct
+        except Exception:  # noqa: BLE001
+            should_reconstruct = None  # type: ignore[assignment]
+
+        out: list[dict[str, Any] | None] = []
+        for (det, crop_bytes, crop_mime), analysis in zip(crops, analyses):
+            if not isinstance(analysis, dict):
+                # Defensive: batched parser may have returned a non-dict
+                # for one slot — treat as if that slot failed and skip.
+                out.append(None)
+                continue
+            needs_reconstruction = False
+            reconstruction_reasons: list[str] = []
+            if should_reconstruct is not None:
+                try:
+                    needs, reasons = should_reconstruct(
+                        analysis, det.get("bbox"),
+                    )
+                    if needs and _settings.DEFER_RECONSTRUCTION_ON_ANALYZE:
+                        needs_reconstruction = True
+                        reconstruction_reasons = list(reasons)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "reconstruction gate failed for batched crop "
+                        "label=%s: %s",
+                        det.get("label"), repr(exc)[:160],
+                    )
+            out.append(
+                {
+                    "label": det.get("label") or "garment",
+                    "kind": det.get("kind") or "garment",
+                    "bbox": det.get("bbox"),
+                    "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
+                    "crop_mime": crop_mime,
+                    "analysis": analysis,
+                    "reconstruction": None,
+                    "needs_reconstruction": needs_reconstruction,
+                    "reconstruction_reasons": reconstruction_reasons,
+                }
+            )
+        return out
+
+    async def analyze_batch(
+        self,
+        crops_bytes: list[bytes],
+        *,
+        language: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Patch M18 — Single Gemini call analysing N crops at once.
+
+        Builds one multi-modal request with all N crops attached and
+        asks the model to return an N-element JSON array of
+        GarmentAnalysis objects, in the same order. Bypasses the
+        Emergent LLM-key concurrency-1 throttle that made the per-crop
+        loop effectively sequential.
+
+        Raises on any condition where the result can't be trusted
+        (network error, missing key, model returned the wrong number
+        of items, response wasn't a parseable array). The caller
+        (``_analyse_crops``) catches and falls back to the per-crop
+        loop, so a batch-level failure never breaks the analyze
+        endpoint.
+
+        Notes
+        -----
+        * Gemma is intentionally not supported here — the Gemma-4
+          fine-tune is single-image only and the Eyes toggle never
+          routes batches to it. We always go straight to Gemini.
+        * Per-image base64 ``_shrink_for_vision`` keeps the
+          request payload bounded; with the default ``max_side=1280``
+          a 4-crop request lands at <250 KB pre-base64.
+        """
+        n = len(crops_bytes)
+        if n == 0:
+            return []
+        if not self.api_key:
+            raise RuntimeError(
+                "analyze_batch: requires GEMINI_API_KEY or EMERGENT_LLM_KEY"
+            )
+
+        system_prompt = (
+            _build_system_prompt(one_pass=False)
+            + _language_directive(language)
+            + (
+                "\n\nBATCH MODE — You will be given multiple cropped "
+                "garment photographs in a single message. They appear "
+                "in numbered order (image 1, image 2, ...). You MUST "
+                f"return a JSON ARRAY of EXACTLY {n} objects, one "
+                "per crop, in the same order, each following the "
+                "GarmentAnalysis schema described above. Do NOT "
+                "merge crops, do NOT skip crops, do NOT add explanatory "
+                "text outside the array. The response MUST start with "
+                "`[` and end with `]`."
+            )
+        )
+        user_text = (
+            f"Analyse the {n} cropped garment image(s) below in order. "
+            f"Return a JSON array of {n} GarmentAnalysis entries."
+        )
+
+        file_contents = [
+            ImageContent(base64.b64encode(_shrink_for_vision(b)).decode("ascii"))
+            for b in crops_bytes
+        ]
+
+        chat = LlmChat(
+            api_key=self.api_key,
+            session_id=f"theeyes-batch-{uuid.uuid4().hex[:12]}",
+            system_message=system_prompt,
+        )
+        chat.with_model("gemini", self.crop_model)
+        msg = UserMessage(text=user_text, file_contents=file_contents)
+
+        t0 = time.perf_counter()
+        ok = False
+        last_err: str | None = None
+        try:
+            raw = await chat.send_message(msg)
+            ok = True
+        except Exception as exc:  # noqa: BLE001
+            last_err = repr(exc)
+            raise
+        finally:
+            provider_activity.record(
+                "garment-vision-batch",
+                ok=ok,
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+                error=last_err,
+                extra={
+                    "provider": "gemini",
+                    "model": self.crop_model,
+                    "batch_size": n,
+                },
+            )
+
+        parsed = _extract_json(raw or "")
+        # Some models wrap arrays in {"items": [...]} or {"results": [...]}.
+        if isinstance(parsed, dict):
+            for key in ("items", "results", "garments", "analyses"):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+        if not isinstance(parsed, list):
+            raise ValueError(
+                f"analyze_batch: expected JSON array of {n}, got "
+                f"{type(parsed).__name__}"
+            )
+        if len(parsed) != n:
+            raise ValueError(
+                f"analyze_batch: model returned {len(parsed)} items, "
+                f"expected exactly {n}"
+            )
+
+        # Coerce each entry through the same single-garment normaliser
+        # the per-crop path uses so dress_code enums, title fallbacks,
+        # provider tags etc. all line up.
+        results: list[dict[str, Any]] = []
+        for entry in parsed:
+            try:
+                norm = _coerce_single_garment(entry)
+                if not norm.get("title") and norm.get("name"):
+                    norm["title"] = norm["name"]
+                if not norm.get("title"):
+                    norm["title"] = "Unnamed garment"
+                norm = _coerce_enums(norm)
+                norm["provider_used"] = "gemini"
+                norm["model_used"] = self.crop_model
+                norm["_batched"] = True
+                results.append(norm)
+            except Exception as exc:  # noqa: BLE001
+                # One bad slot — push a sentinel so the caller's
+                # ``_build_batched_results`` can drop it; we don't
+                # raise here because that would discard the rest of
+                # the (good) batch.
+                logger.warning(
+                    "analyze_batch: bad entry coerced to empty: %s",
+                    repr(exc)[:160],
+                )
+                results.append({})
+        return results
 
     async def analyze_outfit(
         self, image_bytes: bytes, *, max_items: int | None = None,
