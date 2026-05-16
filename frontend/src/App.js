@@ -9,6 +9,8 @@ import { AppLayout } from '@/components/AppLayout';
 import { PublicOnly } from '@/components/PublicOnly';
 import { SeoBase } from '@/components/SeoBase';
 import { LanguageSwitchOverlay } from '@/components/LanguageSwitchOverlay';
+import { WorkProgressFloater } from '@/components/WorkProgressFloater';
+import { WorkBatchDoneToast } from '@/components/WorkBatchDoneToast';
 
 import Login from '@/pages/Login';
 import Register from '@/pages/Register';
@@ -79,6 +81,8 @@ function App() {
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
           <Toaster position="top-center" richColors closeButton />
+          <WorkProgressFloater />
+          <WorkBatchDoneToast />
           </BrowserRouter>
           </PayPalProvider>
         </LocationProvider>

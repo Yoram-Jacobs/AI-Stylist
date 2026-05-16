@@ -1,26 +1,30 @@
 [
   {
-    "content": "Add analyze_batch_stream() async generator using litellm stream=True with incremental JSON-array parsing",
-    "status": "completed"
+    "content": "Create lib/workStore.js — global store for analyze jobs + polish-pending IDs with continuous poller",
+    "status": "in_progress"
   },
   {
-    "content": "Convert /analyze to NDJSON streaming when Accept: application/x-ndjson is requested",
-    "status": "completed"
+    "content": "Create components/WorkProgressFloater.jsx — fixed bottom-right pill, shows analyze + polish progress",
+    "status": "pending"
   },
   {
-    "content": "Update frontend analyzeItemImage to consume NDJSON via fetch + onItem callback",
-    "status": "completed"
+    "content": "Mount the floater in App.jsx so it survives navigation",
+    "status": "pending"
   },
   {
-    "content": "Wire AddItem.jsx to incrementally render cards as items arrive",
-    "status": "completed"
+    "content": "Wire AddItem.jsx to register analyze jobs + polish items with workStore",
+    "status": "pending"
   },
   {
-    "content": "Lint + restart + measure perceived first-card latency vs the 17s batched baseline",
-    "status": "completed"
+    "content": "Fire 'You have news in your closet' toast when polish batch completes",
+    "status": "pending"
+  },
+  {
+    "content": "Add i18n strings + lint + smoke-test by saving multiple items + navigating",
+    "status": "pending"
   },
   {
     "content": "Update plan.md + finish",
-    "status": "completed"
+    "status": "pending"
   }
 ]
