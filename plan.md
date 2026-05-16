@@ -984,6 +984,85 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch 12k — "One more twink": negative padding at boundary edges — SHIPPED
+
+**Bug:** After Patch 12j (asymmetric per-category bbox padding, with
+0.5 % padding on tight-boundary edges), the May 2026 outfit screenshot
+showed clear improvement — but residual leak persisted:
+
+- Blouse card: faint rim of skirt waistband visible at the very bottom.
+- Skirt card: visible band of legs + boot tops at the bottom.
+- Boots card: ✅ already clean.
+
+Root cause: **SegFormer's own bbox over-claims** a few percent of
+adjacent-garment pixels as the target class. The morphological
+closing in `_postprocess_mask` smooths the boundary but doesn't trim
+overshoot. By the time we add even a tiny 0.5 % positive padding, the
+bbox already extends past the natural garment edge — and rembg keeps
+those pixels as foreground because they ARE in the photo.
+
+**Fix:** Negative padding at boundary edges (the crop bites INSIDE
+the SegFormer bbox to compensate for the mask's natural overshoot).
+Updated `_BBOX_PAD_TRBL_BY_CATEGORY`:
+
+| Cat        | top         | right | bottom        | left  | Δ from 12j                  |
+|------------|-------------|-------|---------------|-------|-----------------------------|
+| top        | 4.0 %       | 2.0 % | **−1.5 %**    | 2.0 % | bottom +0.5 % → −1.5 %      |
+| bottom     | **−1.5 %**  | 2.0 % | **−2.5 %**    | 2.0 % | both edges flip negative; hem more aggressive than waist |
+| dress      | 2.0 %       | 2.0 % | **−2.0 %**    | 2.0 % | hem flips negative; top loosened slightly (3 % → 2 %)    |
+| Full Body  | same as dress                                                                           |
+| outerwear  | 1.0 %       | 3.0 % | **−1.0 %**    | 3.0 % | hem flips negative                                       |
+| footwear   | **−1.5 %**  | 3.0 % | 3.0 %         | 3.0 % | top flips negative; heel stays loose                     |
+| headwear   | 4.0 %       | 4.0 % | 3.0 %         | 4.0 % | unchanged                                                |
+| accessory  | 1.5 %       | 1.5 % | 1.5 %         | 1.5 % | unchanged                                                |
+| unknown    | 4.0 %       | 4.0 % | 4.0 %         | 4.0 % | unchanged (backward-compat)                              |
+
+**Mechanics:** `_crop_to_bbox`'s formula was already negative-safe:
+
+```python
+y1 = max(0, int(ymin/1000*h - h * pad_t))   # pad_t<0 → y1 moves DOWN (inside bbox)
+y2 = min(h, int(ymax/1000*h + h * pad_b))   # pad_b<0 → y2 moves UP (inside bbox)
+```
+
+The `max(0, ...)` / `min(h, ...)` clamps prevent out-of-bounds; the
+existing `if x2-x1<=4 or y2-y1<=4: return None` guard handles
+degenerate cases (caller falls back to full frame).
+
+**Verification:** updated smoke tests pass:
+- Resolver returns the new tuples for top / bottom / footwear with
+  the expected sign pattern (top.bottom<0, bot.top<0, bot.bottom<0
+  more than bot.top, foot.top<0, foot.bottom≥0.03).
+- End-to-end synthetic crop on 1000×1500 image with a 400-800
+  normalised bottom-category bbox: default 4 % padding produces a
+  720 px tall crop (y=540..1260); 12k negative padding produces a
+  **540 px tall crop (y=622..1162) — 25 % shorter** with the top
+  edge moved DOWN by 82 px (no blouse leak) and the bottom edge
+  moved UP by 98 px (no boot leak). Exactly the "one more twink"
+  the user requested.
+- Edge case: a 0.64 % area bbox (below `_MIN_CROP_AREA_PCT=0.008`
+  floor) returns None with bottom-category. This is the existing
+  Patch 12d behaviour preserving against tiny-bbox hallucinations —
+  unrelated to the negative-padding change.
+- Top-category bbox: bottom edge trimmed 83 px more than default,
+  top edge unchanged (face/collar still loose). Asymmetric profile
+  preserved.
+
+**Why this works on the user's photo:**
+- Blouse waistband: blouse bbox bottom edge now at −1.5 % of frame
+  height (≈ −22 px on a 1500 px source) INSIDE the SegFormer bbox.
+  The over-claimed waistband pixels are dropped along with any 0.5 %
+  positive padding from 12j.
+- Skirt leg/boot leak: skirt bbox bottom at −2.5 % (≈ −37 px). The
+  over-claimed thigh/boot-top pixels are dropped.
+- Boots: untouched (top edge already meant to be tight; bottom +
+  sides loose so heel/sole/silhouette stay in frame).
+
+**Files touched:**
+- `backend/app/services/garment_vision.py` — only the
+  `_BBOX_PAD_TRBL_BY_CATEGORY` table values; no signature changes,
+  no logic changes elsewhere. The smallest-possible "twink" diff.
+- `plan.md` (this entry)
+
 ## ✅ Patch 12j — Per-category asymmetric bbox padding (Tighten the margin) — SHIPPED
 
 **Bug:** Even after Patch 12i tightened the SegFormer alpha dilation

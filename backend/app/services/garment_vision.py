@@ -694,23 +694,40 @@ _BBOX_PAD_TRBL_BY_CATEGORY: dict[str, tuple[float, float, float, float]] = {
     # Top / Outerwear-like upper garment: face-side loose, waistline
     # tight. Sides slightly tight too (avoid pulling in adjacent
     # hands / bags).
-    "top":        (0.04, 0.02, 0.005, 0.02),
-    # Bottom: waistline tight (top edge), hem tight (avoids leaking
-    # shoes / floor reflections). Sides slightly tight.
-    "bottom":     (0.005, 0.02, 0.005, 0.02),
-    # Dress / Full Body: top edge can crop a little of the collar
-    # because dresses often photograph head-on with neck visible;
-    # bottom edge tight (avoid floor / shoes).
-    "dress":      (0.03, 0.02, 0.01, 0.02),
-    "fullbody":   (0.03, 0.02, 0.01, 0.02),
-    "full body":  (0.03, 0.02, 0.01, 0.02),
+    #
+    # Patch 12k (May 2026, "one more twink") — bottom edge bumped
+    # from +0.5 % to **-1.5 %**, i.e. the crop now ends 1.5 % INSIDE
+    # the SegFormer-derived bbox at the waistline. The 0.5 % positive
+    # margin from Patch 12j wasn't enough on the May 2026 test photo:
+    # the SegFormer mask itself was over-claiming a few percent of
+    # waistband/skirt-top pixels as "Upper-clothes", so the bbox was
+    # already too tall before any padding was added. Negative padding
+    # bites INTO the bbox and trims that over-claim. The real blouse
+    # body still survives because morphological closing in
+    # ``_postprocess_mask`` is uniform — the outer 1.5 % of mask
+    # pixels are the noisy/uncertain ones; the dominant garment body
+    # is well inside.
+    "top":        (0.04, 0.02, -0.015, 0.02),
+    # Bottom: waistline AND hem are both adjacent to other body
+    # regions (top above, footwear/skin below). Both edges go
+    # negative; the hem edge is the more aggressive one because the
+    # skirt-vs-thigh / skirt-vs-boot boundary is where SegFormer is
+    # least confident on the May 2026 test photo (visible leak of
+    # legs + boot tops bottom of skirt card).
+    "bottom":     (-0.015, 0.02, -0.025, 0.02),
+    # Dress / Full Body: same logic — neckline tight, hem tight (no
+    # floor / shoes / mat).
+    "dress":      (0.02, 0.02, -0.020, 0.02),
+    "fullbody":   (0.02, 0.02, -0.020, 0.02),
+    "full body":  (0.02, 0.02, -0.020, 0.02),
     # Outerwear: collar overlaps neckline of underlying top — tighten
     # top edge. Hem of an open coat shows pants behind — tighten
     # bottom too. Sides loose to keep the silhouette.
-    "outerwear":  (0.015, 0.03, 0.01, 0.03),
-    # Footwear: top edge tight to avoid trouser hem leaking;
-    # everything else loose so the heel + sole stay in frame.
-    "footwear":   (0.005, 0.03, 0.03, 0.03),
+    "outerwear":  (0.01, 0.03, -0.010, 0.03),
+    # Footwear: top edge tight (avoid trouser hem leaking) — now
+    # negative so we bite past the SegFormer bbox top. Bottom / sides
+    # loose so the heel + sole stay in frame.
+    "footwear":   (-0.015, 0.03, 0.03, 0.03),
     # Headwear: free-edge garment — generous padding all around so
     # the brim / pom-pom isn't clipped.
     "headwear":   (0.04, 0.04, 0.03, 0.04),
