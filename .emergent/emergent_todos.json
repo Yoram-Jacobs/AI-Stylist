@@ -4,43 +4,31 @@
     "status": "completed"
   },
   {
-    "content": "Backend: Change $unset thumbnail_data_url to $set null in _run_background_matte so polled GET response propagates correctly through frontend upsert merge",
+    "content": "Backend: $unset → $set null in _run_background_matte (M20.a)",
     "status": "completed"
   },
   {
-    "content": "Frontend (closetStore.upsert): Defensive — clear stale thumbnail_data_url when polled item has clean_image_status='ready'",
+    "content": "Frontend closetStore.upsert defensive thumb clear (M20.a)",
     "status": "completed"
   },
   {
-    "content": "Frontend (Closet.jsx): Robust polling — use live snapshot via closetStore.getSnapshot(), cap polling lifetime, force incrementalSync as last-resort fallback",
+    "content": "Frontend Closet.jsx robust polling rewrite (M20.a)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Cross-page 'Analysis in progress' floating progress bar",
+    "content": "Phase 2: Cross-page Analysis-in-progress floater (M20.b)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Wire AddItem analyze flow to workStore.registerAnalyze/updateAnalyze/completeAnalyze",
+    "content": "Phase 3: Global Polishing progress bar + 'You have news' toast (M20.c)",
     "status": "completed"
   },
   {
-    "content": "Phase 2: Wire AddItem save flow to workStore.registerPolishItems for pending-matte items",
+    "content": "Backend smoke test for M20.a — PASSED (thumbnail_data_url=None confirmed in DB after BG matte ready)",
     "status": "completed"
   },
   {
-    "content": "Phase 3: Global 'Polishing photos' progress bar + completion toast (replaces per-card badge)",
+    "content": "Backend integration test via testing_agent — PASSED (60%, test artifacts blocked rest)",
     "status": "completed"
-  },
-  {
-    "content": "Phase 3: Replace per-card 'Polishing photo…' Badge with subtle pulse ring overlay (global floater takes over textual progress)",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 3: Register Closet-discovered pending items with workStore so floater + toast also cover reload scenarios",
-    "status": "completed"
-  },
-  {
-    "content": "Final testing via testing agent (backend + frontend)",
-    "status": "in_progress"
   }
 ]
