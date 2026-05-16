@@ -175,6 +175,132 @@ def _run_inference(pil_full: Image.Image) -> np.ndarray:
     return pred
 
 
+# Patch 12e (May 2026) — pair-recovery thresholds for footwear.
+#   * ``_PAIR_ASYMMETRY_THRESHOLD`` — if smaller_half_mass / larger_half_mass
+#     is below this, the first-pass mask is suspect for a missing partner.
+#   * ``_PAIR_OVERLAP_PCT`` — when re-cropping the source image to the
+#     missing half, include this much of the *dominant* side so the
+#     SegFormer model has anatomical context for the half it's parsing
+#     (a lone leg-only crop often produces a 0-shoe result; a leg + a
+#     glimpse of the other shoe usually fires correctly).
+_PAIR_ASYMMETRY_THRESHOLD: float = 0.30
+_PAIR_OVERLAP_PCT: float = 0.15
+
+
+def _recover_paired_footwear(
+    full_image: Image.Image,
+    shoes_mask: np.ndarray,
+) -> np.ndarray:
+    """Patch 12e (May 2026) — Option B2 second-pass pair recovery.
+
+    Detects whether a unified ``Shoes`` mask is anatomically asymmetric
+    (one half of the frame carries < 30 % the mass of the other), and
+    if so re-runs SegFormer on the *missing* half of the source image
+    to look for the partner boot the first pass missed.
+
+    Fidelity rule
+    -------------
+    If the second pass also returns nothing in the missing half (e.g.
+    the photo is a profile shot, or the partner shoe is occluded by an
+    object or the model's pose), the function returns the original
+    mask unchanged. We never fabricate a partner the source photo
+    doesn't show — staying loyal to the user's upload is explicitly
+    required by product spec.
+
+    Why a second SegFormer pass is needed
+    -------------------------------------
+    SegFormer's per-pixel argmax has a strong global prior: if one
+    boot dominates the lower-frame footwear region, the model can
+    under-confidently classify the partner boot as "Right-leg" /
+    "Skin" / background. Cropping to a half-frame removes that prior
+    and forces the model to reconsider; on a clean photo with two
+    boots, the second pass routinely recovers the missed partner.
+
+    Cost
+    ----
+    ~2-4 s of CPU inference per asymmetric footwear detection. Fires
+    on a small fraction of uploads (only when symmetry is broken).
+    No-op on photos where both boots were detected cleanly.
+    """
+    if shoes_mask is None or shoes_mask.size == 0:
+        return shoes_mask
+    H, W = shoes_mask.shape
+    if H <= 0 or W <= 0:
+        return shoes_mask
+    mid = W // 2
+    left_mass = int(shoes_mask[:, :mid].sum())
+    right_mass = int(shoes_mask[:, mid:].sum())
+    total_mass = left_mass + right_mass
+    if total_mass == 0:
+        return shoes_mask
+    smaller = min(left_mass, right_mass)
+    larger = max(left_mass, right_mass)
+    if larger == 0 or (smaller / larger) >= _PAIR_ASYMMETRY_THRESHOLD:
+        # Already balanced — both halves carry comparable mass.
+        return shoes_mask
+
+    missing_left = left_mass < right_mass
+    overlap_px = int(W * _PAIR_OVERLAP_PCT)
+    if missing_left:
+        crop_x1, crop_x2 = 0, min(W, mid + overlap_px)
+    else:
+        crop_x1, crop_x2 = max(0, mid - overlap_px), W
+    if crop_x2 - crop_x1 <= 4:
+        return shoes_mask
+
+    half_img = full_image.crop((crop_x1, 0, crop_x2, H))
+    try:
+        half_class_mask = _run_inference(half_img)
+    except Exception as exc:  # noqa: BLE001
+        logger.info(
+            "_recover_paired_footwear: second-pass inference failed: %s",
+            repr(exc)[:120],
+        )
+        return shoes_mask
+
+    # Find every class id whose label looks like a shoe in this model.
+    shoes_labels = {"Left-shoe", "Right-shoe", "Shoes"}
+    shoes_class_ids = [
+        cid for cid, label in _id2label.items() if label in shoes_labels
+    ]
+    if not shoes_class_ids:
+        return shoes_mask
+    half_shoes = np.zeros_like(half_class_mask, dtype=np.uint8)
+    for cid in shoes_class_ids:
+        half_shoes |= (half_class_mask == cid).astype(np.uint8)
+
+    # Translate the half-image mask back to full-image coordinates and
+    # restrict the union to the *missing* half only — the overlap zone
+    # on the dominant side is already covered by the original mask.
+    full_shoes_new = np.zeros_like(shoes_mask)
+    full_shoes_new[:, crop_x1:crop_x2] = half_shoes
+    if missing_left:
+        full_shoes_new[:, mid:] = 0
+    else:
+        full_shoes_new[:, :mid] = 0
+
+    new_mass = int(full_shoes_new.sum())
+    if new_mass < max(64, int(0.0005 * H * W)):
+        # Found nothing meaningful on the missing half → faithful to source.
+        logger.info(
+            "_recover_paired_footwear: second pass found no partner on the "
+            "%s half (mass=%d px, threshold=%d px) — keeping single-boot mask "
+            "faithful to the original photo",
+            "left" if missing_left else "right",
+            new_mass, max(64, int(0.0005 * H * W)),
+        )
+        return shoes_mask
+
+    merged = np.maximum(shoes_mask, full_shoes_new).astype(np.uint8)
+    logger.info(
+        "_recover_paired_footwear: recovered missing partner on %s half "
+        "(added %d px, mass %d → %d on %dx%d frame)",
+        "left" if missing_left else "right",
+        new_mass, int(shoes_mask.sum()), int(merged.sum()), W, H,
+    )
+    return merged
+
+
 # Classes whose mask should ALWAYS be treated as a single instance,
 # regardless of how many disconnected blobs SegFormer's per-pixel
 # argmax produces. A high-contrast graphic print on a t-shirt or a
@@ -632,6 +758,27 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
             "score": 0.95,
             "mask": combined,
         }
+
+    # 2a) Patch 12e (May 2026) — Option B2 pair recovery for footwear.
+    #     When the unified Shoes mask is anatomically lopsided (one
+    #     half of the frame carries < 30% the mass of the other), the
+    #     first SegFormer pass almost certainly missed a partner boot
+    #     due to a strong global prior on the dominant side. Re-run
+    #     SegFormer on the missing half to give the model a focused
+    #     second look. If nothing turns up on the missing half, the
+    #     photo genuinely only shows one boot (profile shot / occluded
+    #     partner) — leave the mask alone so the saved card stays
+    #     faithful to the original photo. See ``_recover_paired_footwear``.
+    if "Shoes" in by_label:
+        try:
+            by_label["Shoes"]["mask"] = await asyncio.to_thread(
+                _recover_paired_footwear, img, by_label["Shoes"]["mask"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "clothing_parser: pair recovery skipped after error: %s",
+                repr(exc)[:120],
+            )
 
     # 2b) Clean up every merged mask: fill shadow-holes, smooth jagged
     #     edges, drop floating specks. Without this step the alpha

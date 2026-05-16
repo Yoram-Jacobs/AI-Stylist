@@ -1,18 +1,18 @@
 [
   {
-    "content": "Replace absolute 192 px floor with proportional floor max(96, 12% of src_short)",
+    "content": "Add _recover_missing_pair helper in clothing_parser.py",
     "status": "completed"
   },
   {
-    "content": "Smoke-test on man photo dimensions (550x810) to confirm pants/shoes/hat survive",
+    "content": "Wire pair recovery into parse_garments for the Shoes label",
     "status": "completed"
   },
   {
-    "content": "Smoke-test on woman-in-black dimensions to confirm bag/shoes still drop",
+    "content": "Smoke-test on woman photo (expect 2 boots paired) AND single-side-profile photo (expect 1 kept faithfully)",
     "status": "completed"
   },
   {
-    "content": "Discuss Bug B (single-boot detection) options with user",
-    "status": "in_progress"
+    "content": "(3) Wall time: warm-load SegFormer + rembg + CLIP at backend boot; run crop analyses concurrently",
+    "status": "pending"
   }
 ]
