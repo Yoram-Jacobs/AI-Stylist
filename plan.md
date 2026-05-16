@@ -984,6 +984,86 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M21 — SegFormer-anchored category enforcement (P0 fix) — SHIPPED
+
+**Bug:** User uploads an outfit photo; SegFormer correctly segments the
+pants region into a `bottom`-kind crop, but the bbox is loose enough
+that a sliver of an adjacent coat's tails leaks into the top edge of
+the pants crop. Gemini classifies the whole crop and decides it's
+"Outerwear / Overcoat" because of the coat pixels. User ends up with
+a "Charcoal Overcoat" card in their closet that is actually a pair of
+pants. Same failure mode reproduced on the issue tracker for
+footwear, accessories, and dresses — any time Gemini wanders outside
+the SegFormer-anchored category set.
+
+**Fix:** Two-layer defence in `app/services/garment_vision.py`:
+
+### Layer 1 — Prompt hint
+Every batched Gemini call now embeds a "CROP CATEGORY HINTS" block in
+the system prompt naming each crop's SegFormer pre-classification:
+
+> Image 1: pre-classified as Bottom (pants / skirt / shorts).
+> Image 2: pre-classified as Top or Outerwear (upper-body garment).
+> ...
+>
+> If a hint says 'Bottom', the dominant garment IS a bottom (...),
+> even if a sleeve, hem, or coat tail from an adjacent garment is
+> partially visible. Honour these hints; choose sub_category from
+> within the hinted top-level category.
+
+Threaded through `analyze_batch` + `analyze_batch_stream` via a new
+`kind_hints: list[str | None]` parameter; the inline system-prompt
+build in `analyze_batch` and `_build_batch_litellm_messages` (used by
+the streaming path) both emit identical hint blocks so the one-shot
+and streaming code paths produce equivalent prompts.
+
+### Layer 2 — Post-validation override
+New `_enforce_segformer_category(analysis, *, segformer_kind, label)`
+runs after `_coerce_enums` on every Gemini result, regardless of
+which path produced it. Logic:
+
+- For unambiguous SegFormer kinds (`bottom`, `dress`, `footwear`,
+  `accessory`, `headwear`): if Gemini's `category` is outside the
+  compatible set, log a WARNING with before/after, overwrite the
+  category with the canonical default, clear `sub_category` (so a
+  stale "Overcoat" doesn't survive on a now-"Bottom" item), and
+  stamp `_category_overridden_by="segformer"` for observability.
+- For ambiguous `top` kind: allow both `Top` and `Outerwear` (a
+  SegFormer "top" mask can legitimately be either a t-shirt or a
+  parka, and Gemini has the vocabulary to distinguish them).
+- For unknown kinds (`garment` from the Gemini-only fallback) or
+  missing kind: no-op (no anchor available).
+- Empty / missing Gemini `category` with a known SegFormer kind:
+  fill in with the SegFormer default and stamp
+  `_category_overridden_by="segformer-fill"`.
+
+### Wiring
+- `_analyse_crops`: builds `kind_hints` from `crops[i][0]["kind"]`
+  and passes to `analyze_batch` (one-shot batched path).
+- `analyze_outfit_stream`: builds `kind_hints` from the same source
+  and passes to `analyze_batch_stream` (NDJSON streaming path).
+- `_analyse_one_crop`: applies layer-2 enforcement after every
+  per-crop `self.analyze(...)` (the legacy single-crop path, also
+  used as the fallback when the batched call fails).
+- All three coercion sites (`analyze_batch` parsed-array loop,
+  `analyze_batch_stream` per-object yield, `_analyse_one_crop`
+  analysis result) now call `_enforce_segformer_category` with the
+  matching `kind`.
+
+### Verification
+13/13 unit-style smoke tests pass, including the exact "pants crop
+labeled Overcoat" failure: Gemini's
+`{"category": "Outerwear", "sub_category": "Overcoat"}` on a
+`segformer_kind="bottom"` is overridden to
+`{"category": "Bottom", "sub_category": null,
+"_category_overridden_by": "segformer"}` and the override is logged
+at WARNING level. Backend boots clean with no regressions.
+
+### Files touched
+- `backend/app/services/garment_vision.py` (new helper + 3 call sites
+  + 2 signature extensions + 2 prompt-hint blocks)
+- `plan.md` (this entry)
+
 ## ✅ Patch M20.2 — Save-while-scanning auto-save queue (SHIPPED)
 
 **Bug:** User uploads N photos, presses Save the moment the FIRST

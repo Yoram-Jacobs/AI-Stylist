@@ -1,26 +1,42 @@
 [
   {
-    "content": "M20.a — Last polished item stuck bug (P0): backend $set null + frontend defensive merge + robust polling",
+    "content": "Read CONCRETE_FACTS.md",
     "status": "completed"
   },
   {
-    "content": "M20.b — Cross-page Analysis-in-progress floater (P1)",
+    "content": "Patch M21: P0 — Anchor Gemini category to SegFormer kind",
     "status": "completed"
   },
   {
-    "content": "M20.c — Global Polishing progress bar + 'You have news in your closet' toast (P1)",
+    "content": "Add _SEGFORMER_KIND_TO_ALLOWED_CATEGORIES + _SEGFORMER_KIND_TO_DEFAULT_CATEGORY enforcement tables",
     "status": "completed"
   },
   {
-    "content": "M20.1 — Restore per-card 'Polishing photo…' badge (user feedback: useful for identifying which card is mid-polish)",
+    "content": "Add _enforce_segformer_category() helper + per-kind human-readable labels",
     "status": "completed"
   },
   {
-    "content": "M20.2 — Save-while-scanning auto-save queue (P1 bug)",
+    "content": "Add kind_hints param to _build_batch_litellm_messages and inject 'Pre-classified as X' prompt block",
     "status": "completed"
   },
   {
-    "content": "plan.md updated with session wrap-up note for the next agent",
+    "content": "Thread kind_hints through analyze_batch + analyze_batch_stream signatures",
+    "status": "completed"
+  },
+  {
+    "content": "Pass detection kinds from analyze_outfit_stream + _analyse_crops batched-path callers",
+    "status": "completed"
+  },
+  {
+    "content": "Apply _enforce_segformer_category in analyze_batch, analyze_batch_stream, and _analyse_one_crop",
+    "status": "completed"
+  },
+  {
+    "content": "Backend smoke test — 13/13 PASS including the pants-as-Overcoat regression",
+    "status": "completed"
+  },
+  {
+    "content": "Lint + plan.md update",
     "status": "completed"
   }
 ]
