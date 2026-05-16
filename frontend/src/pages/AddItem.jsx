@@ -144,6 +144,16 @@ export default function AddItem() {
   const [preflight, setPreflight] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  // Patch 12 (May 2026) — analyzeCard in-flight guard. The user reported
+  // a single upload producing two `/analyze` passes 90 s apart (saving
+  // 8 items where 4 were expected). The exact trigger was elusive
+  // — possibly a `useEffect` double-fire under React StrictMode, a
+  // network-layer retry, or a manual "Try again" click that landed
+  // before the original promise resolved. Regardless, ``analyzeCard``
+  // must be idempotent per card: ``analyzeInFlight.current`` tracks
+  // the set of card IDs currently being analysed and short-circuits any
+  // duplicate invocation. Cleared in the ``finally`` block.
+  const analyzeInFlight = useRef(new Set());
 
   const pickFiles = () => fileInputRef.current?.click();
   const openCamera = () => cameraInputRef.current?.click();
@@ -750,6 +760,18 @@ export default function AddItem() {
   };
 
   const analyzeCard = async (card) => {
+    // Patch 12 (May 2026) — idempotency guard. If an analyze for this
+    // card is already mid-flight, refuse to start another one.
+    // Prevents the "8 items saved from one upload" duplication where
+    // the same card got analysed twice and both result sets persisted.
+    if (analyzeInFlight.current.has(card.id)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[analyzeCard] skipped duplicate analyze for card ${card.id} — already in flight`,
+      );
+      return;
+    }
+    analyzeInFlight.current.add(card.id);
     // Faux-progress timer so the scanning animation paces with the API call.
     const startedAt = Date.now();
     const tick = setInterval(() => {
@@ -922,6 +944,10 @@ export default function AddItem() {
         )
       );
       toast.error(msg);
+    } finally {
+      // Patch 12 — release in-flight slot regardless of success/failure
+      // so the user can legitimately retry via the "Try again" button.
+      analyzeInFlight.current.delete(card.id);
     }
   };
 

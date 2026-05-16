@@ -784,7 +784,16 @@ function ItemCardInner({ item, isSelected, showCheckbox, score }) {
                   alt={item.title}
                   loading="lazy"
                   decoding="async"
-                  className="w-full h-full object-cover"
+                  // Patch 12 (May 2026) — ``object-contain`` (was
+                  // ``object-cover``). Cover scales the source up to
+                  // fill the 3:4 card, which on small crops produces
+                  // a visible bilinear blur. Contain renders the
+                  // source at its native aspect ratio with neutral
+                  // letterbox gutters against ``bg-secondary``. Crisp
+                  // for tiny crops, indistinguishable from cover on
+                  // garment-shaped portrait images that already match
+                  // ~3:4.
+                  className="w-full h-full object-contain"
                   data-testid="closet-item-thumb"
                 />
                 {polishing && (

@@ -1,18 +1,18 @@
 [
   {
-    "content": "Revert bbox-expansion floor in _crop_to_bbox",
+    "content": "Add min-short-edge px floor in _crop_to_bbox that DROPS crops below threshold (returns None)",
+    "status": "completed"
+  },
+  {
+    "content": "Smoke-test: confirm Bag/Shoes get dropped on outfit photo but kept on dedicated bag/shoe photo",
     "status": "completed"
   },
   {
     "content": "Add frontend save/analyze in-flight guard so the same upload can't double-fire",
-    "status": "pending"
+    "status": "completed"
   },
   {
-    "content": "Decide if accessories (Bag/Shoes) should be saved as items or dropped from outfit photos",
-    "status": "pending"
-  },
-  {
-    "content": "Add frontend CSS object-fit:contain on closet card image to handle small-crop blur without expanding",
-    "status": "pending"
+    "content": "Frontend CSS object-fit:contain for small-crop thumbnails",
+    "status": "completed"
   }
 ]
