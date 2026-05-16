@@ -2012,7 +2012,17 @@ class GarmentVisionService:
             if seg_mask_bbox is not None:
                 try:
                     refined = _cp.apply_alpha_intersection(
-                        matted, seg_mask_bbox
+                        matted,
+                        seg_mask_bbox,
+                        # Patch 12i — pass the SegFormer kind so the
+                        # intersection uses the per-category dilation
+                        # budget. Tops/bottoms/dresses get the
+                        # tightened budget (1.5-1.8 %) to stop the
+                        # blouse-skirt rim overlap on shared
+                        # waistlines; footwear/headwear keep the
+                        # original 2.5 % to preserve puffy-cuff /
+                        # low-contrast-shoe recovery.
+                        category=det.get("kind"),
                     )
                     if refined:
                         matted = refined

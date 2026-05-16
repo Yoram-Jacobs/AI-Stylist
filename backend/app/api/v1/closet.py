@@ -438,7 +438,19 @@ async def _run_background_matte(
     #    rembg PNG is missing or the SegFormer mask is unavailable.
     if result and seg_mask is not None:
         try:
-            refined = _cp.apply_alpha_intersection(result, seg_mask)
+            refined = _cp.apply_alpha_intersection(
+                result,
+                seg_mask,
+                # Patch 12i — pass the item's category through to the
+                # intersection so it picks the per-category dilation
+                # budget. ``category`` is the user-facing string from
+                # the create_item payload (Top / Bottom / Outerwear /
+                # Full Body / Footwear / Accessories) and
+                # ``_resolve_dilate_pct_for_category`` accepts both
+                # the user vocabulary and the SegFormer-kind
+                # vocabulary case-insensitively.
+                category=category,
+            )
             if refined:
                 logger.info(
                     "Background matte SegFormer-refined for item %s "
@@ -3724,7 +3736,14 @@ async def clean_item_background(
         if seg_mask is not None:
             try:
                 maybe_refined = _cp.apply_alpha_intersection(
-                    result["image_png"], seg_mask
+                    result["image_png"],
+                    seg_mask,
+                    # Patch 12i — per-category dilation budget.
+                    # ``item.get("category")`` is the same value
+                    # SegFormer was asked to match (Top / Bottom /
+                    # Outerwear / etc.), so it routes to the right
+                    # table entry.
+                    category=item.get("category"),
                 )
                 if maybe_refined:
                     logger.info(

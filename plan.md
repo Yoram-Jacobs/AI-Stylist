@@ -984,6 +984,75 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch 12i — Per-category dilation budget for tight torso crops (P1) — SHIPPED
+
+**Bug:** The flat 2.5 % dilation budget introduced by Patch 12f
+("DILATE the SegFormer mask before blending") was tuned for free-edge
+garments (footwear / hats / low-contrast accessories) where the mask
+is patchy and there is no adjacent garment to leak into. On tight
+torso outfit photos where a blouse and a skirt share the waistline,
+2.5 % = 25 px on a 1000 px crop extended each mask 25 px INTO the
+other garment's region. With rembg keeping both garments as
+foreground, the resulting blouse cutout inherited a 25 px rim of
+skirt fabric at its bottom edge (and vice versa) — visible as a
+coloured strip in the closet thumbnail.
+
+**Fix:** New `_DILATE_PCT_BY_CATEGORY` lookup in
+`app/services/clothing_parser.py` keyed by both SegFormer-kind
+vocabulary (top, bottom, dress, …) and Gemini-category vocabulary
+(Top, Bottom, Full Body, …), case- and whitespace-insensitive:
+
+| Category                            | Old (12f) | New (12i) | Why                                                                       |
+|-------------------------------------|-----------|-----------|---------------------------------------------------------------------------|
+| top / Top                           | 2.5 %     | **1.5 %** | shares waistline with bottom/dress — stop rim bleed                       |
+| bottom / Bottom                     | 2.5 %     | **1.5 %** | symmetric — shares waistline with top/dress                               |
+| dress / Full Body                   | 2.5 %     | **1.8 %** | top edge tight, bottom free — slightly looser than top/bottom             |
+| accessory / Accessories / Underwear | 2.5 %     | **1.5 %** | belts/scarves frequently abut other garments                              |
+| outerwear / Outerwear               | 2.5 %     | **2.0 %** | jackets/coats — collar tight, hem free, middle ground                     |
+| footwear / Footwear                 | 2.5 %     | **2.5 %** | UNCHANGED — patchy on low-contrast shoes, no adjacent-garment risk        |
+| headwear                            | 2.5 %     | **2.5 %** | UNCHANGED — hat brim halo                                                 |
+| unknown / missing                   | 2.5 %     | **2.5 %** | backward-compat — legacy callers without `category` get the Patch 12f budget |
+
+`_DILATE_MIN_PX=4` and `_DILATE_MAX_PX=64` clamps are preserved.
+
+**Wiring:** `apply_alpha_intersection` now accepts `category: str |
+None = None` (keyword-only). Three call sites updated:
+
+1. `garment_vision.py::_matte_crops` — passes `det.get("kind")`
+2. `closet.py::_run_background_matte` — passes the item's `category`
+   parameter (user-facing string from create_item)
+3. `closet.py` `/clean-background` endpoint — passes
+   `item.get("category")` from the saved closet record
+
+The single-crop / per-crop fallback path (`_analyse_one_crop`) does
+NOT call `apply_alpha_intersection` directly — it goes through
+`_matte_crops` which already routes `category` through. The Phase O.6
+``_run_background_matte`` covers the create_item path. All four
+production codepaths now route per-category budgets.
+
+**Verification:** 32/32 unit-style smoke tests pass:
+- 19 resolver lookups (case-insensitivity, whitespace collapsing,
+  fallback to default for unknown / None / empty / SegFormer-only
+  `garment` kind).
+- 7 end-to-end `apply_alpha_intersection` runs on a 1000×1000
+  synthetic PNG, one per category — all return valid PNG bytes.
+- Backward-compat: legacy 2-positional-arg call (no `category`)
+  returns the same output as before.
+- Semantic invariants: top / bottom / dress all have smaller
+  dilation pct than footwear — i.e. the fix moves the budget in the
+  right direction.
+
+**Files touched:**
+- `backend/app/services/clothing_parser.py` (new table + resolver
+  helper + docstring overhaul + replaced flat budget with
+  category lookup)
+- `backend/app/services/garment_vision.py` (`_matte_crops` passes
+  `category=det.get("kind")`)
+- `backend/app/api/v1/closet.py` (2 sites: `_run_background_matte`
+  passes `category=category`; `/clean-background` passes
+  `category=item.get("category")`)
+- `plan.md` (this entry)
+
 ## ✅ Patch M21 — SegFormer-anchored category enforcement (P0 fix) — SHIPPED
 
 **Bug:** User uploads an outfit photo; SegFormer correctly segments the

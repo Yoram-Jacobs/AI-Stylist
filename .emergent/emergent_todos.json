@@ -1,38 +1,22 @@
 [
   {
-    "content": "Read CONCRETE_FACTS.md",
+    "content": "Patch 12i: per-category dilation budget for tight torso crops",
     "status": "completed"
   },
   {
-    "content": "Patch M21: P0 — Anchor Gemini category to SegFormer kind",
+    "content": "Define _DILATE_PCT_BY_CATEGORY table in clothing_parser.py with tight budgets for top/bottom/dress/accessory and free budgets for footwear/headwear",
     "status": "completed"
   },
   {
-    "content": "Add _SEGFORMER_KIND_TO_ALLOWED_CATEGORIES + _SEGFORMER_KIND_TO_DEFAULT_CATEGORY enforcement tables",
+    "content": "Add category param to apply_alpha_intersection() with backward-compat default",
     "status": "completed"
   },
   {
-    "content": "Add _enforce_segformer_category() helper + per-kind human-readable labels",
+    "content": "Update 3 production call sites: garment_vision._matte_crops, closet._run_background_matte, closet /clean-background",
     "status": "completed"
   },
   {
-    "content": "Add kind_hints param to _build_batch_litellm_messages and inject 'Pre-classified as X' prompt block",
-    "status": "completed"
-  },
-  {
-    "content": "Thread kind_hints through analyze_batch + analyze_batch_stream signatures",
-    "status": "completed"
-  },
-  {
-    "content": "Pass detection kinds from analyze_outfit_stream + _analyse_crops batched-path callers",
-    "status": "completed"
-  },
-  {
-    "content": "Apply _enforce_segformer_category in analyze_batch, analyze_batch_stream, and _analyse_one_crop",
-    "status": "completed"
-  },
-  {
-    "content": "Backend smoke test — 13/13 PASS including the pants-as-Overcoat regression",
+    "content": "Unit smoke test: 32/32 passed (19 resolver + 7 end-to-end + 1 backward-compat + 5 semantic)",
     "status": "completed"
   },
   {
