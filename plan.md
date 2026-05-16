@@ -984,6 +984,72 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.3 — Silent batch path wired into `workStore` (UX parity) — SHIPPED
+
+**Gap:** The interactive `analyzeCard` flow (≤5 photos) was wired
+into the global `workStore` in Patch M20.b/c — cross-page "Analysing"
+floater, per-item polish progress bar, and "You have news in your
+closet" completion toast. The **silent batch path**
+(`handleBatchBackground`, used when uploading >5 photos) was
+ignored: it ran its own `bgBatch` progress UI on /add but never
+notified `workStore`, so a user who navigated away mid-upload lost
+all progress feedback, and the completion toast never fired.
+
+**Fix:** Wired `processOne` (the sequential per-file worker inside
+`handleBatchBackground`) into the same three workStore lifecycle
+hooks the interactive path uses:
+
+1. `workStore.registerAnalyze(jobId, filename)` at the top of
+   `processOne` — gives the floater a labelled row per file in
+   flight.
+2. `workStore.updateAnalyze(jobId, {items, total})` after the analyze
+   response arrives — surfaces the per-photo decomposition count
+   (e.g. a single shot that SegFormer split into 3 garments shows
+   `Analysing 3/3 items`).
+3. `workStore.completeAnalyze(jobId)` after every code-path that
+   ends the processing of this file (analyze success, analyze
+   failure with raw-photo fallback, file-read failure). Runs OUTSIDE
+   the per-item save loop so duplicate-redirect items don't leave
+   phantom jobs.
+4. `workStore.registerPolishItems(created)` collects every
+   `api.createItem` response whose `clean_image_status === 'pending'`
+   and registers it with the global polish tracker. The
+   `WorkProgressFloater` then shows `Polishing N/M photos` for the
+   whole batch and the `WorkBatchDoneToast` fires the "You have
+   news in your closet" sonner toast when the last item resolves.
+
+**Behavioural deltas the user will notice:**
+- Drop 6+ photos on /add → bottom-right floater pill appears with
+  one row per file (`Analysing image_001.jpg 1/1 items`), survives
+  navigation to /home / /closet / anywhere.
+- After all files have been analyse-saved, the floater switches to
+  `Polishing 6/6 photos` as the backend BackgroundTasks chew through
+  rembg + SegFormer alpha intersection per crop.
+- When the last polish drains: sonner toast `You have news in your
+  closet` fires with an "Open closet" action — same UX as the ≤5
+  interactive path.
+- `bgBatch` progress UI on /add stays unchanged (in-page progress
+  bar, count, final summary toast) — workStore is an ADDITIVE
+  cross-page layer, not a replacement.
+
+**No backend changes.** The silent path already calls the same
+`/closet/analyze` and `/closet` endpoints as the interactive flow,
+so the M21 / 12i / 12j / 12k / 12l fixes (SegFormer-anchored
+category, per-category dilation + bbox padding, negative-padding
+twink) were already active on this path from the moment they
+shipped. The silent path just wasn't surfacing the resulting items
+through the new UX layer.
+
+**Files touched:**
+- `frontend/src/pages/AddItem.jsx` (`handleBatchBackground::processOne`
+  — added `analyzeJobId` + 4 workStore lifecycle calls in
+  exception-safe positions; collected `polishCandidates` from
+  successful saves; registered the batch with workStore at end of
+  each file)
+- `plan.md` (this entry)
+
+**Lint:** ESLint clean, esbuild clean.
+
 ## ✅ Patch 12l — Delicate-borderline twink on Top.bottom (-1.5 % → -2.5 %) — SHIPPED
 
 User screenshot after 12k showed the skirt + boots cards clean but

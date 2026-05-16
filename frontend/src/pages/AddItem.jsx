@@ -553,6 +553,18 @@ export default function AddItem() {
       let failedHere = 0;
       let analyzeFailedHere = 0;
       let b64 = null;
+      // Patch M20.3 (May 2026) — Wire the silent batch path into the
+      // global ``workStore`` so the cross-page floater + completion
+      // toast that the interactive ``analyzeCard`` flow already gets
+      // also fire for >5-photo uploads. Each file gets a unique
+      // analyze job id so concurrent labels render cleanly on the
+      // floater. ``completeAnalyze`` runs in the ``finally`` block
+      // below so a thrown error / OOM doesn't leave a phantom job
+      // ticking forever.
+      const analyzeJobId =
+        `bg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      workStore.registerAnalyze(analyzeJobId, file?.name || null);
+      const polishCandidates = [];
       // Phase Z2 — recompute the fingerprint here so each saved item
       // carries source_sha256/filename/size in the DB, even on the
       // batch path. (We already verified upstream none of these are
@@ -580,6 +592,7 @@ export default function AddItem() {
         b64 = await fileToBase64(file);
       } catch (_) {
         failedHere += 1;
+        workStore.completeAnalyze(analyzeJobId);
         setBgBatch((b) => (b ? { ...b, processed: b.processed + 1, failed: b.failed + failedHere } : null));
         return;
       }
@@ -595,6 +608,17 @@ export default function AddItem() {
           Array.isArray(resp?.items) && resp.items.length > 0
             ? resp.items
             : [{ analysis: resp, crop_base64: b64, crop_mime: file.type || 'image/jpeg' }];
+        // Patch M20.3 — Update the floater so the user sees how many
+        // garments this photo decomposed into (a single shot can
+        // yield 1-4 items via SegFormer detection). For a 6-photo
+        // batch, the floater walks through e.g. "Analysing 1/3" for
+        // the first photo, then "Analysing 1/2" when the next one
+        // starts. Each ``analyzeJobId`` is independent, so the
+        // floater renders one row per file in flight.
+        workStore.updateAnalyze(analyzeJobId, {
+          items: analysisItems.length,
+          total: analysisItems.length,
+        });
       } catch (_) {
         analyzeFailedHere += 1;
         analysisItems = [
@@ -669,10 +693,34 @@ export default function AddItem() {
               const { closetStore } = await import('@/lib/closetStore');
               closetStore.upsert(created);
             } catch { /* store import failure should never block upload */ }
+            // Patch M20.3 — collect polish candidates for workStore.
+            // ``clean_image_status === 'pending'`` means the backend
+            // BackgroundTask is still running rembg + SegFormer
+            // alpha intersection on the crop; the global poller
+            // in ``workStore`` will track it and fire the "You have
+            // news in your closet" toast when the batch drains.
+            if (created.clean_image_status === 'pending') {
+              polishCandidates.push(created);
+            }
           }
         } catch (_) {
           failedHere += 1;
         }
+      }
+
+      // Patch M20.3 — Release the floater slot for this file BEFORE
+      // bumping ``bgBatch.processed`` so the floater's "Analysing"
+      // counter ticks down as each file finishes, regardless of
+      // success/failure. Done in finally-style flow (no actual
+      // try/finally because the await chain above is already
+      // exception-safe — caught errors are counted in failedHere /
+      // analyzeFailedHere, not re-raised).
+      workStore.completeAnalyze(analyzeJobId);
+      // Register any pending-matte items with the global polish
+      // tracker so the floater shows "Polishing N/M photos" and the
+      // ``WorkBatchDoneToast`` fires once the last one drains.
+      if (polishCandidates.length) {
+        workStore.registerPolishItems(polishCandidates);
       }
 
       setBgBatch((b) =>
