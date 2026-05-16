@@ -435,6 +435,32 @@ class Settings:
     DEFER_RECONSTRUCTION_ON_ANALYZE: bool = (
         os.environ.get("DEFER_RECONSTRUCTION_ON_ANALYZE", "true").lower() == "true"
     )
+
+    # Patch M16 (May 2026) — Hard kill switch for the auto-reconstruction
+    # pipeline. After M14 we observed in live closet screenshots that
+    # the SegFormer + rembg + ``apply_alpha_intersection`` triad alone
+    # already produces acceptable per-garment cutouts (you can see the
+    # head still visible under the coat, the smeared sneaker, the cap
+    # with the face below — those are the raw triad outputs, never
+    # touched by Nano Banana). Nano Banana was supposed to clean those
+    # up but in practice it either (a) didn't fire reliably, (b) made
+    # things worse on low-contrast crops, or (c) added 20-40 s latency
+    # per crop with marginal quality gain. Burning that API budget and
+    # latency for no visible improvement is the wrong trade.
+    #
+    # When ``false`` (default):
+    #   * ``should_reconstruct`` returns ``(False, [])`` short-circuit
+    #     so neither the inline path nor the deferred BackgroundTask
+    #     ever fires.
+    #   * The manual "Repair Photo" CTA (``/closet/{id}/reshoot``)
+    #     stays usable — that's an explicit user request and not part
+    #     of the auto-pipeline being killed here.
+    # When ``true``:
+    #   * Restores the legacy behaviour (use together with
+    #     ``DEFER_RECONSTRUCTION_ON_ANALYZE`` to control sync vs. async).
+    ENABLE_RECONSTRUCTION: bool = (
+        os.environ.get("ENABLE_RECONSTRUCTION", "false").lower() == "true"
+    )
     # Feature-flag for the local SegFormer inference path in
     # clothing_parser.py. Default tracks torch+transformers availability:
     # full-fat on Hetzner, off on the lightweight Emergent pod (which

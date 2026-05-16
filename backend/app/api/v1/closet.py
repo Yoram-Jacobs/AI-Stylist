@@ -547,6 +547,18 @@ async def _run_background_reconstruction(
     """
     from app.services.reconstruction import reconstruct
 
+    # Patch M16 — Belt-and-braces. ``should_reconstruct`` is the
+    # authoritative gate but if an in-flight save from before the flag
+    # flip carried ``needs_reconstruction=True`` we still want to
+    # honour the kill-switch and skip the work cleanly.
+    if not settings.ENABLE_RECONSTRUCTION:
+        logger.info(
+            "Background reconstruction SKIPPED for item %s "
+            "(ENABLE_RECONSTRUCTION=false)",
+            item_id,
+        )
+        return
+
     db = get_db()
     t0 = datetime.now(timezone.utc)
     try:

@@ -1,26 +1,22 @@
 [
   {
-    "content": "Add DEFER_RECONSTRUCTION_ON_ANALYZE config flag",
+    "content": "Add ENABLE_RECONSTRUCTION config flag (default false)",
     "status": "completed"
   },
   {
-    "content": "Patch garment_vision._analyse_one_crop to defer reconstruction when flag is on; surface needs_reconstruction + reasons per item",
+    "content": "Short-circuit should_reconstruct() when ENABLE_RECONSTRUCTION=false",
     "status": "completed"
   },
   {
-    "content": "Add CreateItemIn fields (needs_reconstruction, reconstruction_reasons) and analyze response passthrough",
+    "content": "Add safety gate in _run_background_reconstruction too (belt-and-braces)",
     "status": "completed"
   },
   {
-    "content": "Add _run_background_reconstruction in closet.py + wire BackgroundTask in create_item",
-    "status": "completed"
-  },
-  {
-    "content": "Lint + restart + measure new analyze_outfit duration",
+    "content": "Lint + restart + verify no needs_reconstruction marker in next /analyze",
     "status": "completed"
   },
   {
     "content": "Update plan.md + finish",
-    "status": "completed"
+    "status": "in_progress"
   }
 ]

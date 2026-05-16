@@ -644,6 +644,58 @@ later.
 production deploys (e.g. 1 GB Emergent host pod) to restore the
 legacy single-lane behaviour without a code change.
 
+## ✅ Patch M16 — Disable Nano Banana auto-reconstruction entirely (SHIPPED)
+
+**Empirical observation from live closet screenshots after M14:**
+The items the user saw in the closet (charcoal coat with the head
+still visible underneath; pants crop with the coat overlapping the
+top; smeared single sneaker; cap crop with the face below) are all
+**raw SegFormer + rembg + `apply_alpha_intersection`** outputs.
+Nano Banana never actually replaced them in practice — either it
+silently failed, the BackgroundTask hadn't completed yet, or the
+output failed validation. Yet on the hot path it was costing 20-40 s
+per crop in the synchronous era and ~equivalent API spend now in the
+deferred era. Burning that latency + API budget for no visible
+quality gain is the wrong trade.
+
+**Decision (user-confirmed):** Flag Nano Banana off completely on the
+auto-reconstruction path. The triad alone is good enough; the manual
+"Repair Photo" CTA stays available for explicit user requests.
+
+**Implementation:**
+- New config flag `ENABLE_RECONSTRUCTION` in `config.py` (default
+  `false`).
+- `services/reconstruction.should_reconstruct` short-circuits to
+  `(False, [])` at the top of the function when the flag is off.
+  This single gate covers BOTH the inline path (deprecated via M14)
+  AND the deferred BackgroundTask path — neither ever fires.
+- `closet._run_background_reconstruction` has a belt-and-braces early
+  return (logs "SKIPPED — ENABLE_RECONSTRUCTION=false") in case an
+  in-flight save from before the flag flip carries
+  `needs_reconstruction=True` through.
+- `/closet/{id}/reshoot` ("Repair Photo" CTA) intentionally NOT
+  gated — explicit user action, still works.
+
+**Effect:**
+- `/analyze` no longer marks ANY item with `needs_reconstruction=True`.
+- Post-save BackgroundTask for reconstruction never queued.
+- Zero Nano Banana API spend on the auto-pipeline.
+- Closet items now persist with their `clean_image_url` (SegFormer +
+  rembg + `apply_alpha_intersection` triad) as the canonical source;
+  the `thumbnails.pick_source_data_url` priority chain falls to
+  `clean_image_url` since `reconstructed_image_url` will be `None`.
+
+**Verified post-restart (live process):**
+- `settings.ENABLE_RECONSTRUCTION = False`
+- `should_reconstruct({'category':'top'}, [0,200,500,800])` →
+  `(False, [])` (was edge-touching → would have triggered before)
+- All 4 trigger cases (edge-touch / undersized / aspect-mismatch /
+  whole-frame) return `(False, [])`.
+
+**To re-enable in the future:** set `ENABLE_RECONSTRUCTION=true` in
+`.env`. The defer machinery (M14) and concurrency lift (M15) remain
+in place, so re-enabling is safe.
+
 ## Still open after this session (in priority order)
 
 1. **Issue 1 (P0)** — Gemini overrides SegFormer category. Pants crops
