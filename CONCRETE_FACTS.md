@@ -151,7 +151,7 @@ docker compose up -d --force-recreate eyes
 | `/app/design_guidelines.md` | Frontend design tokens + UI rules (binding) |
 | `/app/plan.md` | Phased development plan (live, updated each session) |
 | `/app/inference-server/eyes/V4_DEPLOY.md` | Eyes v4 deployment runbook + decision log |
-- /app/inference-server/eyes/test_images | Images dataset for testing real photographs
+| `/app/inference-server/eyes/test_images/` | **Canonical real-photograph test dataset** — 30 outfit JPGs (`0001.jpg`…`0030.jpg`) with companion `.json` ground-truth labels. Use this for backend SegFormer / rembg / matte diagnostics, Eyes benchmark runs, frontend bulk-upload tests. Do NOT delete or mutate. |
 | `/app/CONCRETE_FACTS.md` | **This file.** |
 
 ---
