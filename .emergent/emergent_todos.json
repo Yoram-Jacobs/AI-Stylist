@@ -1,30 +1,34 @@
 [
   {
-    "content": "Patch 12j: per-category asymmetric bbox padding (Tighten the margin)",
+    "content": "Fix A: bbox/mask alignment in _bbox_crop_useful",
     "status": "completed"
   },
   {
-    "content": "Replace _BBOX_PADDING_PCT scalar with _BBOX_PAD_TRBL_BY_CATEGORY (top,right,bottom,left) table",
+    "content": "Test A on 0001.jpg + a few more from test_images",
     "status": "completed"
   },
   {
-    "content": "Add _resolve_bbox_pad_trbl_for_category() helper",
+    "content": "Fix B: phantom guard in _matte_crops",
     "status": "completed"
   },
   {
-    "content": "Update _crop_to_bbox signature to accept category kwarg, apply asymmetric pads",
+    "content": "Test B",
     "status": "completed"
   },
   {
-    "content": "Update 2 callers: detect_items batched path + one-pass single-call path",
+    "content": "Fix C: same-class collision in clothing_parser._split_instances",
     "status": "completed"
   },
   {
-    "content": "Smoke test: 24/24 PASS — resolver lookups + critical invariants + end-to-end synthetic crops + backward-compat",
+    "content": "Test C",
     "status": "completed"
   },
   {
-    "content": "Lint clean + plan.md updated",
+    "content": "Fix D: surface + subtract human-skin mask (parser + consumer)",
+    "status": "completed"
+  },
+  {
+    "content": "Test D end-to-end",
     "status": "completed"
   }
 ]

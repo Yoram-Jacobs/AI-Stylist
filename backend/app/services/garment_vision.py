@@ -1361,6 +1361,36 @@ def _crop_to_bbox(
     return buf.getvalue(), (x1, y1, x2, y2)
 
 
+# Minimum fraction of the crop that must be "solid" garment pixels
+# (alpha >= 128, perceptually opaque) for the matte to ship to the UI.
+# Below this threshold the cutout is empirically empty/near-empty —
+# rembg failure on tiny crops, SegFormer phantom detections, or a
+# crop where rembg only kept the background by mistake. Dropping
+# these cards is preferable to shipping a blank white tile.
+_PHANTOM_DROP_PCT = 0.05
+
+
+def _solid_alpha_coverage(png_bytes: bytes) -> float | None:
+    """Fraction of an RGBA PNG whose alpha channel is >= 128.
+
+    Returns ``None`` when the bytes can't be decoded or the image
+    is not RGBA (so the caller can skip the check without dropping
+    the detection). The 128 threshold is the perceptual midpoint —
+    pixels below it look translucent, above it look opaque.
+    """
+    try:
+        img = Image.open(io.BytesIO(png_bytes))
+        if img.mode != "RGBA":
+            return None
+        import numpy as _np
+        arr = _np.asarray(img)
+        if arr.ndim != 3 or arr.shape[2] != 4:
+            return None
+        return float((arr[:, :, 3] >= 128).mean())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _scan_complete_json_objects(
     text: str, start_pos: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -1597,6 +1627,13 @@ class GarmentVisionService:
                 # semantic PNG cutouts instead of bbox rectangles. Not
                 # serialised to JSON anywhere.
                 "mask": p.get("mask"),
+                # Full-res union of Face / Hair / limb pixels. Sliced
+                # to bbox by ``_bbox_crop_useful`` and subtracted from
+                # the dilated garment soft-mask inside
+                # ``apply_alpha_intersection`` so face / hair / arms /
+                # legs can't leak into the final matte. May be None
+                # if the parser couldn't build the human mask.
+                "_human_mask_full": p.get("_human_mask_full"),
                 "source": "clothing_parser",
             }
             for p in parser_items
@@ -2089,23 +2126,23 @@ class GarmentVisionService:
             img_size = None
 
         for det in useful:
-            box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
-            if not box_px:
-                continue
-            # Patch 12j — pass the SegFormer kind so the bbox crop
-            # uses the per-edge padding budget. Tightens the
-            # waistline-side edge for tops/bottoms so adjacent
-            # garments never enter the crop frame in the first place
-            # (the most important defence against blouse-skirt rim
-            # bleed; SegFormer + dilation cleanup are downstream
-            # cleanups, but they can only work with the pixels the
-            # bbox crop hands them).
+            # Cut the per-bbox crop using the per-category asymmetric
+            # padding from _BBOX_PAD_TRBL_BY_CATEGORY. The returned
+            # `box_px` is the EXACT rectangle the JPEG was cut at —
+            # we MUST slice the SegFormer mask from this same box so
+            # the mask aligns pixel-for-pixel with the crop. Slicing
+            # from a separately-computed `bbox_to_pixels(...)` (which
+            # uses the legacy 4 % flat padding) leaves the mask
+            # shifted by up to ~5 % of the crop dimensions for any
+            # category with asymmetric padding (top, bottom, dress,
+            # outerwear, footwear), corrupting every downstream alpha
+            # intersection.
             result = _crop_to_bbox(
                 image_bytes, det["bbox"], category=det.get("kind"),
             )
             if not result:
                 continue
-            crop_bytes, _xy = result
+            crop_bytes, box_px = result
             mask = det.get("mask")
             if mask is not None and img_size is not None:
                 mask_bbox = clothing_parser.slice_mask_to_bbox(
@@ -2114,6 +2151,18 @@ class GarmentVisionService:
                 if mask_bbox is not None:
                     det["_mask_bbox"] = mask_bbox
                     det["mask"] = None
+            human_full = det.get("_human_mask_full")
+            if human_full is not None and img_size is not None:
+                human_bbox = clothing_parser.slice_mask_to_bbox(
+                    human_full, img_size, box_px
+                )
+                if human_bbox is not None:
+                    det["_human_mask_bbox"] = human_bbox
+                # Drop the full-res reference once we have the slice —
+                # the parser hands the SAME ndarray to every detection
+                # of the same source photo, so dropping it here lets
+                # the GC release it once every detection is processed.
+                det["_human_mask_full"] = None
             out.append((det, crop_bytes, "image/jpeg"))
         return out
 
@@ -2126,6 +2175,12 @@ class GarmentVisionService:
         Serialised because each rembg call holds the onnxruntime
         session — parallel invocations have been seen causing silent
         OOM kills in 3GB containers.
+
+        Phantom guard: after matting (with or without intersection),
+        measure the solid-alpha coverage of the final RGBA. If it's
+        below ``_PHANTOM_DROP_PCT`` (perceptually empty), drop the
+        detection entirely rather than ship a blank/near-blank card
+        to the UI.
         """
         from app.services import background_matting
         from app.services import clothing_parser as _cp
@@ -2142,9 +2197,16 @@ class GarmentVisionService:
                 )
                 matted = None
             if not matted:
+                # rembg failed or returned empty — keep the JPEG bbox
+                # crop. JPEG has no alpha channel so the phantom
+                # guard below doesn't apply; the bbox crop is by
+                # construction non-empty (caller filters tiny crops).
+                det.pop("_mask_bbox", None)
+                det.pop("_human_mask_bbox", None)
                 matted_crops.append((det, cbytes, mime))
                 continue
             seg_mask_bbox = det.get("_mask_bbox")
+            human_mask_bbox = det.get("_human_mask_bbox")
             if seg_mask_bbox is not None:
                 try:
                     refined = _cp.apply_alpha_intersection(
@@ -2159,6 +2221,13 @@ class GarmentVisionService:
                         # original 2.5 % to preserve puffy-cuff /
                         # low-contrast-shoe recovery.
                         category=det.get("kind"),
+                        # Subtract Face / Hair / limb pixels from the
+                        # dilated soft-mask so rembg's person-shaped
+                        # foreground can't leak skin / hair into the
+                        # final matte. Cheap when present (one
+                        # nearest-neighbour resize + max filter), no-
+                        # op when absent.
+                        human_mask=human_mask_bbox,
                     )
                     if refined:
                         matted = refined
@@ -2169,6 +2238,24 @@ class GarmentVisionService:
                         repr(exc)[:120],
                     )
             det.pop("_mask_bbox", None)
+            det.pop("_human_mask_bbox", None)
+
+            # Phantom guard — drop the detection if the final matte
+            # has effectively no garment pixels. "Solid" alpha means
+            # alpha >= 128 (perceptually opaque); below 5 % of the
+            # crop is empirically a blank/near-blank cutout that
+            # would surface as an empty white card in the UI.
+            cov = _solid_alpha_coverage(matted)
+            if cov is not None and cov < _PHANTOM_DROP_PCT:
+                logger.info(
+                    "_matte_crops: dropping near-empty matte for %s — "
+                    "solid-alpha = %.1f%% < %.0f%% threshold",
+                    det.get("label"),
+                    cov * 100.0,
+                    _PHANTOM_DROP_PCT * 100.0,
+                )
+                continue
+
             matted_crops.append((det, matted, "image/png"))
         return matted_crops
 
