@@ -615,35 +615,31 @@ export default function AddItem() {
     //
     // Patch M20.5.1 — MUST ``await`` continueInteractive. It is async
     // (does ``Promise.all(fileToBase64)`` over N files); without the
-    // await the next line's ``setTimeout(0, saveAll)`` fires while
-    // drafts are still being built, ``cards`` is still empty in
-    // saveAll's closure, saveAll's "no ready and no scanning" branch
-    // hits, and the user sees a "nothing to save" toast instead of a
-    // batch in flight. (Original M20.5 bug — silent path was silent
-    // because nothing was queued.)
+    // await the next line's auto-save trigger fires while drafts
+    // are still being built, ``cards`` is still empty in React state,
+    // and the save effect's "no ready and no scanning" branch hits.
     await continueInteractive(survivorFps, /* duplicateAcks */ {});
-    // Auto-fire ``saveAll`` on the next macrotask. After the await
-    // above completes the synchronous setCards calls (one inside
-    // continueInteractive for the draft batch, plus one per
-    // ``analyzeCard(d)`` flipping the card to ``status=scanning``)
-    // are queued; ``setTimeout(0)`` lets React commit the new state
-    // and run the ``saveAllRef.current = saveAll`` useEffect before
-    // we call it, so saveAll sees the up-to-date ``cards``.
+    // Patch M20.5.2 — Auto-save trigger.
     //
-    // The M20.2 ``pendingAutoSave`` queue then handles the rest:
-    //   1. First saveAll sees ``ready=[]`` + ``scanning=[N]`` and
-    //      goes into the "queue and wait" branch
-    //      (``setPendingAutoSave(true)`` + "Waiting for N photos…"
-    //      toast).
-    //   2. The ``pendingAutoSave`` effect re-fires saveAll once the
-    //      last scanning card flips to ``ready``, which persists the
-    //      batch via the optimistic flow + background ``settle()``
-    //      and navigates to /closet.
-    setTimeout(() => {
-      if (typeof saveAllRef.current === 'function') {
-        saveAllRef.current();
-      }
-    }, 0);
+    // Previously this used a ``setTimeout(0, saveAllRef.current())``
+    // tap-dance to wait for React to commit the new draft cards
+    // before firing saveAll. That was racy (depended on render-vs-
+    // setTimeout ordering) and ran saveAll TWICE — once via the
+    // timeout (which itself called ``setPendingAutoSave(true)`` from
+    // the "all scanning" branch) and again via the
+    // ``pendingAutoSave`` effect once analyses completed.
+    //
+    // New approach: just flip ``pendingAutoSave`` directly. The
+    // existing effect at the end of this component picks it up,
+    // ignores it while any card is still scanning, and fires
+    // ``saveAll`` exactly once when every card has reached a
+    // terminal state (ready / error). ``saveAll`` then runs the
+    // existing optimistic-first persistence pipeline, registers
+    // ``clean_image_status === 'pending'`` items with the global
+    // ``workStore`` so the "Polishing N/M photos" floater + the
+    // "You have news in your closet" toast fire, and finally
+    // navigates to /closet.
+    setPendingAutoSave(true);
   };
 
   const analyzeCard = async (card) => {
@@ -718,6 +714,35 @@ export default function AddItem() {
         fromOnePass: false,
         reconstructionAdvised: false,
         deferMatte: !!meta.defer_matte,
+        // Patch M20.5.2 (May 2026) — CRITICAL: propagate the SOURCE
+        // photo fingerprints + filename + size_bytes + isDuplicate
+        // ack from the original draft card to every placeholder card
+        // we split it into. Without this:
+        //   * Saved closet items had ``source_sha256 = null``,
+        //     ``source_phash = null``, etc. — the Closet page's hash
+        //     repair stream then targeted them as "legacy items
+        //     missing fingerprints" and the repair endpoint failed
+        //     because the underlying ``image_base64`` is the CROP,
+        //     not the original photo, so the server couldn't re-hash
+        //     the source bytes. Surface error:
+        //     "Couldn't refresh fingerprints".
+        //   * ``source_filename = null`` confused the thumbnail
+        //     repair stream similarly → "Couldn't refresh thumbnails".
+        //   * Re-uploading the SAME outfit photo a second time
+        //     skipped the pre-flight duplicate check because the
+        //     first-batch closet items had no fingerprints to
+        //     compare against.
+        //   * ``isDuplicate`` ack from the pre-flight dialog never
+        //     reached the backend save → the red ⭐ overlay never
+        //     painted for known dupes.
+        // Every garment cropped out of a single source photo legitimately
+        // shares the same source-photo fingerprint, by design.
+        sourceSha256: card.sourceSha256 || null,
+        sourcePhash: card.sourcePhash || null,
+        sourceColorSig: card.sourceColorSig || null,
+        sourceFilename: card.sourceFilename || null,
+        sourceSizeBytes: card.sourceSizeBytes || null,
+        isDuplicate: !!card.isDuplicate,
         // Tracked so onItem can locate the right card in state.
         _streamSlot: meta._slot,
       });

@@ -984,6 +984,115 @@ keeps showing Polishing photo…".
   ("Polishing N/M photos") and the per-card badge identifies the
   specific in-flight items.
 
+## ✅ Patch M20.5.2 — Propagate source fingerprints to placeholder cards + drop setTimeout race — SHIPPED
+
+User screenshot after M20.5 / M20.5.1 showed massive regressions on the
+>5-photo bulk upload path:
+
+1. **"Couldn't refresh fingerprints"** banner persisting in /closet.
+2. **"Couldn't refresh thumbnails"** banner persisting in /closet.
+3. **No duplicate checkup** — re-uploading the SAME outfit a second
+   time silently saved every garment again.
+4. **Looping "Polishing photo…"** — items stuck at the polishing badge
+   forever; the global `workStore` polish row never fired and
+   `WorkBatchDoneToast` never popped.
+
+### Root cause #1 — `buildBaseCard` dropped source fingerprints
+
+Inside `analyzeCard::handleDetect`, the streaming `detect` frame splits
+the single draft card into N placeholder cards (one per garment crop)
+via `buildBaseCard(meta, cardId)`. The helper rebuilt the card from
+scratch but never propagated **the source-photo fingerprints** from
+the original draft card:
+
+* `sourceSha256`
+* `sourcePhash`
+* `sourceColorSig`
+* `sourceFilename`
+* `sourceSizeBytes`
+* `isDuplicate` (the pre-flight duplicate-acknowledge flag)
+
+The interactive (≤5) path SOMETIMES worked because if the user only
+uploads a single-garment photo, the placeholder's `card.id` happens to
+be `${origId}-0` and the original card carrying the fingerprints was
+just discarded — no big deal in practice (the closet still loaded).
+But for **every** photo split into multiple garments by SegFormer,
+the closet items lost their source fingerprints entirely.
+
+Downstream consequences:
+
+* Closet items saved with `source_sha256=null`, `source_phash=null`
+  → the Closet page's `HashRepairChip` streaming endpoint picked
+  them up as legacy items needing re-hashing → but the saved
+  `image_base64` is the CROPPED garment (not the original
+  full-frame photo), so the server-side rehash failed → user-facing
+  banner "Couldn't refresh fingerprints".
+* `source_filename=null` confused the `ThumbRepairChip` similarly →
+  "Couldn't refresh thumbnails".
+* No fingerprints in the saved items → pre-flight duplicate check on
+  re-upload of the same photo found nothing to match against → silent
+  re-save of duplicates.
+* `isDuplicate=false` (default) overrode the user's pre-flight
+  acknowledgement → red ⭐ overlay never painted on known duplicates.
+
+### Root cause #2 — `setTimeout(0, saveAllRef.current())` race
+
+`handleBulkUpload` used a brittle `setTimeout(0)` hop after
+`await continueInteractive(...)` to fire `saveAll` after React
+committed the new draft cards. The timing was correct in theory
+(macrotask after current task + microtasks + render) but had two
+problems:
+
+1. **It called saveAll TWICE.** The first saveAll saw all cards
+   scanning, hit the "all scanning" branch, and called
+   `setPendingAutoSave(true)` itself. Then the existing
+   `pendingAutoSave` effect fired saveAll a second time once analyses
+   completed. The toast emitted by the first call ("Waiting for N
+   photos…") was wrong for bulk mode — the user was on /home / /closet
+   while the silent batch ran.
+
+2. **Race-dependent on render scheduling.** If `setCards` from
+   `continueInteractive` was batched with subsequent `setCards` from
+   `analyzeCard` and committed AFTER `setTimeout(0)` fired, the
+   `saveAllRef.current` still pointed at the saveAll closure that
+   captured the pre-batch (empty) cards array → "nothing to save"
+   toast → no save at all (the user-reported "silent path is silent"
+   bug from M20.5).
+
+### Fix
+
+**Frontend `AddItem.jsx::buildBaseCard`** — propagate the six missing
+fields from the original draft card to every placeholder card.
+The fields are intentionally shared across every garment cropped from
+the SAME source photo — they describe the SOURCE photo, not the
+garment.
+
+**Frontend `AddItem.jsx::handleBulkUpload`** — replace
+`setTimeout(0, saveAllRef.current())` with a direct
+`setPendingAutoSave(true)`. The existing `pendingAutoSave` effect
+already does the right thing — ignores while any card is scanning,
+fires `saveAll` exactly once when every card reaches a terminal state.
+`saveAll` then handles the optimistic save, workStore polish
+registration, and navigation. saveAll fires ONCE per batch instead of
+twice; the wrong toast no longer emits; the race is eliminated.
+
+### Files touched
+
+* `frontend/src/pages/AddItem.jsx` (`buildBaseCard` +
+  `handleBulkUpload`, +35 / -22 LoC)
+* `plan.md` (this entry)
+
+### Verification
+
+* ESLint: clean.
+* esbuild: clean (2.0 MB bundle).
+* Polishing flow restored: with fingerprints + `deferMatte` flowing
+  through to `buildCreatePayload`, the backend save returns
+  `clean_image_status='pending'` → settle() pushes to
+  `polishCandidates` → `workStore.registerPolishItems` ticks → poller
+  fires every 3 s → `WorkBatchDoneToast` fires once the last polish
+  drains → "You have news in your closet" toast as designed.
+
 ## ✅ Patch M20.5.1 — Silent path was silent because nothing was queued (hotfix) — SHIPPED
 
 User report after M20.5: "The silent process is so silent — nothing
