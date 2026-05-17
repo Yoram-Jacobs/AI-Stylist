@@ -1,26 +1,22 @@
 [
   {
-    "content": "Add /app/inference-server/eyes/test_images dataset path to CONCRETE_FACTS.md",
+    "content": "Backend: add post-bail-out alpha-coverage check in `_run_background_matte`. When apply_alpha_intersection bailed out AND rembg-only alpha < 8% → delete item.",
     "status": "completed"
   },
   {
-    "content": "Audit current state of backend SegFormer pipeline (clothing_parser.py + garment_vision.py): bbox padding budgets, category enforcement, alpha intersection threshold",
+    "content": "Mirror the same check in `clean_background_for_item` (the manual /clean-background endpoint) for parity",
     "status": "completed"
   },
   {
-    "content": "Build a diagnostic script that runs clothing_parser+garment_vision against test images, dumping: SegFormer masks, per-region bboxes, pre/post rembg crops, alpha coverage %, final crop sizes",
-    "status": "completed"
+    "content": "Frontend: harden workStore polish poll to handle 404 (deleted item) — remove from pending queue + closetStore",
+    "status": "in_progress"
   },
   {
-    "content": "Run diagnostic against 6 outfit images from test_images/. Aggregate stats per image: regions detected, regions kept, regions dropped (and why), under-coverage failures",
-    "status": "completed"
+    "content": "Verify: backend lints + restart, frontend lints, screenshot smoke test",
+    "status": "pending"
   },
   {
-    "content": "Compare against the expected 20-30 items baseline; identify the specific patches that regressed (M21 / 12k / 12l) by toggling each off in the diagnostic",
-    "status": "completed"
-  },
-  {
-    "content": "Produce diagnosis report in plan.md with concrete root cause(s), recommended fixes, and which patches to revert/adjust. No code fix this session (per user choice 5a).",
-    "status": "completed"
+    "content": "Update plan.md with the fix details + remove the 'NOT applied this session' caveat",
+    "status": "pending"
   }
 ]
