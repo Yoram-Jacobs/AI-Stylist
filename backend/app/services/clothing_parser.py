@@ -63,6 +63,21 @@ _LABEL_MAP: dict[str, str | None] = {
     "Bag": "accessory",
     "Scarf": "accessory",
 }
+
+# SegFormer ATR classes that represent the WEARER'S BODY (not clothing).
+# `_LABEL_MAP` maps these to ``None`` so they never become garment
+# detections, but their pixel-level location in the source image is
+# valuable for downstream cleanup: rembg's person-shaped foreground
+# leaks past every garment's mask edge unless we explicitly subtract
+# the wearer's face / hair / arms / legs from the dilated soft-mask
+# used in ``apply_alpha_intersection``. Surface a single binary
+# "human" mask alongside each detection so the consumer can subtract
+# it post-dilation without re-running SegFormer.
+_HUMAN_CLASS_NAMES = (
+    "Face", "Hair",
+    "Left-arm", "Right-arm",
+    "Left-leg", "Right-leg",
+)
 # Minimum mask area (as fraction of total image) to consider a detection.
 # Patch 10a (May 2026) — category-dependent. The flat ``_MIN_AREA_FRAC =
 # 0.005`` previously dropped any segment covering less than 0.5% of the
@@ -301,21 +316,218 @@ def _recover_paired_footwear(
     return merged
 
 
-# Classes whose mask should ALWAYS be treated as a single instance,
-# regardless of how many disconnected blobs SegFormer's per-pixel
-# argmax produces. A high-contrast graphic print on a t-shirt or a
-# wide belt across a dress can break the mask into 2-5 disconnected
-# components, but anatomically the wearer can only have one
-# upper-garment / one bottom / one dress at a time. Splitting these
-# into separate "instances" was the root cause of the over-cropping
-# regression where graphic-print t-shirts produced multiple shredded
-# crops in the closet (one per fragment).
+# Classes whose mask should be passed through ``_split_into_spatial_groups``:
+# nearby fragments of a single object get merged, but two genuinely-
+# separate items of the same class still ship as two cards.
+#
+# Upper-clothes / Dress / Skirt / Pants — anatomically the wearer can
+# only have ONE per outfit, but SegFormer fragments their masks at
+# high-contrast prints, belts, sashes, etc. (a graphic-print t-shirt
+# can split into 2-5 disconnected components). Merging keeps the
+# garment whole.
+#
+# Hat / Sunglasses / Belt / Bag / Scarf — usually ONE per outfit. The
+# fragmentation pattern is different (a shoulder-bag strap fragments
+# from the bag body because they cross the torso at different
+# argmax-favoured colours; a long scarf can split where it drapes
+# over the shoulder). Same merge-then-split logic surfaces the
+# accessory as one card. Two genuinely-separate accessories (tote
+# + handbag, hat + bandana) still ship as two — they're > 5 % of
+# the frame's short edge apart and the spatial-groups splitter
+# breaks them.
+#
+# Left-shoe / Right-shoe are intentionally NOT here — they are
+# literally two-instance and need to stay split so the post-pass
+# pair-collapser can union them into a single "Shoes" card.
 _SINGLE_INSTANCE_CLASSES = {
     "Upper-clothes",
     "Dress",
     "Skirt",
     "Pants",
+    "Hat",
+    "Sunglasses",
+    "Belt",
+    "Bag",
+    "Scarf",
 }
+
+
+def _split_into_spatial_groups(class_binary: np.ndarray) -> list[np.ndarray]:
+    """Split a single-instance class mask into spatially-distinct groups.
+
+    Used for the ``_SINGLE_INSTANCE_CLASSES`` (top, dress, skirt, pants)
+    where two truly separate garments of the same class can appear in
+    one photo — e.g. a flat-lay with two skirts side by side, two
+    models in one frame, or a layered outfit where an open jacket and
+    the t-shirt underneath each have visible non-overlapping regions.
+    Without this split the previous "treat the whole class as one
+    blob" logic merged the two garments and the downstream
+    ``_postprocess_mask`` largest-component step silently discarded
+    one of them.
+
+    Returns one mask per detected garment group. Small print-fragments
+    (high-contrast graphic break-ups of a single garment's mask) are
+    absorbed into the nearest surviving group, so a graphic-print
+    t-shirt still ships ONE card not many.
+
+    Heuristics:
+      * A component is a "major" garment if its area is at least 20 %
+        of the largest component's area AND at least 0.1 % of the
+        frame.
+      * Two major components belong to the same garment if the gap
+        between their bboxes is at most 5 % of the frame's short
+        edge (≈ the natural spacing a print or a belt creates in
+        one garment, not the spacing between two separate items).
+      * "Minor" components (< 20 % of largest) are absorbed into the
+        nearest major group if within 10 % of the short edge; else
+        dropped as noise.
+
+    On single-component input returns ``[class_binary]`` unchanged
+    (the common case). Empty input returns ``[]``.
+    """
+    from scipy import ndimage
+
+    if class_binary.sum() < 128:
+        return []
+
+    labeled, n = ndimage.label(class_binary)
+    if n <= 1:
+        return [class_binary.astype(np.uint8)]
+
+    H, W = class_binary.shape
+    frame_short = max(1, min(H, W))
+
+    # Per-component area + bbox.
+    comps: list[dict[str, Any]] = []
+    for inst in range(1, n + 1):
+        mask = (labeled == inst).astype(np.uint8)
+        area = int(mask.sum())
+        if area < 128:
+            continue  # speck noise
+        ys, xs = np.where(mask)
+        bbox = (int(ys.min()), int(xs.min()), int(ys.max()), int(xs.max()))
+        comps.append({"mask": mask, "area": area, "bbox": bbox})
+    if not comps:
+        return []
+    if len(comps) == 1:
+        return [comps[0]["mask"]]
+
+    comps.sort(key=lambda c: c["area"], reverse=True)
+    largest_area = comps[0]["area"]
+    min_major_frac = 0.20
+    min_major_frame_frac = 0.001  # 0.1 % of frame area
+    frame_area = H * W
+    min_major_area = max(
+        int(min_major_frac * largest_area),
+        int(min_major_frame_frac * frame_area),
+    )
+    majors: list[dict[str, Any]] = []
+    minors: list[dict[str, Any]] = []
+    for c in comps:
+        if c["area"] >= min_major_area:
+            majors.append(c)
+        else:
+            minors.append(c)
+
+    # If only one major survives, everything else is noise / fragment.
+    if len(majors) == 1:
+        merge_gap = max(8, int(0.10 * frame_short))
+        main = majors[0]
+        for frag in minors:
+            if _bbox_gap(frag["bbox"], main["bbox"]) <= merge_gap:
+                main["mask"] = np.maximum(main["mask"], frag["mask"])
+        # Bridge disconnected fragments into the main blob (see the
+        # multi-major branch below for the rationale).
+        try:
+            from scipy import ndimage as _ndi
+            k = max(3, (merge_gap * 2 + 1) | 1)
+            structure = np.ones((k, k), dtype=bool)
+            bridged = _ndi.binary_closing(
+                main["mask"] > 0, structure=structure, iterations=1,
+            )
+            return [bridged.astype(np.uint8)]
+        except Exception:  # noqa: BLE001
+            return [main["mask"]]
+
+    # Multiple majors — group by spatial proximity. Two majors merge
+    # into the same group when their bbox gap is small (within
+    # 5 % of the frame's short edge — natural in-garment spacing).
+    merge_gap = max(8, int(0.05 * frame_short))
+    groups: list[dict[str, Any]] = []
+    for major in majors:
+        joined = False
+        for g in groups:
+            if _bbox_gap(major["bbox"], g["bbox"]) <= merge_gap:
+                g["mask"] = np.maximum(g["mask"], major["mask"])
+                gy1, gx1, gy2, gx2 = g["bbox"]
+                my1, mx1, my2, mx2 = major["bbox"]
+                g["bbox"] = (
+                    min(gy1, my1), min(gx1, mx1),
+                    max(gy2, my2), max(gx2, mx2),
+                )
+                joined = True
+                break
+        if not joined:
+            groups.append({
+                "mask": major["mask"].copy(),
+                "bbox": major["bbox"],
+            })
+
+    # Absorb minor fragments into the nearest group (within 10 % of
+    # short edge); else drop as noise.
+    absorb_gap = max(16, int(0.10 * frame_short))
+    for frag in minors:
+        best = None
+        best_gap = None
+        for g in groups:
+            gap = _bbox_gap(frag["bbox"], g["bbox"])
+            if best is None or gap < (best_gap or 0):
+                best = g
+                best_gap = gap
+        if best is not None and best_gap is not None and best_gap <= absorb_gap:
+            best["mask"] = np.maximum(best["mask"], frag["mask"])
+
+    # Bridge disconnected components within each group so the downstream
+    # ``_postprocess_mask`` "keep largest connected component" step
+    # doesn't kill the smaller half. Without this bridging step the
+    # merge above is purely bbox-level — the mask itself still has
+    # two (or more) disconnected blobs and ``_postprocess_mask`` then
+    # discards everything except the largest. The classic failure
+    # mode is a shoulder-bag whose strap and body are argmax-split:
+    # both fragments survive ``_split_into_spatial_groups``, both get
+    # merged into one group's mask, but the largest-component step
+    # drops the strap (or the body) anyway.
+    #
+    # The closing kernel scales with merge_gap × 2 + 1 (just enough
+    # to bridge the natural in-instance gap). Tighter would leave
+    # the components disconnected; looser would consume legitimate
+    # negative-space inside the garment (e.g. the hole between two
+    # halves of an open jacket).
+    for g in groups:
+        try:
+            from scipy import ndimage as _ndi
+            k = max(3, (merge_gap * 2 + 1) | 1)
+            structure = np.ones((k, k), dtype=bool)
+            bridged = _ndi.binary_closing(
+                g["mask"] > 0, structure=structure, iterations=1,
+            )
+            g["mask"] = bridged.astype(np.uint8)
+        except Exception:  # noqa: BLE001
+            pass  # leave un-bridged; will be partially clipped downstream
+
+    return [g["mask"] for g in groups]
+
+
+def _bbox_gap(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> int:
+    """Minimum L-infinity distance between two ``(ymin, xmin, ymax, xmax)``
+    bboxes. Returns 0 if they overlap or touch."""
+    ay1, ax1, ay2, ax2 = a
+    by1, bx1, by2, bx2 = b
+    dx = max(0, max(bx1 - ax2, ax1 - bx2))
+    dy = max(0, max(by1 - ay2, ay1 - by2))
+    return max(dx, dy)
 
 
 def _split_instances(class_mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
@@ -324,10 +536,16 @@ def _split_instances(class_mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
     Returns [(label_name, binary_mask_u8), ...]. Mask is same H×W as input.
     Small specks are dropped.
 
-    Note on graphic-print regression: classes in
-    ``_SINGLE_INSTANCE_CLASSES`` are intentionally NOT split into
-    components. Doing so caused the closet to fill with shredded
-    fragments whenever a t-shirt's print broke the mask continuity.
+    Classes in ``_SINGLE_INSTANCE_CLASSES`` use
+    ``_split_into_spatial_groups`` so two genuinely-separate garments
+    of the same class (flat-lay with two skirts, layered outfits with
+    visible non-overlapping regions) ship as two cards, while
+    print-fragments of a single garment stay merged into one mask.
+
+    Multi-instance classes (Left-shoe / Right-shoe / Hat / Bag /
+    Belt / Scarf / Sunglasses) keep the legacy connected-component
+    split so a wearer's two distinct shoes or a hat + scarf each
+    surface as their own detection.
     """
     from scipy import ndimage
 
@@ -344,15 +562,10 @@ def _split_instances(class_mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
             continue
         class_binary = (class_mask == cid_i).astype(np.uint8)
 
-        # Single-instance classes: keep the entire class mask as ONE
-        # detection, no component-splitting. Tiny floating specks far
-        # from the main blob will be dropped by `_postprocess_mask`'s
-        # "largest connected component" step downstream — but the
-        # main garment region will stay whole even if its centre got
-        # chewed up by a high-contrast print.
         if label_name in _SINGLE_INSTANCE_CLASSES:
-            if int(class_binary.sum()) >= 128:
-                out.append((label_name, class_binary))
+            for sub in _split_into_spatial_groups(class_binary):
+                if int(sub.sum()) >= 128:
+                    out.append((label_name, sub))
             continue
 
         # Multi-instance-allowed classes (shoes, accessories, …):
@@ -718,6 +931,23 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
     instances = await asyncio.to_thread(_split_instances, class_mask)
     total = max(1, W * H)
 
+    # Build a binary "human body" mask from the same class_mask — the
+    # union of Face / Hair / Left-arm / Right-arm / Left-leg /
+    # Right-leg pixels. Consumers (`apply_alpha_intersection`)
+    # subtract this from the per-garment soft mask AFTER dilation
+    # so face / hair / limb pixels can't leak into the final matte
+    # even when SegFormer mis-labelled a few skin pixels as garment
+    # OR when dilation grew the garment mask outward into adjacent
+    # skin. Returned only once; sliced per-bbox downstream.
+    human_class_ids = {
+        cid for cid, name in _id2label.items()
+        if name in _HUMAN_CLASS_NAMES
+    }
+    if human_class_ids:
+        human_mask_full = np.isin(class_mask, list(human_class_ids)).astype(np.uint8)
+    else:
+        human_mask_full = None
+
     # 1) First pass: keep only sufficiently-large instances; index by label.
     by_label: dict[str, dict[str, Any]] = {}
     for label_name, mask in instances:
@@ -726,6 +956,30 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
         # sunglasses, belts, shoes, etc. in a full-body shot.
         category = _LABEL_MAP.get(label_name)
         if int(mask.sum()) / total < _min_area_frac_for(category):
+            continue
+        if label_name in _SINGLE_INSTANCE_CLASSES:
+            # `_split_instances` has already split this class into
+            # spatially-distinct garment groups via
+            # `_split_into_spatial_groups`. Each entry is a separate
+            # garment instance and must keep its own slot in by_label
+            # so the downstream NMS / bbox-emit loop sees both as
+            # candidates instead of unioning them by label name. Use
+            # a unique suffixed key per instance; the rest of the
+            # pipeline iterates by_label.values() so the key shape
+            # is opaque to it (except the explicit Left-shoe /
+            # Right-shoe pop below, which is intentionally only used
+            # for multi-instance classes).
+            key = label_name
+            suffix = 0
+            while key in by_label:
+                suffix += 1
+                key = f"{label_name}#{suffix}"
+            by_label[key] = {
+                "label": label_name,
+                "category": category,
+                "score": 0.95,
+                "mask": mask,
+            }
             continue
         if label_name in by_label:
             # Merge disconnected components of the same label into one
@@ -816,6 +1070,15 @@ async def parse_garments(image_bytes: bytes) -> list[dict[str, Any]]:
                     int(xmax / W * 1000),
                 ],
                 "mask": item["mask"],
+                # Full-resolution union of Face / Hair / limb pixels.
+                # Sliced per-bbox downstream and subtracted from the
+                # dilated garment soft-mask in
+                # ``apply_alpha_intersection`` so face / hair / arms /
+                # legs can't leak into the final matte. May be None
+                # if SegFormer's id2label didn't expose any of the
+                # human classes (defensive — should never happen on
+                # the ATR-18 checkpoint).
+                "_human_mask_full": human_mask_full,
             }
         )
     logger.info(
@@ -973,6 +1236,7 @@ def apply_alpha_intersection(
     seg_mask_bbox: np.ndarray,
     *,
     category: str | None = None,
+    human_mask: np.ndarray | None = None,
 ) -> bytes | None:
     """Refine a rembg-matted PNG by AND-ing its alpha with a SegFormer mask.
 
@@ -982,6 +1246,23 @@ def apply_alpha_intersection(
     SegFormer mask says which pixels belong specifically to the targeted
     garment class, so intersecting the two yields a clean cutout of just
     the targeted item.
+
+    Human-mask subtraction (optional, recommended)
+    ----------------------------------------------
+    When ``human_mask`` is provided (binary uint8, same H×W as the
+    crop OR full-res — automatically resized), pixels marked as the
+    wearer's BODY (Face / Hair / Left-arm / Right-arm / Left-leg /
+    Right-leg from SegFormer's ATR classes) are subtracted from the
+    DILATED garment soft-mask BEFORE the rembg intersection. This
+    closes a structural leak: rembg's person-shaped foreground keeps
+    every skin pixel, and the dilation pass (which legitimately grows
+    the garment mask outward to recover puffy sleeves / shoe halos)
+    grows it into adjacent face / neck / arm / leg regions. Without
+    explicit skin subtraction, a shirt card inherits the model's
+    neck and chin, a skirt card inherits the upper thighs, etc.
+    The subtraction is applied AFTER dilation so dilation can still
+    recover legitimate garment halo on the non-skin side; only
+    pixels that are BOTH (dilated-garment) AND (skin) get wiped.
 
     Patch 12f (May 2026) — DILATE the SegFormer mask before blending.
     Earlier behaviour used a strict ``min(rembg, gaussian_blur(mask))``,
@@ -1132,6 +1413,93 @@ def apply_alpha_intersection(
         soft_mask = np.array(mask_im)
     except Exception:  # noqa: BLE001
         soft_mask = mask_resized
+
+    # Geometric head-exclusion for torso garments.
+    #
+    # For tops / outerwear / dresses / full-body, the wearer's head
+    # always sits ABOVE the garment. SegFormer's per-pixel Face / Hair
+    # classification is imperfect at edges (translucent hair strands,
+    # the neck region — which has NO dedicated class in ATR-18 —
+    # gets argmax'd as either Face or Upper-clothes depending on
+    # local contrast). The human-mask subtraction below can't catch
+    # what SegFormer didn't classify as Face/Hair in the first
+    # place. But geometrically, the rows ABOVE the first row with
+    # significant garment coverage are GUARANTEED head / neck / hair —
+    # the garment hasn't started yet. Wipe soft_mask in those rows
+    # so the alpha intersection forces alpha = 0 there, even if
+    # rembg insists on keeping the head as foreground.
+    #
+    # 5 % of crop height is left as a buffer below the first solid
+    # row to avoid clipping a high collar / ribbed-cuff edge that
+    # the SegFormer mask itself thinned out at the very top. The
+    # "significant coverage" threshold is 30 % of row width — most
+    # garment-body rows clear this comfortably; sparse rows from
+    # spaghetti straps / open collars stay below and the buffer
+    # protects them.
+    if category and category.lower().replace(" ", "") in {
+        "top", "outerwear", "dress", "fullbody",
+    }:
+        try:
+            row_mask = (mask_resized > 127)
+            row_cov = row_mask.mean(axis=1)
+            solid_rows = np.where(row_cov >= 0.30)[0]
+            if len(solid_rows) > 0:
+                first_solid_y = int(solid_rows[0])
+                cut_y = max(0, first_solid_y - int(0.05 * Hc))
+                if cut_y > 0:
+                    soft_mask[:cut_y, :] = 0
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "apply_alpha_intersection: head-exclusion skipped: %s",
+                repr(exc)[:120],
+            )
+
+    # Subtract the human-body mask from the dilated soft-mask. Done
+    # AFTER dilation so we don't accidentally shrink legitimate
+    # garment halo on the non-skin side. The skin mask itself gets a
+    # smaller dilation (half the garment budget) so it covers the
+    # 1-2 px transition pixels at the body/garment seam, where
+    # SegFormer's per-pixel argmax often flickers. A more aggressive
+    # dilation (≥ 1.5× the garment budget) was tried but on torso
+    # crops with a small head region the skin mask grew far enough
+    # to cannibalise the upper-jacket / collar pixels — solid alpha
+    # collapsed to sub-5 % and the phantom guard dropped the entire
+    # card. Keep this conservative; rely on the per-category bbox
+    # top-edge padding to cut off the bulk of the head/neck region
+    # BEFORE this mask intersection ever runs.
+    if human_mask is not None:
+        try:
+            from PIL import ImageFilter as _IF
+
+            if human_mask.shape != (Hc, Wc):
+                human_resized = np.array(
+                    Image.fromarray(
+                        (human_mask * 255).astype(np.uint8)
+                        if human_mask.dtype != np.uint8
+                        else human_mask,
+                        mode="L",
+                    ).resize((Wc, Hc), Image.NEAREST)
+                )
+            else:
+                human_resized = (
+                    human_mask * 255 if human_mask.dtype != np.uint8 else human_mask
+                ).astype(np.uint8)
+            skin_dilate_px = max(1, dilate_px // 2)
+            if skin_dilate_px > 0:
+                human_im = Image.fromarray(human_resized, mode="L")
+                human_im = human_im.filter(
+                    _IF.MaxFilter(2 * skin_dilate_px + 1)
+                )
+                human_resized = np.array(human_im)
+            soft_mask = np.where(
+                human_resized > 127, np.uint8(0), soft_mask,
+            ).astype(np.uint8)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "apply_alpha_intersection: human-mask subtract skipped: %s",
+                repr(exc)[:120],
+            )
+
     # New alpha = min(rembg_alpha, dilated_soft_mask). Anywhere SegFormer
     # (after dilation) said "not this garment AND not its halo" we wipe
     # out, even if rembg thought it was foreground. Where dilation

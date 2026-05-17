@@ -779,24 +779,54 @@ def _resolve_bbox_pad_trbl_for_category(
 
 
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
-# Patch 12d (May 2026) — short-edge floor for crop output, expressed
-# as a PROPORTIONAL function of the source image's short edge. The
-# previous absolute 192 px floor was too aggressive on small uploads:
-# the man-in-trench-coat photo arrived at 550×810 px and the floor
-# dropped Pants (184 px), Shoes (124 px), and Hat (104 px) — leaving
-# only the coat. Inversely, on large 2000+ px uploads, 192 px was too
-# permissive and let bag-strap slivers through.
+# Short-edge floor for crop output, expressed as a PER-CATEGORY
+# percentage of the source image's short edge. Pixel-based floors
+# (the old 96 px hard minimum) silently dropped legitimate small
+# garments on low-resolution phone uploads (footwear on a 550 px
+# photo has a short edge of ~50-80 px, well below 96 px), AND were
+# blind to aspect ratio. Percent-only thresholds adapt cleanly to
+# any source resolution and orientation.
 #
-# The proportional form ``max(_MIN_CROP_SHORT_EDGE_FLOOR_PX,
-# _MIN_CROP_SHORT_EDGE_PCT * src_short)`` adapts cleanly:
-#   *  550 px source → floor ≈ 96 px   (lets Pants 184 px through)
-#   * 1500 px source → floor ≈ 180 px  (drops typical phantoms)
-#   * 2000 px source → floor ≈ 240 px  (aggressive drop for bag slivers)
-# A hard cap of 256 px prevents very large uploads from silently
-# losing legitimate small-accessory crops.
-_MIN_CROP_SHORT_EDGE_PCT = 0.12
-_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96
-_MIN_CROP_SHORT_EDGE_CEIL_PX = 256
+# Calibration: on a typical full-body editorial photo at 550-832 px
+# short edge, the natural in-frame short edge of each category is:
+#   * top / bottom / outerwear / dress / fullbody : 30-50 % (huge)
+#   * footwear                                     :  8-12 % (shoe height)
+#   * headwear                                     :  8-12 % (hat height)
+#   * accessory (sunglasses, belt, scarf, bag)    :  3-10 % (varies)
+# The thresholds below sit comfortably below those natural sizes so
+# real garments pass and only hallucinated slivers (1-2 % short
+# edges with no spatial structure) get dropped.
+_MIN_CROP_SHORT_EDGE_PCT_DEFAULT = 0.05
+_MIN_CROP_SHORT_EDGE_PCT_BY_CATEGORY: dict[str, float] = {
+    "top":        0.08,
+    "bottom":     0.08,
+    "dress":      0.08,
+    "fullbody":   0.08,
+    "full body":  0.08,
+    "outerwear":  0.08,
+    "footwear":   0.04,
+    "headwear":   0.04,
+    "accessory":  0.025,
+}
+
+
+def _resolve_min_short_edge_pct_for_category(
+    category: str | None,
+) -> float:
+    """Look up the per-category short-edge percent floor.
+
+    Defaults to ``_MIN_CROP_SHORT_EDGE_PCT_DEFAULT`` when the
+    category is unknown / empty. Category strings are case-folded
+    and stripped before lookup.
+    """
+    if not category:
+        return _MIN_CROP_SHORT_EDGE_PCT_DEFAULT
+    key = str(category).strip().lower()
+    return _MIN_CROP_SHORT_EDGE_PCT_BY_CATEGORY.get(
+        key, _MIN_CROP_SHORT_EDGE_PCT_DEFAULT,
+    )
+
+
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
 # A single bbox covering at least this fraction of the frame means the
 # user uploaded an already-tight garment shot; cropping further would
@@ -1329,36 +1359,169 @@ def _crop_to_bbox(
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
     if area_pct < _MIN_CROP_AREA_PCT:
         return None
-    # Patch 12d (May 2026) — drop tiny crops outright. Below the
-    # proportional short-edge floor Gemini doesn't have enough pixels
-    # to classify the cropped object cleanly and instead "borrows"
-    # surrounding context from the bbox padding, yielding hallucinated
-    # garment names (a Bag bbox 90 px wide with t-shirt pixels in the
-    # padding came back as "Black longline open blazer"). The floor
-    # scales with source size so small uploads (e.g. 550×810 px phone
-    # thumbnails) don't lose every detection, and large uploads still
-    # filter genuine phantoms.
+    # Per-category short-edge floor (purely percent-based). The
+    # threshold scales with the source's short edge so the floor is
+    # aspect-ratio invariant and resolution-invariant: a shoe at
+    # 8 % of frame short edge passes whether the upload is 550 px
+    # or 4000 px. Each category has its own percent because a
+    # legitimate top occupies far more frame than a legitimate
+    # accessory — using one global percent either dropped real
+    # accessories (when set high enough to filter top phantoms) or
+    # let through phantom slivers (when set low enough to keep
+    # real accessories).
     cur_short = min(x2 - x1, y2 - y1)
     src_short = min(w, h)
-    floor_px = max(
-        _MIN_CROP_SHORT_EDGE_FLOOR_PX,
-        min(
-            _MIN_CROP_SHORT_EDGE_CEIL_PX,
-            int(_MIN_CROP_SHORT_EDGE_PCT * src_short),
-        ),
-    )
+    pct = _resolve_min_short_edge_pct_for_category(category)
+    floor_px = int(pct * src_short)
     if cur_short < floor_px:
         logger.info(
             "_crop_to_bbox: dropping tiny crop short_edge=%d px "
-            "(floor=%d px = %.0f%% of %d×%d source) — "
-            "likely SegFormer sliver of an adjacent garment",
-            cur_short, floor_px, _MIN_CROP_SHORT_EDGE_PCT * 100, w, h,
+            "(floor=%d px = %.1f%% of %d×%d source, "
+            "category=%s) — likely SegFormer sliver of an "
+            "adjacent garment",
+            cur_short, floor_px, pct * 100, w, h, category,
         )
         return None
     crop = img.crop((x1, y1, x2, y2))
     buf = io.BytesIO()
     crop.save(buf, format="JPEG", quality=88, optimize=True)
     return buf.getvalue(), (x1, y1, x2, y2)
+
+
+# Minimum fraction of the crop that must be "solid" garment pixels
+# (alpha >= 128, perceptually opaque) for the matte to ship to the UI.
+# Below this threshold the cutout is empirically empty/near-empty —
+# rembg failure on tiny crops, SegFormer phantom detections, or a
+# crop where rembg only kept the background by mistake. Dropping
+# these cards is preferable to shipping a blank white tile.
+_PHANTOM_DROP_PCT = 0.05
+
+
+def _solid_alpha_coverage(png_bytes: bytes) -> float | None:
+    """Fraction of an RGBA PNG whose alpha channel is >= 128.
+
+    Returns ``None`` when the bytes can't be decoded or the image
+    is not RGBA (so the caller can skip the check without dropping
+    the detection). The 128 threshold is the perceptual midpoint —
+    pixels below it look translucent, above it look opaque.
+    """
+    try:
+        img = Image.open(io.BytesIO(png_bytes))
+        if img.mode != "RGBA":
+            return None
+        import numpy as _np
+        arr = _np.asarray(img)
+        if arr.ndim != 3 or arr.shape[2] != 4:
+            return None
+        return float((arr[:, :, 3] >= 128).mean())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# Frontend card window aspect (`aspect-[3/4]` in AddItem.jsx). The
+# canvas dimensions below preserve that 3:4 portrait ratio at a
+# resolution that's large enough to look crisp on retina displays
+# yet small enough to keep the streamed `items_meta` payload light.
+_CARD_CANVAS_W = 900
+_CARD_CANVAS_H = 1200
+
+
+def _fit_crop_to_card(
+    crop_bytes: bytes,
+    *,
+    crop_mime: str = "image/jpeg",
+    canvas_w: int = _CARD_CANVAS_W,
+    canvas_h: int = _CARD_CANVAS_H,
+) -> tuple[bytes, str]:
+    """Rescale a per-item crop and center it on a fixed-aspect canvas.
+
+    The frontend renders each garment card inside an
+    ``aspect-[3/4]`` portrait window with ``object-cover``. Without
+    normalisation, crop bytes coming out of the pipeline span a wide
+    range of aspect ratios:
+
+      * wide footwear / belt crops → ``object-cover`` clips the heel
+        and toe out of view;
+      * narrow earring / strap crops → the item shrinks to a thin
+        sliver inside the card;
+      * the rembg matte from a tiny-bbox accessory can come back at
+        full source resolution (rembg composites alpha onto the
+        original full-res RGB), so the card receives a multi-MB
+        image where the visible garment occupies only a fraction of
+        the frame.
+
+    This helper produces a uniform 3:4 portrait canvas containing
+    the crop, scaled to fit (either up OR down) so the longer side
+    of the garment touches the canvas edge, then centered. Aspect
+    ratio is always preserved so the item never gets squished or
+    clipped. RGBA inputs preserve their alpha on a fully transparent
+    canvas; RGB inputs are pasted onto a neutral white canvas and
+    stay JPEG. Returns ``(out_bytes, out_mime)``.
+
+    Example: a 25x120 shoe matte → upscaled to 250x1200 (the larger
+    side hits the canvas height), then centered horizontally on the
+    900x1200 canvas with ~325px of transparent padding on each side.
+
+    On any decode / re-encode failure we fall back to the original
+    bytes + mime so a single bad crop can never break the response.
+    """
+    try:
+        img = Image.open(io.BytesIO(crop_bytes))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
+    has_alpha = (
+        img.mode in ("RGBA", "LA")
+        or (img.mode == "P" and "transparency" in img.info)
+    )
+    try:
+        if has_alpha:
+            img = img.convert("RGBA")
+        else:
+            img = img.convert("RGB")
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
+    iw, ih = img.size
+    if iw <= 0 or ih <= 0:
+        return crop_bytes, crop_mime
+
+    # Scale-to-fit the canvas: choose the smaller of the two ratios so
+    # the entire crop is visible (no clipping) and the longer side
+    # touches the canvas edge. **No upper cap of 1.0** — small bbox
+    # crops (a 25x120 shoe matte from a far-away product photo) get
+    # upscaled to fill the card window (e.g. 250x1200) instead of
+    # rendering as a tiny dot on a mostly-empty canvas. LANCZOS keeps
+    # the upscale acceptably smooth on the modest 5-10x factors we
+    # see in practice.
+    scale = min(canvas_w / float(iw), canvas_h / float(ih))
+    new_w = max(1, int(round(iw * scale)))
+    new_h = max(1, int(round(ih * scale)))
+    if (new_w, new_h) != (iw, ih):
+        try:
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+        except Exception:  # noqa: BLE001
+            return crop_bytes, crop_mime
+
+    ox = (canvas_w - new_w) // 2
+    oy = (canvas_h - new_h) // 2
+
+    try:
+        if has_alpha:
+            canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+            canvas.paste(img, (ox, oy), img)
+            buf = io.BytesIO()
+            canvas.save(buf, format="PNG", optimize=True)
+            return buf.getvalue(), "image/png"
+        canvas = Image.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
+        canvas.paste(img, (ox, oy))
+        buf = io.BytesIO()
+        canvas.save(buf, format="JPEG", quality=90, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
 
 
 def _scan_complete_json_objects(
@@ -1597,6 +1760,13 @@ class GarmentVisionService:
                 # semantic PNG cutouts instead of bbox rectangles. Not
                 # serialised to JSON anywhere.
                 "mask": p.get("mask"),
+                # Full-res union of Face / Hair / limb pixels. Sliced
+                # to bbox by ``_bbox_crop_useful`` and subtracted from
+                # the dilated garment soft-mask inside
+                # ``apply_alpha_intersection`` so face / hair / arms /
+                # legs can't leak into the final matte. May be None
+                # if the parser couldn't build the human mask.
+                "_human_mask_full": p.get("_human_mask_full"),
                 "source": "clothing_parser",
             }
             for p in parser_items
@@ -1931,12 +2101,15 @@ class GarmentVisionService:
             or analysis.get("sub_category")
             or "garment"
         )
+        fitted_bytes, fitted_mime = _fit_crop_to_card(
+            crop_bytes, crop_mime=crop_mime,
+        )
         return {
             "label": label,
             "kind": kind_hint or "garment",
             "bbox": [0, 0, 1000, 1000],
-            "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-            "crop_mime": crop_mime,
+            "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+            "crop_mime": fitted_mime,
             "analysis": analysis,
         }
 
@@ -2051,6 +2224,20 @@ class GarmentVisionService:
         A single detection that covers ≥90% of the frame is treated as
         "analyse the whole photo" so we don't pay for an identical LLM
         call on a bbox-cropped copy.
+
+        Cap ordering is **category-aware**: when more useful
+        detections exist than ``cap`` slots, the rule is "keep one of
+        each kind first, then fill remaining slots by frame area
+        descending". The previous plain ``useful[:cap]`` slice
+        accepted whatever order the parser emitted (ATR class-id
+        ascending: Hat → Sunglasses → Upper-clothes → Skirt → Pants →
+        Belt → Shoes → Bag → Scarf) — a busy outfit with hat +
+        sunglasses + top + skirt + pants + belt + shoes + bag = 8
+        detections would lose Shoes + Bag every time because they sit
+        at the tail of the class-id order. Category-aware ordering
+        guarantees that at least one of (top, bottom, outerwear,
+        dress, footwear, headwear, accessory) wins a slot before any
+        category gets a second one.
         """
         useful: list[dict[str, Any]] = []
         for det in detections:
@@ -2062,7 +2249,40 @@ class GarmentVisionService:
             if area >= 1000 * 1000 * 0.9:
                 continue
             useful.append(det)
-        return useful[:cap]
+
+        if len(useful) <= cap:
+            return useful
+
+        # Group by ``kind`` and sort each group by bbox area
+        # descending so the bigger garment of each kind wins its slot.
+        from collections import defaultdict
+
+        by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for d in useful:
+            kind = (d.get("kind") or "garment").strip().lower()
+            by_kind[kind].append(d)
+        for kind in by_kind:
+            by_kind[kind].sort(
+                key=lambda d: (
+                    max(0, d["bbox"][2] - d["bbox"][0])
+                    * max(0, d["bbox"][3] - d["bbox"][1])
+                ),
+                reverse=True,
+            )
+
+        # Round-robin pick one per kind, then fill remaining slots
+        # by largest-area-first across whatever's left.
+        out: list[dict[str, Any]] = []
+        kinds = list(by_kind.keys())
+        while len(out) < cap:
+            picked_this_round = False
+            for kind in kinds:
+                if by_kind[kind] and len(out) < cap:
+                    out.append(by_kind[kind].pop(0))
+                    picked_this_round = True
+            if not picked_this_round:
+                break
+        return out
 
     @staticmethod
     def _bbox_crop_useful(
@@ -2089,23 +2309,23 @@ class GarmentVisionService:
             img_size = None
 
         for det in useful:
-            box_px = clothing_parser.bbox_to_pixels(image_bytes, det["bbox"])
-            if not box_px:
-                continue
-            # Patch 12j — pass the SegFormer kind so the bbox crop
-            # uses the per-edge padding budget. Tightens the
-            # waistline-side edge for tops/bottoms so adjacent
-            # garments never enter the crop frame in the first place
-            # (the most important defence against blouse-skirt rim
-            # bleed; SegFormer + dilation cleanup are downstream
-            # cleanups, but they can only work with the pixels the
-            # bbox crop hands them).
+            # Cut the per-bbox crop using the per-category asymmetric
+            # padding from _BBOX_PAD_TRBL_BY_CATEGORY. The returned
+            # `box_px` is the EXACT rectangle the JPEG was cut at —
+            # we MUST slice the SegFormer mask from this same box so
+            # the mask aligns pixel-for-pixel with the crop. Slicing
+            # from a separately-computed `bbox_to_pixels(...)` (which
+            # uses the legacy 4 % flat padding) leaves the mask
+            # shifted by up to ~5 % of the crop dimensions for any
+            # category with asymmetric padding (top, bottom, dress,
+            # outerwear, footwear), corrupting every downstream alpha
+            # intersection.
             result = _crop_to_bbox(
                 image_bytes, det["bbox"], category=det.get("kind"),
             )
             if not result:
                 continue
-            crop_bytes, _xy = result
+            crop_bytes, box_px = result
             mask = det.get("mask")
             if mask is not None and img_size is not None:
                 mask_bbox = clothing_parser.slice_mask_to_bbox(
@@ -2114,6 +2334,18 @@ class GarmentVisionService:
                 if mask_bbox is not None:
                     det["_mask_bbox"] = mask_bbox
                     det["mask"] = None
+            human_full = det.get("_human_mask_full")
+            if human_full is not None and img_size is not None:
+                human_bbox = clothing_parser.slice_mask_to_bbox(
+                    human_full, img_size, box_px
+                )
+                if human_bbox is not None:
+                    det["_human_mask_bbox"] = human_bbox
+                # Drop the full-res reference once we have the slice —
+                # the parser hands the SAME ndarray to every detection
+                # of the same source photo, so dropping it here lets
+                # the GC release it once every detection is processed.
+                det["_human_mask_full"] = None
             out.append((det, crop_bytes, "image/jpeg"))
         return out
 
@@ -2126,6 +2358,12 @@ class GarmentVisionService:
         Serialised because each rembg call holds the onnxruntime
         session — parallel invocations have been seen causing silent
         OOM kills in 3GB containers.
+
+        Phantom guard: after matting (with or without intersection),
+        measure the solid-alpha coverage of the final RGBA. If it's
+        below ``_PHANTOM_DROP_PCT`` (perceptually empty), drop the
+        detection entirely rather than ship a blank/near-blank card
+        to the UI.
         """
         from app.services import background_matting
         from app.services import clothing_parser as _cp
@@ -2142,9 +2380,16 @@ class GarmentVisionService:
                 )
                 matted = None
             if not matted:
+                # rembg failed or returned empty — keep the JPEG bbox
+                # crop. JPEG has no alpha channel so the phantom
+                # guard below doesn't apply; the bbox crop is by
+                # construction non-empty (caller filters tiny crops).
+                det.pop("_mask_bbox", None)
+                det.pop("_human_mask_bbox", None)
                 matted_crops.append((det, cbytes, mime))
                 continue
             seg_mask_bbox = det.get("_mask_bbox")
+            human_mask_bbox = det.get("_human_mask_bbox")
             if seg_mask_bbox is not None:
                 try:
                     refined = _cp.apply_alpha_intersection(
@@ -2159,6 +2404,13 @@ class GarmentVisionService:
                         # original 2.5 % to preserve puffy-cuff /
                         # low-contrast-shoe recovery.
                         category=det.get("kind"),
+                        # Subtract Face / Hair / limb pixels from the
+                        # dilated soft-mask so rembg's person-shaped
+                        # foreground can't leak skin / hair into the
+                        # final matte. Cheap when present (one
+                        # nearest-neighbour resize + max filter), no-
+                        # op when absent.
+                        human_mask=human_mask_bbox,
                     )
                     if refined:
                         matted = refined
@@ -2169,6 +2421,24 @@ class GarmentVisionService:
                         repr(exc)[:120],
                     )
             det.pop("_mask_bbox", None)
+            det.pop("_human_mask_bbox", None)
+
+            # Phantom guard — drop the detection if the final matte
+            # has effectively no garment pixels. "Solid" alpha means
+            # alpha >= 128 (perceptually opaque); below 5 % of the
+            # crop is empirically a blank/near-blank cutout that
+            # would surface as an empty white card in the UI.
+            cov = _solid_alpha_coverage(matted)
+            if cov is not None and cov < _PHANTOM_DROP_PCT:
+                logger.info(
+                    "_matte_crops: dropping near-empty matte for %s — "
+                    "solid-alpha = %.1f%% < %.0f%% threshold",
+                    det.get("label"),
+                    cov * 100.0,
+                    _PHANTOM_DROP_PCT * 100.0,
+                )
+                continue
+
             matted_crops.append((det, matted, "image/png"))
         return matted_crops
 
@@ -2259,12 +2529,15 @@ class GarmentVisionService:
                     det.get("label"),
                     repr(exc)[:160],
                 )
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime=crop_mime,
+            )
             return {
                 "label": det.get("label") or "garment",
                 "kind": det.get("kind") or "garment",
                 "bbox": det.get("bbox"),
-                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                "crop_mime": crop_mime,
+                "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                "crop_mime": fitted_mime,
                 "analysis": analysis,
                 "reconstruction": reconstruction_payload,
                 # Patch M14 — Marker fields used by the ``/closet`` save
@@ -2413,13 +2686,16 @@ class GarmentVisionService:
                         "label=%s: %s",
                         det.get("label"), repr(exc)[:160],
                     )
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime=crop_mime,
+            )
             out.append(
                 {
                     "label": det.get("label") or "garment",
                     "kind": det.get("kind") or "garment",
                     "bbox": det.get("bbox"),
-                    "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                    "crop_mime": crop_mime,
+                    "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                    "crop_mime": fitted_mime,
                     "analysis": analysis,
                     "reconstruction": None,
                     "needs_reconstruction": needs_reconstruction,
@@ -2999,17 +3275,17 @@ class GarmentVisionService:
         # Emit the detect frame FIRST — gives the frontend everything
         # it needs to render placeholder cards while we wait for
         # per-item analyses to stream in.
-        items_meta = [
-            {
+        items_meta = []
+        for d, crop_b, crop_m in crops:
+            fitted_b, fitted_m = _fit_crop_to_card(crop_b, crop_mime=crop_m)
+            items_meta.append({
                 "label": d.get("label") or "garment",
                 "kind": d.get("kind") or "garment",
                 "bbox": d.get("bbox"),
-                "crop_base64": base64.b64encode(crop_b).decode("ascii"),
-                "crop_mime": crop_m,
+                "crop_base64": base64.b64encode(fitted_b).decode("ascii"),
+                "crop_mime": fitted_m,
                 "defer_matte": defer_matte,
-            }
-            for (d, crop_b, crop_m) in crops
-        ]
+            })
         yield {"type": "detect", "count": len(crops), "items_meta": items_meta}
 
         # Stream-analyse the crops via batched Gemini stream.
@@ -3250,12 +3526,15 @@ class GarmentVisionService:
                 or "garment"
             )
 
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime="image/jpeg",
+            )
             items.append({
                 "label": label,
                 "kind": "garment",
                 "bbox": bbox,
-                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                "crop_mime": "image/jpeg",
+                "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                "crop_mime": fitted_mime,
                 "analysis": analysis,
                 # NEW \u2014 frontend reads this to decide whether to render
                 # the opt-in "Repair photo" CTA (Phase 2 wires the actual
