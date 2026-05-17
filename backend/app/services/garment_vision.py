@@ -1451,11 +1451,16 @@ def _fit_crop_to_card(
         the frame.
 
     This helper produces a uniform 3:4 portrait canvas containing
-    the crop, centered and downscaled (NEVER upscaled — we keep
-    small crops at their native resolution to avoid jaggy
-    pixel-doubling). RGBA inputs preserve their alpha on a fully
-    transparent canvas; RGB inputs are pasted onto a neutral white
-    canvas and stay JPEG. Returns ``(out_bytes, out_mime)``.
+    the crop, scaled to fit (either up OR down) so the longer side
+    of the garment touches the canvas edge, then centered. Aspect
+    ratio is always preserved so the item never gets squished or
+    clipped. RGBA inputs preserve their alpha on a fully transparent
+    canvas; RGB inputs are pasted onto a neutral white canvas and
+    stay JPEG. Returns ``(out_bytes, out_mime)``.
+
+    Example: a 25x120 shoe matte → upscaled to 250x1200 (the larger
+    side hits the canvas height), then centered horizontally on the
+    900x1200 canvas with ~325px of transparent padding on each side.
 
     On any decode / re-encode failure we fall back to the original
     bytes + mime so a single bad crop can never break the response.
@@ -1482,9 +1487,15 @@ def _fit_crop_to_card(
     if iw <= 0 or ih <= 0:
         return crop_bytes, crop_mime
 
-    # Downscale to fit; never upscale (preserves crisp edges on tiny
-    # accessories like rings / earrings).
-    scale = min(canvas_w / float(iw), canvas_h / float(ih), 1.0)
+    # Scale-to-fit the canvas: choose the smaller of the two ratios so
+    # the entire crop is visible (no clipping) and the longer side
+    # touches the canvas edge. **No upper cap of 1.0** — small bbox
+    # crops (a 25x120 shoe matte from a far-away product photo) get
+    # upscaled to fill the card window (e.g. 250x1200) instead of
+    # rendering as a tiny dot on a mostly-empty canvas. LANCZOS keeps
+    # the upscale acceptably smooth on the modest 5-10x factors we
+    # see in practice.
+    scale = min(canvas_w / float(iw), canvas_h / float(ih))
     new_w = max(1, int(round(iw * scale)))
     new_h = max(1, int(round(ih * scale)))
     if (new_w, new_h) != (iw, ih):
