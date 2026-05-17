@@ -779,24 +779,54 @@ def _resolve_bbox_pad_trbl_for_category(
 
 
 _MIN_CROP_AREA_PCT = 0.008  # ignore detections smaller than ~1% of the frame
-# Patch 12d (May 2026) — short-edge floor for crop output, expressed
-# as a PROPORTIONAL function of the source image's short edge. The
-# previous absolute 192 px floor was too aggressive on small uploads:
-# the man-in-trench-coat photo arrived at 550×810 px and the floor
-# dropped Pants (184 px), Shoes (124 px), and Hat (104 px) — leaving
-# only the coat. Inversely, on large 2000+ px uploads, 192 px was too
-# permissive and let bag-strap slivers through.
+# Short-edge floor for crop output, expressed as a PER-CATEGORY
+# percentage of the source image's short edge. Pixel-based floors
+# (the old 96 px hard minimum) silently dropped legitimate small
+# garments on low-resolution phone uploads (footwear on a 550 px
+# photo has a short edge of ~50-80 px, well below 96 px), AND were
+# blind to aspect ratio. Percent-only thresholds adapt cleanly to
+# any source resolution and orientation.
 #
-# The proportional form ``max(_MIN_CROP_SHORT_EDGE_FLOOR_PX,
-# _MIN_CROP_SHORT_EDGE_PCT * src_short)`` adapts cleanly:
-#   *  550 px source → floor ≈ 96 px   (lets Pants 184 px through)
-#   * 1500 px source → floor ≈ 180 px  (drops typical phantoms)
-#   * 2000 px source → floor ≈ 240 px  (aggressive drop for bag slivers)
-# A hard cap of 256 px prevents very large uploads from silently
-# losing legitimate small-accessory crops.
-_MIN_CROP_SHORT_EDGE_PCT = 0.12
-_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96
-_MIN_CROP_SHORT_EDGE_CEIL_PX = 256
+# Calibration: on a typical full-body editorial photo at 550-832 px
+# short edge, the natural in-frame short edge of each category is:
+#   * top / bottom / outerwear / dress / fullbody : 30-50 % (huge)
+#   * footwear                                     :  8-12 % (shoe height)
+#   * headwear                                     :  8-12 % (hat height)
+#   * accessory (sunglasses, belt, scarf, bag)    :  3-10 % (varies)
+# The thresholds below sit comfortably below those natural sizes so
+# real garments pass and only hallucinated slivers (1-2 % short
+# edges with no spatial structure) get dropped.
+_MIN_CROP_SHORT_EDGE_PCT_DEFAULT = 0.05
+_MIN_CROP_SHORT_EDGE_PCT_BY_CATEGORY: dict[str, float] = {
+    "top":        0.08,
+    "bottom":     0.08,
+    "dress":      0.08,
+    "fullbody":   0.08,
+    "full body":  0.08,
+    "outerwear":  0.08,
+    "footwear":   0.04,
+    "headwear":   0.04,
+    "accessory":  0.025,
+}
+
+
+def _resolve_min_short_edge_pct_for_category(
+    category: str | None,
+) -> float:
+    """Look up the per-category short-edge percent floor.
+
+    Defaults to ``_MIN_CROP_SHORT_EDGE_PCT_DEFAULT`` when the
+    category is unknown / empty. Category strings are case-folded
+    and stripped before lookup.
+    """
+    if not category:
+        return _MIN_CROP_SHORT_EDGE_PCT_DEFAULT
+    key = str(category).strip().lower()
+    return _MIN_CROP_SHORT_EDGE_PCT_BY_CATEGORY.get(
+        key, _MIN_CROP_SHORT_EDGE_PCT_DEFAULT,
+    )
+
+
 _NMS_IOU_THRESHOLD = 0.35  # two boxes with IoU above this are considered duplicates
 # A single bbox covering at least this fraction of the frame means the
 # user uploaded an already-tight garment shot; cropping further would
@@ -1329,30 +1359,27 @@ def _crop_to_bbox(
     area_pct = ((x2 - x1) * (y2 - y1)) / float(max(1, w * h))
     if area_pct < _MIN_CROP_AREA_PCT:
         return None
-    # Patch 12d (May 2026) — drop tiny crops outright. Below the
-    # proportional short-edge floor Gemini doesn't have enough pixels
-    # to classify the cropped object cleanly and instead "borrows"
-    # surrounding context from the bbox padding, yielding hallucinated
-    # garment names (a Bag bbox 90 px wide with t-shirt pixels in the
-    # padding came back as "Black longline open blazer"). The floor
-    # scales with source size so small uploads (e.g. 550×810 px phone
-    # thumbnails) don't lose every detection, and large uploads still
-    # filter genuine phantoms.
+    # Per-category short-edge floor (purely percent-based). The
+    # threshold scales with the source's short edge so the floor is
+    # aspect-ratio invariant and resolution-invariant: a shoe at
+    # 8 % of frame short edge passes whether the upload is 550 px
+    # or 4000 px. Each category has its own percent because a
+    # legitimate top occupies far more frame than a legitimate
+    # accessory — using one global percent either dropped real
+    # accessories (when set high enough to filter top phantoms) or
+    # let through phantom slivers (when set low enough to keep
+    # real accessories).
     cur_short = min(x2 - x1, y2 - y1)
     src_short = min(w, h)
-    floor_px = max(
-        _MIN_CROP_SHORT_EDGE_FLOOR_PX,
-        min(
-            _MIN_CROP_SHORT_EDGE_CEIL_PX,
-            int(_MIN_CROP_SHORT_EDGE_PCT * src_short),
-        ),
-    )
+    pct = _resolve_min_short_edge_pct_for_category(category)
+    floor_px = int(pct * src_short)
     if cur_short < floor_px:
         logger.info(
             "_crop_to_bbox: dropping tiny crop short_edge=%d px "
-            "(floor=%d px = %.0f%% of %d×%d source) — "
-            "likely SegFormer sliver of an adjacent garment",
-            cur_short, floor_px, _MIN_CROP_SHORT_EDGE_PCT * 100, w, h,
+            "(floor=%d px = %.1f%% of %d×%d source, "
+            "category=%s) — likely SegFormer sliver of an "
+            "adjacent garment",
+            cur_short, floor_px, pct * 100, w, h, category,
         )
         return None
     crop = img.crop((x1, y1, x2, y2))
