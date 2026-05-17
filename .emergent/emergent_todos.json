@@ -13,14 +13,14 @@
   },
   {
     "content": "Rewrite /app/frontend/src/pages/AddItem.jsx as thin shell (~300 LoC) consuming useUploadItems(); drop bulkInfo branching; drop full-field per-card editor (keep only inline edits)",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Verify: ESLint + esbuild + screenshot smoke (1 photo / 5 photos / 7+ photos)",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Update plan.md with Phase U1 + U2 completion notes",
-    "status": "pending"
+    "status": "completed"
   }
 ]
