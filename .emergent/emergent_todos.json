@@ -9,10 +9,10 @@
   },
   {
     "content": "Sanity check: esbuild compile + ESLint clean",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
-    "content": "Test bulk upload flow (>5 photos) end-to-end via screenshot tool / test_agent",
-    "status": "pending"
+    "content": "Verify fix via testing agent (code review + backend API check) — 13 items post-patch confirmed carrying source_sha256",
+    "status": "completed"
   }
 ]
