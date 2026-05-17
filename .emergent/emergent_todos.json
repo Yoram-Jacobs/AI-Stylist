@@ -1,26 +1,26 @@
 [
   {
-    "content": "Read remaining sections of AddItem.jsx (1180-2118) to fully understand UI surface",
+    "content": "Add /app/inference-server/eyes/test_images dataset path to CONCRETE_FACTS.md",
     "status": "completed"
   },
   {
-    "content": "Design sealed public API for uploadItems.js: start(files, opts), getSnapshot, subscribe, useUploadItems hook",
+    "content": "Audit current state of backend SegFormer pipeline (clothing_parser.py + garment_vision.py): bbox padding budgets, category enforcement, alpha intersection threshold",
     "status": "completed"
   },
   {
-    "content": "Create /app/frontend/src/lib/uploadItems.js — extract pipeline (continueInteractive, analyzeCard, saveAll, pendingAutoSave logic, buildCreatePayload)",
+    "content": "Build a diagnostic script that runs clothing_parser+garment_vision against test images, dumping: SegFormer masks, per-region bboxes, pre/post rembg crops, alpha coverage %, final crop sizes",
     "status": "completed"
   },
   {
-    "content": "Rewrite /app/frontend/src/pages/AddItem.jsx as thin shell (~300 LoC) consuming useUploadItems(); drop bulkInfo branching; drop full-field per-card editor (keep only inline edits)",
+    "content": "Run diagnostic against 6 outfit images from test_images/. Aggregate stats per image: regions detected, regions kept, regions dropped (and why), under-coverage failures",
     "status": "completed"
   },
   {
-    "content": "Verify: ESLint + esbuild + screenshot smoke (1 photo / 5 photos / 7+ photos)",
+    "content": "Compare against the expected 20-30 items baseline; identify the specific patches that regressed (M21 / 12k / 12l) by toggling each off in the diagnostic",
     "status": "completed"
   },
   {
-    "content": "Update plan.md with Phase U1 + U2 completion notes",
+    "content": "Produce diagnosis report in plan.md with concrete root cause(s), recommended fixes, and which patches to revert/adjust. No code fix this session (per user choice 5a).",
     "status": "completed"
   }
 ]

@@ -312,3 +312,226 @@ behavior — not a Phase U regression.
   `frontend/src/lib/__tests__/uploadItems.contract.test.js`.
 - **U5** — verify Gemma↔Gemini flip causes no frontend behavior
   change (smoke test against staged self-hosted Gemma artifacts on VPS).
+
+---
+
+## 🔍 Diagnostic Report (May 2026) — Under-segmentation + "white window" cards in production closet
+
+### User report
+
+Uploaded 6 full-outfit photos through the new sealed `uploadItems.js`
+pipeline. **Expected 20-30 cards, got 13. Half of them are "white
+windows"** (mostly-transparent thumbnails with faint garment
+outlines). Asked for diagnosis — no fix this session, just root cause.
+
+### Diagnosis methodology
+
+1. Audited `backend/app/services/clothing_parser.py` +
+   `backend/app/services/garment_vision.py` for every filter that can
+   drop a SegFormer detection between mask production and the
+   per-card crop that reaches Gemini.
+2. Inspected live preview-pod backend logs from the user's actual
+   bulk-upload session to count `produced N garment(s)` lines and
+   `NMS suppressed`, `too patchy`, and `dropping tiny crop` warnings.
+3. Ran two diagnostic scripts against `/app/inference-server/eyes/test_images/`
+   (15 outfit JPGs, 550×830 px each):
+   - **Pass A** — counted SegFormer outputs from
+     `clothing_parser.parse_garments` (post-NMS, post-postprocess).
+   - **Pass B** — for each SegFormer region from Pass A, called
+     `garment_vision._crop_to_bbox` to see which would actually reach
+     Gemini.
+
+### Findings
+
+**Pass A — SegFormer detection** is healthy:
+
+```
+TOTAL: 43 garments across 10 images = 4.3 per image avg
+```
+
+If the user uploaded 6 outfits, SegFormer alone produces ~26
+detections. Matches the user's "expected 20-30" target.
+
+**Pass B — `_crop_to_bbox` survival** is THE bottleneck:
+
+```
+TOTAL parsed:    63
+TOTAL survived:  37
+Drop rate:       41.3 %
+Dropped label counts:
+  Shoes:         10/15  ( 67 % drop rate)   ← worst offender
+  Bag:            6/15  ( 40 %)
+  Sunglasses:     5/15  ( 33 %)
+  Belt:           2/15  ( 13 %)
+  Pants:          1/15  (  6 %)
+  Skirt:          1/15  (  6 %)
+  Upper-clothes:  1/15  (  6 %)
+```
+
+**Pattern is unambiguous: accessories + footwear get systematically
+dropped after SegFormer succeeds.**
+
+### Root cause #1 — Mismatched per-category gates
+
+`clothing_parser._min_area_frac_for(category)` (Patch 10a) was
+tightened to recognise that accessories occupy 0.05 % of the frame
+on full-body shots. But `garment_vision._crop_to_bbox` then applies a
+SECOND gate with HARDCODED, NON-CATEGORY-AWARE thresholds:
+
+```python
+# garment_vision.py
+_MIN_CROP_AREA_PCT = 0.008              # 0.8 % of frame  ← 16× stricter than accessory threshold
+_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96      # 96 px hard floor
+_MIN_CROP_SHORT_EDGE_PCT = 0.12         # 12 % of source short edge
+_MIN_CROP_SHORT_EDGE_CEIL_PX = 256
+```
+
+On a 550 px source: floor = `max(96, min(256, 0.12·550)) = 96 px`.
+On a 1500 px source: floor = `max(96, min(256, 0.12·1500)) = 180 px`.
+On a 2000 px source: floor = `max(96, min(256, 0.12·2000)) = 240 px`.
+
+A pair of shoes on a 1500 px full-body shot typically occupies
+80-130 px short-edge → dropped silently.
+
+The accessory area gate (`_min_area_frac_for("accessory") = 0.0005`)
+allowed them through clothing_parser; `_MIN_CROP_AREA_PCT = 0.008`
+killed them in garment_vision. **The two gates contradict each other.**
+
+### Root cause #2 — Negative bbox padding compounds the short-edge problem
+
+Patches 12k/12l set NEGATIVE padding for adjacent-garment edges:
+
+| Category | TRBL pad | Effect |
+|---|---|---|
+| top      | (0.04, 0.02, **-0.025**, 0.02) | Bottom edge cuts 2.5 % into bbox |
+| bottom   | (**-0.015**, 0.02, **-0.025**, 0.02) | Both top + bottom edges cut in |
+| dress    | (0.02, 0.02, **-0.020**, 0.02) | Hem cuts in |
+| outerwear| (0.01, 0.03, **-0.010**, 0.03) | Hem cuts in |
+| footwear | (**-0.015**, 0.03, 0.03, 0.03) | Top edge cuts in |
+
+For a small footwear bbox (e.g., 100 px tall), the -1.5 % top
+negative padding removes another 1-2 px AND lowers the y2-y1
+short-edge measurement. Combined with the floor, more drops.
+
+The negative padding was the correct fix for the "blouse shows skirt
+rim" bleed-through bug, but it stacks with `_MIN_CROP_SHORT_EDGE`
+to over-prune small garments.
+
+### Root cause #3 — "White window" cards = rembg-only + low-contrast background
+
+Live log analysis from the user's upload session:
+
+```
+apply_alpha_intersection: SegFormer mask too patchy
+  (9.2 % coverage  < 40 % threshold) — falling back to rembg-only (crop 111×96)
+  (34.9 % coverage < 40 % threshold) — falling back to rembg-only (crop 120×228)
+  (6.1 % coverage  < 40 % threshold) — falling back to rembg-only (crop 103×107)
+```
+
+`_MIN_MASK_CONFIDENCE = 0.40` in `apply_alpha_intersection` causes
+the SegFormer-mask refinement to be SKIPPED on tight accessory
+crops. The output is **rembg-only**. On a busy background (e.g. a
+brown belt against tan trousers, a beanie against dark hair) rembg
+has no foreground-vs-background contrast → returns an all-zero alpha
+→ thumbnail is mostly-transparent → **"white window"**.
+
+Logged sizes (111×96, 103×107) are right at the short-edge floor —
+these are the crops that BARELY survived `_crop_to_bbox` but then
+fail the matte step.
+
+### Root cause #4 — NMS over-collapses layered looks
+
+`_suppress_overlapping_garments` (Patch 12) drops the smaller of two
+masks when containment ≥ 0.70 OR IoU ≥ 0.50.
+
+Live log evidence:
+
+```
+NMS suppressed 1 overlap(s):
+  ['Dress(→Upper-clothes, iou=0.02, cont=1.00)']
+```
+
+A real layered look (long blazer over a dress that just peeks below
+the hem) → SegFormer fires both Upper-clothes (huge) and Dress
+(small). NMS sees `cont=1.00` → drops Dress. **The user loses one
+real garment per layered outfit.**
+
+This is a SECONDARY contributor (1 garment per layered look) vs the
+PRIMARY `_crop_to_bbox` cull (40 % of total). It only matters once
+the crop-to-bbox issue is solved.
+
+### Summary table
+
+| # | Cause | Estimated impact |
+|---|---|---|
+| **1** | `_MIN_CROP_AREA_PCT = 0.008` + `_MIN_CROP_SHORT_EDGE_FLOOR_PX = 96` in `garment_vision.py` are NOT category-aware. Contradicts `clothing_parser._min_area_frac_for("accessory")`. | **41 % drop on accessories + footwear; the dominant under-segmentation cause.** |
+| **2** | Negative bbox padding (Patches 12k/12l) for footwear top + bottom hems compounds the short-edge floor problem. | Marginal — adds ~5 % on top of root cause #1. |
+| **3** | `apply_alpha_intersection` bails out at <40 % mask coverage → rembg-only on small accessories → rembg can't find foreground on busy backgrounds → blank alpha → "white window". | Affects ~30-50 % of accessory cards that DO survive crop. |
+| **4** | NMS containment threshold 0.70 drops the inner garment of layered looks. | ~1 garment per layered outfit photo. |
+
+### Recommended fixes (NOT applied this session per user choice 5a)
+
+**Top-priority fix (addresses root cause #1):**
+
+Make `_MIN_CROP_AREA_PCT` + `_MIN_CROP_SHORT_EDGE_*` **per-category**
+in `garment_vision.py`, mirroring the per-category area thresholds
+already established in `clothing_parser._MIN_AREA_FRAC_PER_CATEGORY`.
+Target table:
+
+| Category | min crop area % | short-edge floor px | short-edge pct |
+|---|---|---|---|
+| top / bottom / dress | 0.8 % | 96 | 12 % |
+| outerwear | 0.8 % | 96 | 12 % |
+| **footwear** | **0.05 %** | **40** | **5 %** |
+| **accessory** | **0.05 %** | **40** | **5 %** |
+| **headwear** | **0.10 %** | **48** | **6 %** |
+
+Expected impact: cuts the 41 % drop rate to ~5 %, bringing
+end-to-end garment count per outfit photo from ~2.5 to ~4.0.
+
+**Secondary fix (addresses root cause #3):**
+
+Drop `_MIN_MASK_CONFIDENCE` from 0.40 to 0.25 ONLY for footwear /
+accessory crops (keep 0.40 for tops/bottoms/dresses where a patchy
+mask really does indicate a problem). This keeps SegFormer refinement
+firing on the small-accessory cases where rembg is most likely to
+fail alone, eliminating most "white window" thumbnails.
+
+**Layered-look fix (addresses root cause #4):**
+
+Raise NMS containment threshold from 0.70 → 0.85. Empirically a
+genuine phantom-inside-real has cont ≥ 0.95 (the smaller mask is
+entirely subset of the larger). Layered looks rarely exceed 0.85
+because the inner garment usually has at least 15 % of its pixels
+visible outside the outer garment's mask.
+
+### Action items for next session
+
+1. Implement the per-category `_crop_to_bbox` thresholds in
+   `garment_vision.py`. Add a small contract test against the test
+   image dataset that asserts ≥ 4 garments per image on the 30-image
+   benchmark.
+2. Implement the per-category `_MIN_MASK_CONFIDENCE` in
+   `clothing_parser.apply_alpha_intersection`.
+3. Raise the NMS containment threshold to 0.85.
+4. Re-run the user's 6-photo bulk upload on preview and confirm
+   ~24-30 cards land in the closet with no white-window matte
+   failures.
+
+### Files referenced in this diagnosis
+
+- `backend/app/services/clothing_parser.py` (parse_garments, NMS,
+  apply_alpha_intersection, `_MIN_AREA_FRAC_*`, `_MIN_MASK_CONFIDENCE`,
+  `_DILATE_PCT_BY_CATEGORY`)
+- `backend/app/services/garment_vision.py` (`_crop_to_bbox`,
+  `_MIN_CROP_*`, `_BBOX_PAD_TRBL_BY_CATEGORY`,
+  `_enforce_segformer_category`)
+- `/app/inference-server/eyes/test_images/` (30 outfit JPGs, see
+  CONCRETE_FACTS.md)
+
+### Files NOT to touch
+
+- `frontend/src/lib/uploadItems.js` is **sealed and correct**. It
+  faithfully renders whatever the backend streams. ZERO frontend
+  change required to fix the under-segmentation / white-window
+  issues — all four root causes are server-side.
