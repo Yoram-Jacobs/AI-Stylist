@@ -1,18 +1,18 @@
 [
   {
-    "content": "Bag fragmentation fix: extend _SINGLE_INSTANCE_CLASSES to accessories",
+    "content": "Add `_fit_crop_to_card` helper near `_crop_to_bbox` in `garment_vision.py`",
     "status": "completed"
   },
   {
-    "content": "Test bag fix on 0007/0009 + canonical batch",
+    "content": "Apply helper at the 5 crop_base64 encoding sites (_build_fullframe_item, _analyse_one_crop, _build_batched_results, analyze_outfit_stream items_meta, analyze_outfit_one_pass)",
     "status": "completed"
   },
   {
-    "content": "B1 cap fix: category-aware ordering in _filter_useful_detections",
+    "content": "Run python-based unit verification: pad small + large + RGBA + RGB crops; assert canvas size & alpha behaviour",
     "status": "completed"
   },
   {
-    "content": "Test cap fix",
+    "content": "Run ruff lint on garment_vision.py and confirm backend service stays up",
     "status": "completed"
   }
 ]

@@ -1418,6 +1418,101 @@ def _solid_alpha_coverage(png_bytes: bytes) -> float | None:
         return None
 
 
+# Frontend card window aspect (`aspect-[3/4]` in AddItem.jsx). The
+# canvas dimensions below preserve that 3:4 portrait ratio at a
+# resolution that's large enough to look crisp on retina displays
+# yet small enough to keep the streamed `items_meta` payload light.
+_CARD_CANVAS_W = 900
+_CARD_CANVAS_H = 1200
+
+
+def _fit_crop_to_card(
+    crop_bytes: bytes,
+    *,
+    crop_mime: str = "image/jpeg",
+    canvas_w: int = _CARD_CANVAS_W,
+    canvas_h: int = _CARD_CANVAS_H,
+) -> tuple[bytes, str]:
+    """Rescale a per-item crop and center it on a fixed-aspect canvas.
+
+    The frontend renders each garment card inside an
+    ``aspect-[3/4]`` portrait window with ``object-cover``. Without
+    normalisation, crop bytes coming out of the pipeline span a wide
+    range of aspect ratios:
+
+      * wide footwear / belt crops → ``object-cover`` clips the heel
+        and toe out of view;
+      * narrow earring / strap crops → the item shrinks to a thin
+        sliver inside the card;
+      * the rembg matte from a tiny-bbox accessory can come back at
+        full source resolution (rembg composites alpha onto the
+        original full-res RGB), so the card receives a multi-MB
+        image where the visible garment occupies only a fraction of
+        the frame.
+
+    This helper produces a uniform 3:4 portrait canvas containing
+    the crop, centered and downscaled (NEVER upscaled — we keep
+    small crops at their native resolution to avoid jaggy
+    pixel-doubling). RGBA inputs preserve their alpha on a fully
+    transparent canvas; RGB inputs are pasted onto a neutral white
+    canvas and stay JPEG. Returns ``(out_bytes, out_mime)``.
+
+    On any decode / re-encode failure we fall back to the original
+    bytes + mime so a single bad crop can never break the response.
+    """
+    try:
+        img = Image.open(io.BytesIO(crop_bytes))
+        img.load()
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
+    has_alpha = (
+        img.mode in ("RGBA", "LA")
+        or (img.mode == "P" and "transparency" in img.info)
+    )
+    try:
+        if has_alpha:
+            img = img.convert("RGBA")
+        else:
+            img = img.convert("RGB")
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
+    iw, ih = img.size
+    if iw <= 0 or ih <= 0:
+        return crop_bytes, crop_mime
+
+    # Downscale to fit; never upscale (preserves crisp edges on tiny
+    # accessories like rings / earrings).
+    scale = min(canvas_w / float(iw), canvas_h / float(ih), 1.0)
+    new_w = max(1, int(round(iw * scale)))
+    new_h = max(1, int(round(ih * scale)))
+    if (new_w, new_h) != (iw, ih):
+        try:
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+        except Exception:  # noqa: BLE001
+            return crop_bytes, crop_mime
+
+    ox = (canvas_w - new_w) // 2
+    oy = (canvas_h - new_h) // 2
+
+    try:
+        if has_alpha:
+            canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+            canvas.paste(img, (ox, oy), img)
+            buf = io.BytesIO()
+            canvas.save(buf, format="PNG", optimize=True)
+            return buf.getvalue(), "image/png"
+        canvas = Image.new("RGB", (canvas_w, canvas_h), (255, 255, 255))
+        canvas.paste(img, (ox, oy))
+        buf = io.BytesIO()
+        canvas.save(buf, format="JPEG", quality=90, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001
+        return crop_bytes, crop_mime
+
+
+
 def _scan_complete_json_objects(
     text: str, start_pos: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -1995,12 +2090,15 @@ class GarmentVisionService:
             or analysis.get("sub_category")
             or "garment"
         )
+        fitted_bytes, fitted_mime = _fit_crop_to_card(
+            crop_bytes, crop_mime=crop_mime,
+        )
         return {
             "label": label,
             "kind": kind_hint or "garment",
             "bbox": [0, 0, 1000, 1000],
-            "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-            "crop_mime": crop_mime,
+            "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+            "crop_mime": fitted_mime,
             "analysis": analysis,
         }
 
@@ -2420,12 +2518,15 @@ class GarmentVisionService:
                     det.get("label"),
                     repr(exc)[:160],
                 )
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime=crop_mime,
+            )
             return {
                 "label": det.get("label") or "garment",
                 "kind": det.get("kind") or "garment",
                 "bbox": det.get("bbox"),
-                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                "crop_mime": crop_mime,
+                "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                "crop_mime": fitted_mime,
                 "analysis": analysis,
                 "reconstruction": reconstruction_payload,
                 # Patch M14 — Marker fields used by the ``/closet`` save
@@ -2574,13 +2675,16 @@ class GarmentVisionService:
                         "label=%s: %s",
                         det.get("label"), repr(exc)[:160],
                     )
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime=crop_mime,
+            )
             out.append(
                 {
                     "label": det.get("label") or "garment",
                     "kind": det.get("kind") or "garment",
                     "bbox": det.get("bbox"),
-                    "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                    "crop_mime": crop_mime,
+                    "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                    "crop_mime": fitted_mime,
                     "analysis": analysis,
                     "reconstruction": None,
                     "needs_reconstruction": needs_reconstruction,
@@ -3160,17 +3264,17 @@ class GarmentVisionService:
         # Emit the detect frame FIRST — gives the frontend everything
         # it needs to render placeholder cards while we wait for
         # per-item analyses to stream in.
-        items_meta = [
-            {
+        items_meta = []
+        for d, crop_b, crop_m in crops:
+            fitted_b, fitted_m = _fit_crop_to_card(crop_b, crop_mime=crop_m)
+            items_meta.append({
                 "label": d.get("label") or "garment",
                 "kind": d.get("kind") or "garment",
                 "bbox": d.get("bbox"),
-                "crop_base64": base64.b64encode(crop_b).decode("ascii"),
-                "crop_mime": crop_m,
+                "crop_base64": base64.b64encode(fitted_b).decode("ascii"),
+                "crop_mime": fitted_m,
                 "defer_matte": defer_matte,
-            }
-            for (d, crop_b, crop_m) in crops
-        ]
+            })
         yield {"type": "detect", "count": len(crops), "items_meta": items_meta}
 
         # Stream-analyse the crops via batched Gemini stream.
@@ -3411,12 +3515,15 @@ class GarmentVisionService:
                 or "garment"
             )
 
+            fitted_bytes, fitted_mime = _fit_crop_to_card(
+                crop_bytes, crop_mime="image/jpeg",
+            )
             items.append({
                 "label": label,
                 "kind": "garment",
                 "bbox": bbox,
-                "crop_base64": base64.b64encode(crop_bytes).decode("ascii"),
-                "crop_mime": "image/jpeg",
+                "crop_base64": base64.b64encode(fitted_bytes).decode("ascii"),
+                "crop_mime": fitted_mime,
                 "analysis": analysis,
                 # NEW \u2014 frontend reads this to decide whether to render
                 # the opt-in "Repair photo" CTA (Phase 2 wires the actual
