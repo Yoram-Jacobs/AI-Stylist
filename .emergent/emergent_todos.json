@@ -1,30 +1,22 @@
 [
   {
-    "content": "Patch M20.5: unify silent batch path with interactive analyzeCard+saveAll",
+    "content": "Backend: add post-bail-out alpha-coverage check in `_run_background_matte`. When apply_alpha_intersection bailed out AND rembg-only alpha < 8% → delete item.",
     "status": "completed"
   },
   {
-    "content": "Replace bgBatch state with simpler bulkInfo {totalFiles, skippedDuplicates}; derive progress via useMemo from cards",
+    "content": "Mirror the same check in `clean_background_for_item` (the manual /clean-background endpoint) for parity",
     "status": "completed"
   },
   {
-    "content": "Remove handleBatchBackground + processOne (~360 lines)",
+    "content": "Frontend: harden workStore polish poll to handle 404 (deleted item) — remove from pending queue + closetStore",
     "status": "completed"
   },
   {
-    "content": "Modify handleFiles: always continueInteractive; when files>threshold set bulkInfo + auto-call saveAll via saveAllRef",
+    "content": "Verify: backend lints + restart, frontend lints, screenshot smoke test",
     "status": "completed"
   },
   {
-    "content": "Simplify DuplicateConfirmDialog handlers (drop pendingBatchSave branch, ~70 LoC)",
-    "status": "completed"
-  },
-  {
-    "content": "Stamp analyzeError on failed analyzeCard for the derived bgBatch.analyzeFailed counter",
-    "status": "completed"
-  },
-  {
-    "content": "Lint + build clean; file shrank from 2370→2086 lines (-12%)",
+    "content": "Update plan.md with the fix details + remove the 'NOT applied this session' caveat",
     "status": "completed"
   }
 ]

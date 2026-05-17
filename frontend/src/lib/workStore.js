@@ -100,9 +100,17 @@ async function _pollOnce() {
   }
 
   // GET each pending item. We swallow per-item errors so a transient
-  // 5xx on one item doesn't kill the rest.
+  // 5xx on one item doesn't kill the rest. Wrap each error so we can
+  // distinguish a 404 (item DELETED by the backend — e.g. Patch 12m
+  // dropped a phantom region whose matte came back blank from both
+  // SegFormer and rembg) from transient network errors. A 404 is
+  // TERMINAL — we drop the item from the polish queue AND from the
+  // local closet store so the user doesn't see a permanently
+  // pending "white window" card.
   const results = await Promise.all(
-    pendingIds.map((id) => api.getItem(id).catch(() => null)),
+    pendingIds.map((id) =>
+      api.getItem(id).catch((err) => ({ _err: err, _id: id })),
+    ),
   );
 
   let drained = false;
@@ -111,7 +119,21 @@ async function _pollOnce() {
   let newlyCompleted = 0;
 
   for (const item of results) {
-    if (!item || !item.id) continue;
+    if (!item) continue;
+    // Patch 12m handling — backend deletion surfaces as 404.
+    if (item._err) {
+      const status = item._err?.response?.status;
+      if (status === 404) {
+        nextSet.delete(item._id);
+        delete nextStartedAt[item._id];
+        newlyCompleted += 1;
+        try { closetStore.remove(item._id); } catch { /* swallow */ }
+      }
+      // Any other error (network blip, 5xx) — leave the item in
+      // the queue; next tick will retry.
+      continue;
+    }
+    if (!item.id) continue;
     // Always push the freshest doc into closetStore so the Closet
     // page picks it up next render — even if the status is still
     // "pending" we want the latest analysis fields / thumbnails.
