@@ -1,18 +1,26 @@
 [
   {
-    "content": "Fix `buildBaseCard` in analyzeCard to propagate source fingerprints + filename + sizeBytes + isDuplicate from the original draft card",
+    "content": "Read remaining sections of AddItem.jsx (1180-2118) to fully understand UI surface",
     "status": "completed"
   },
   {
-    "content": "Simplify `handleBulkUpload` — drop the setTimeout(0)/saveAllRef race in favor of direct `setPendingAutoSave(true)`",
+    "content": "Design sealed public API for uploadItems.js: start(files, opts), getSnapshot, subscribe, useUploadItems hook",
     "status": "completed"
   },
   {
-    "content": "Sanity check: esbuild compile + ESLint clean",
+    "content": "Create /app/frontend/src/lib/uploadItems.js — extract pipeline (continueInteractive, analyzeCard, saveAll, pendingAutoSave logic, buildCreatePayload)",
     "status": "completed"
   },
   {
-    "content": "Verify fix via testing agent (code review + backend API check) — 13 items post-patch confirmed carrying source_sha256",
-    "status": "completed"
+    "content": "Rewrite /app/frontend/src/pages/AddItem.jsx as thin shell (~300 LoC) consuming useUploadItems(); drop bulkInfo branching; drop full-field per-card editor (keep only inline edits)",
+    "status": "in_progress"
+  },
+  {
+    "content": "Verify: ESLint + esbuild + screenshot smoke (1 photo / 5 photos / 7+ photos)",
+    "status": "pending"
+  },
+  {
+    "content": "Update plan.md with Phase U1 + U2 completion notes",
+    "status": "pending"
   }
 ]
