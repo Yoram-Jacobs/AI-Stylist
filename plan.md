@@ -1,5 +1,88 @@
 # DressApp — Development Plan (Core-first) **UPDATED (Eyes v3 / Gemma 4 E2B self-host LIVE on production VPS)**
 
+---
+
+## 🔖 SESSION HANDOFF — 17 May 2026 (Neo, context reset)
+
+> User asked for a clean context reset. Latest state captured below so
+> the next session can resume without re-reading the full 1800-line plan.
+
+### What just shipped this session
+
+- **Patch M20.5.2** — Bulk upload pipeline (>5 photos) regression fix.
+  See full entry further down in this file (search `M20.5.2`).
+  - Root cause: `buildBaseCard` in `AddItem.jsx::analyzeCard` was
+    dropping 6 source-photo fingerprint fields when splitting the
+    NDJSON `detect` frame into per-garment placeholder cards.
+    Saved closet items had `source_sha256=null`/`source_phash=null`,
+    which triggered the Closet page's hash-repair + thumb-repair
+    streams to target them as "legacy items needing rehash" and
+    fail (the saved `image_base64` is the CROP, not the original
+    photo, so server-side rehash had nothing valid to chew on).
+    Surface errors: "Couldn't refresh fingerprints / thumbnails",
+    no duplicate skip on re-upload, polishing flow stuck.
+  - Also replaced a brittle `setTimeout(0, saveAllRef.current())`
+    auto-save trigger in `handleBulkUpload` with a direct
+    `setPendingAutoSave(true)`. saveAll now fires ONCE per bulk
+    batch, not twice.
+  - Files: `frontend/src/pages/AddItem.jsx` (+35 / −22 LoC).
+  - Verification: ESLint clean, esbuild clean, testing agent
+    confirmed 13 items uploaded post-patch already carry
+    `source_sha256`; backend persistence verified
+    (`closet.py` lines 704-709 wired through).
+
+### Status of preview vs production
+
+- **Preview pod** has `M20.5.2`.
+- **Production pod (dressapp.co)** has the broken M20.5 / M20.5.1
+  — user must redeploy to push the fix.
+
+### Open / paused work (priority-ordered)
+
+- **P0 — User redeploys M20.5.2 to dressapp.co** to clear the
+  bulk-upload regression on production.
+- **P1 — Backfill 34 legacy closet items** missing `source_sha256`.
+  Hash-repair stream from /closet handles this; user can trigger
+  manually or it will run automatically next session.
+- **P1 — CCP ground-truth class remap** in
+  `/app/scripts/run_eyes_benchmark.py`.
+- **P1 — Rewrite Eyes deployment runbook** for `llama-server` GGUF
+  (drop the HF_TOKEN reference; target arch is `llama.cpp + GGUF`).
+- **P2 — Vertex AI Try-On (Phase T1)** — blocked on user populating
+  `.env` with the Google Service Account JSON.
+- **P2 — Phase V4.2/V4.3** — Backend STT migration (Whisper →
+  Gemma-4 audio tower) + Frontend TTS swap (Deepgram → browser
+  speechSynthesis / Capacitor TTS). Both paused.
+
+### Known constraints (re-read before next change)
+
+- **No `HF_TOKEN`.** Target Eyes arch is strictly `llama.cpp + GGUF`.
+- **Frontend dependency policy:** never edit `package.json` by hand;
+  always `yarn add <pkg>`.
+- **Backend dependency policy:** never edit `requirements.txt` by
+  hand; `pip install <pkg> && pip freeze > backend/requirements.txt`.
+- **Never modify** `REACT_APP_BACKEND_URL`, `MONGO_URL` in `.env`s.
+- **MongoDB** uses UUID `id`s only — never `ObjectId`.
+- Backend API routes MUST be prefixed `/api`.
+
+### Quick repro for next agent
+
+To test bulk upload after a redeploy or further change:
+
+1. Drop 6+ JPGs from `/app/inference-server/eyes/test_images/`
+   (0001..0030.jpg) onto /add page.
+2. Verify bulk progress card appears, WorkProgressFloater pill at
+   bottom-right, items land in /closet with `source_sha256` /
+   `source_phash` non-null (check via DevTools Network → POST
+   /api/v1/closet body or GET /api/v1/closet items).
+3. Re-upload the same 6 files → pre-flight should skip them with
+   toast "Skipped N photos already in your closet".
+4. Wait ~30 s after save → polish badges drain → "You have news in
+   your closet" Sonner toast fires exactly once.
+5. No "Couldn't refresh fingerprints / thumbnails" banners.
+
+---
+
 > 📌 **Last in-chat session — 14 May 2026.** See
 > [`docs/SESSION_2026_05_14.md`](./docs/SESSION_2026_05_14.md) for the
 > full patch-by-patch log. TL;DR shipped in that session:
