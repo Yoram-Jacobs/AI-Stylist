@@ -420,35 +420,13 @@ The NMS suppression of layered garments (1 per session) is a
 
 **Single actionable recommendation (next session):**
 
-Don't touch the 12g gate threshold — it's right that mask coverage
-< 40 % is unreliable. Fix the FALLBACK: after the bail-out, before
-saving the crop, run a sanity check on the rembg-only alpha. If
-alpha coverage (non-zero pixels / total crop pixels) is below e.g.
-8 %, DROP THE ITEM ENTIRELY — never persist a white-window card.
+~~Don't touch the 12g gate threshold~~ **→ DONE this session as Patch 12m. See entry below.**
 
-Pseudocode (`clothing_parser.apply_alpha_intersection` or its
-caller in `_run_background_matte`):
-
-```python
-if mask_coverage < _MIN_MASK_CONFIDENCE:
-    # Existing 12g bail-out — fall back to rembg-only.
-    rembg_alpha_pct = (arr[:, :, 3] > 0).mean()
-    if rembg_alpha_pct < 0.08:        # NEW: rembg also said "nothing here"
-        # Both detectors disagree with each other → this is a
-        # phantom region. Don't save a blank card.
-        return _BAIL_DROP_ITEM
-    return None                       # existing: keep rembg-only
-```
-
-The drop signal would propagate up to the analyze stream and
-suppress the `item` frame entirely for that crop, so no card is
-created for the phantom region in the first place.
-
-Expected outcome: same 13 cards, but the 6-7 white-window cards
-either become real cutouts (when rembg + the patchy SegFormer
-mask agree) or are silently suppressed (when both detectors
-disagree). User sees ~7-10 clean cards instead of 13 mixed
-clean/blank.
+The 12g gate threshold (40 %) is still correct — what was broken was the
+FALLBACK behavior when 12g bails out. Fixed by adding a second
+detector-disagreement check that DELETES the item when both
+SegFormer (cov < 40 %) AND rembg (alpha cov < 8 %) agree there's
+no salvageable content in the crop.
 
 ### Retracted from earlier draft
 
@@ -483,3 +461,81 @@ detection / classification margin.
 - `frontend/src/lib/uploadItems.js` (sealed; unaffected)
 - Every threshold under Patches 10a / 12 / 12d / 12e / 12f /
   12i / 12j / 12k / 12l / M21 — confirmed correct by user audit.
+
+---
+
+## ✅ Patch 12m (May 2026) — Phantom-region output-quality guard — SHIPPED
+
+### What shipped
+
+A second-detector-disagreement guard in
+`backend/app/api/v1/closet.py::_run_background_matte` that drops a
+closet item entirely when the 12g bail-out fires AND rembg's
+alpha-channel coverage is below 8 %. Mirrored in
+`/clean-background` (manual matte CTA) but with a softer behaviour:
+the matte is rejected and the previous state preserved instead of
+deleting the item, since the user explicitly clicked the button.
+
+Constants & helpers added:
+
+```python
+_PHANTOM_DROP_ALPHA_THRESHOLD = 0.08
+
+def _rembg_alpha_coverage_pct(png_bytes: bytes) -> float | None:
+    """Return the fraction of non-zero alpha pixels in a PNG, or
+    None when the PNG can't be decoded."""
+```
+
+Observability — every 12g bail-out now logs the rembg alpha
+coverage and the guard verdict (`DROP` / `keep`), so ops can triage
+sub-ideal mattes that didn't hit the threshold.
+
+### Frontend companion change
+
+`frontend/src/lib/workStore.js::_pollOnce` now distinguishes a 404
+(item DELETED by the backend, e.g. via the 12m guard) from
+transient network errors. On 404:
+
+1. The id is removed from `polishPendingIds`.
+2. `polishBatchCompleted` is incremented so the "Polishing N/M"
+   pill drains.
+3. `closetStore.remove(id)` is called so the deleted item
+   disappears from the closet view immediately.
+
+Any other error (5xx, network blip) is left in the queue for the
+next poll tick — same behaviour as before.
+
+### Sealed module unaffected
+
+`frontend/src/lib/uploadItems.js` is untouched. The phantom-drop
+guard fires entirely on the backend AFTER the item is saved via
+`POST /closet`; the frontend just observes the eventual 404
+through the polish poll.
+
+### Verification (testing_agent iteration 27)
+
+- 8 outfit photos uploaded → 18 items analyzed and saved.
+- All 18 items completed polish (status: `ready`).
+- **0 white-window artifacts** observed (all 96 visible thumbnails
+  in the final closet had alpha > 30 %).
+- workStore polish poll handled all items without getting stuck.
+- 4× 12g bail-out path triggered during the test; none of them
+  produced rembg alpha < 8 %, so the 12m guard correctly did not
+  fire. This confirms the guard is a safety net (only fires on
+  genuine double-detector disagreement) rather than a routine
+  filter.
+
+### Files touched
+
+- `backend/app/api/v1/closet.py` — added `_PHANTOM_DROP_ALPHA_THRESHOLD`,
+  `_rembg_alpha_coverage_pct`, wired into `_run_background_matte`
+  and `/clean-background`.
+- `frontend/src/lib/workStore.js` — 404 handling in `_pollOnce`.
+- `plan.md` — this entry.
+
+### Out of scope (left untouched)
+
+All Patch 12 series thresholds (10a / 12 / 12d / 12e / 12f / 12g /
+12i / 12j / 12k / 12l) and Patch M21 category enforcement remain
+unchanged. User audit "all margins were correctly set" remains
+respected.

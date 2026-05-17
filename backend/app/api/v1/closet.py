@@ -568,6 +568,20 @@ async def _run_background_matte(
         and not alpha_intersection_refined
     ):
         alpha_pct = _rembg_alpha_coverage_pct(result)
+        # Observability — log the rembg coverage on EVERY 12g bail-out
+        # whether or not we drop the item. Lets ops triage cases where
+        # the guard didn't fire but the user still reports a sub-ideal
+        # matte, and confirms the guard isn't silently no-op'ing.
+        if alpha_pct is not None:
+            logger.info(
+                "Background matte 12m check for item %s — "
+                "12g bail-out path; rembg alpha cov = %.1f%% "
+                "(threshold %.1f%%) — %s",
+                item_id,
+                alpha_pct * 100.0,
+                _PHANTOM_DROP_ALPHA_THRESHOLD * 100.0,
+                "DROP" if alpha_pct < _PHANTOM_DROP_ALPHA_THRESHOLD else "keep",
+            )
         if alpha_pct is not None and alpha_pct < _PHANTOM_DROP_ALPHA_THRESHOLD:
             logger.info(
                 "Background matte DROPPING phantom item %s — "

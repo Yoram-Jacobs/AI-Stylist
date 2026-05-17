@@ -9,14 +9,14 @@
   },
   {
     "content": "Frontend: harden workStore polish poll to handle 404 (deleted item) — remove from pending queue + closetStore",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Verify: backend lints + restart, frontend lints, screenshot smoke test",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Update plan.md with the fix details + remove the 'NOT applied this session' caveat",
-    "status": "pending"
+    "status": "completed"
   }
 ]
