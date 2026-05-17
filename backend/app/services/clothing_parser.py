@@ -1356,12 +1356,59 @@ def apply_alpha_intersection(
     except Exception:  # noqa: BLE001
         soft_mask = mask_resized
 
+    # Geometric head-exclusion for torso garments.
+    #
+    # For tops / outerwear / dresses / full-body, the wearer's head
+    # always sits ABOVE the garment. SegFormer's per-pixel Face / Hair
+    # classification is imperfect at edges (translucent hair strands,
+    # the neck region — which has NO dedicated class in ATR-18 —
+    # gets argmax'd as either Face or Upper-clothes depending on
+    # local contrast). The human-mask subtraction below can't catch
+    # what SegFormer didn't classify as Face/Hair in the first
+    # place. But geometrically, the rows ABOVE the first row with
+    # significant garment coverage are GUARANTEED head / neck / hair —
+    # the garment hasn't started yet. Wipe soft_mask in those rows
+    # so the alpha intersection forces alpha = 0 there, even if
+    # rembg insists on keeping the head as foreground.
+    #
+    # 5 % of crop height is left as a buffer below the first solid
+    # row to avoid clipping a high collar / ribbed-cuff edge that
+    # the SegFormer mask itself thinned out at the very top. The
+    # "significant coverage" threshold is 30 % of row width — most
+    # garment-body rows clear this comfortably; sparse rows from
+    # spaghetti straps / open collars stay below and the buffer
+    # protects them.
+    if category and category.lower().replace(" ", "") in {
+        "top", "outerwear", "dress", "fullbody",
+    }:
+        try:
+            row_mask = (mask_resized > 127)
+            row_cov = row_mask.mean(axis=1)
+            solid_rows = np.where(row_cov >= 0.30)[0]
+            if len(solid_rows) > 0:
+                first_solid_y = int(solid_rows[0])
+                cut_y = max(0, first_solid_y - int(0.05 * Hc))
+                if cut_y > 0:
+                    soft_mask[:cut_y, :] = 0
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "apply_alpha_intersection: head-exclusion skipped: %s",
+                repr(exc)[:120],
+            )
+
     # Subtract the human-body mask from the dilated soft-mask. Done
     # AFTER dilation so we don't accidentally shrink legitimate
     # garment halo on the non-skin side. The skin mask itself gets a
     # smaller dilation (half the garment budget) so it covers the
     # 1-2 px transition pixels at the body/garment seam, where
-    # SegFormer's per-pixel argmax often flickers.
+    # SegFormer's per-pixel argmax often flickers. A more aggressive
+    # dilation (≥ 1.5× the garment budget) was tried but on torso
+    # crops with a small head region the skin mask grew far enough
+    # to cannibalise the upper-jacket / collar pixels — solid alpha
+    # collapsed to sub-5 % and the phantom guard dropped the entire
+    # card. Keep this conservative; rely on the per-category bbox
+    # top-edge padding to cut off the bulk of the head/neck region
+    # BEFORE this mask intersection ever runs.
     if human_mask is not None:
         try:
             from PIL import ImageFilter as _IF
