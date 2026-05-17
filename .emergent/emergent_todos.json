@@ -1,34 +1,18 @@
 [
   {
-    "content": "Fix A: bbox/mask alignment in _bbox_crop_useful",
+    "content": "Bag fragmentation fix: extend _SINGLE_INSTANCE_CLASSES to accessories",
     "status": "completed"
   },
   {
-    "content": "Test A on 0001.jpg + a few more from test_images",
+    "content": "Test bag fix on 0007/0009 + canonical batch",
     "status": "completed"
   },
   {
-    "content": "Fix B: phantom guard in _matte_crops",
+    "content": "B1 cap fix: category-aware ordering in _filter_useful_detections",
     "status": "completed"
   },
   {
-    "content": "Test B",
-    "status": "completed"
-  },
-  {
-    "content": "Fix C: same-class collision in clothing_parser._split_instances",
-    "status": "completed"
-  },
-  {
-    "content": "Test C",
-    "status": "completed"
-  },
-  {
-    "content": "Fix D: surface + subtract human-skin mask (parser + consumer)",
-    "status": "completed"
-  },
-  {
-    "content": "Test D end-to-end",
+    "content": "Test cap fix",
     "status": "completed"
   }
 ]

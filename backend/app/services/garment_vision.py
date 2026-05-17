@@ -2115,6 +2115,20 @@ class GarmentVisionService:
         A single detection that covers ≥90% of the frame is treated as
         "analyse the whole photo" so we don't pay for an identical LLM
         call on a bbox-cropped copy.
+
+        Cap ordering is **category-aware**: when more useful
+        detections exist than ``cap`` slots, the rule is "keep one of
+        each kind first, then fill remaining slots by frame area
+        descending". The previous plain ``useful[:cap]`` slice
+        accepted whatever order the parser emitted (ATR class-id
+        ascending: Hat → Sunglasses → Upper-clothes → Skirt → Pants →
+        Belt → Shoes → Bag → Scarf) — a busy outfit with hat +
+        sunglasses + top + skirt + pants + belt + shoes + bag = 8
+        detections would lose Shoes + Bag every time because they sit
+        at the tail of the class-id order. Category-aware ordering
+        guarantees that at least one of (top, bottom, outerwear,
+        dress, footwear, headwear, accessory) wins a slot before any
+        category gets a second one.
         """
         useful: list[dict[str, Any]] = []
         for det in detections:
@@ -2126,7 +2140,40 @@ class GarmentVisionService:
             if area >= 1000 * 1000 * 0.9:
                 continue
             useful.append(det)
-        return useful[:cap]
+
+        if len(useful) <= cap:
+            return useful
+
+        # Group by ``kind`` and sort each group by bbox area
+        # descending so the bigger garment of each kind wins its slot.
+        from collections import defaultdict
+
+        by_kind: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for d in useful:
+            kind = (d.get("kind") or "garment").strip().lower()
+            by_kind[kind].append(d)
+        for kind in by_kind:
+            by_kind[kind].sort(
+                key=lambda d: (
+                    max(0, d["bbox"][2] - d["bbox"][0])
+                    * max(0, d["bbox"][3] - d["bbox"][1])
+                ),
+                reverse=True,
+            )
+
+        # Round-robin pick one per kind, then fill remaining slots
+        # by largest-area-first across whatever's left.
+        out: list[dict[str, Any]] = []
+        kinds = list(by_kind.keys())
+        while len(out) < cap:
+            picked_this_round = False
+            for kind in kinds:
+                if by_kind[kind] and len(out) < cap:
+                    out.append(by_kind[kind].pop(0))
+                    picked_this_round = True
+            if not picked_this_round:
+                break
+        return out
 
     @staticmethod
     def _bbox_crop_useful(

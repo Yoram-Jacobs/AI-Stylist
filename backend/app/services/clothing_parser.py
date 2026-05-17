@@ -316,20 +316,39 @@ def _recover_paired_footwear(
     return merged
 
 
-# Classes whose mask should ALWAYS be treated as a single instance,
-# regardless of how many disconnected blobs SegFormer's per-pixel
-# argmax produces. A high-contrast graphic print on a t-shirt or a
-# wide belt across a dress can break the mask into 2-5 disconnected
-# components, but anatomically the wearer can only have one
-# upper-garment / one bottom / one dress at a time. Splitting these
-# into separate "instances" was the root cause of the over-cropping
-# regression where graphic-print t-shirts produced multiple shredded
-# crops in the closet (one per fragment).
+# Classes whose mask should be passed through ``_split_into_spatial_groups``:
+# nearby fragments of a single object get merged, but two genuinely-
+# separate items of the same class still ship as two cards.
+#
+# Upper-clothes / Dress / Skirt / Pants — anatomically the wearer can
+# only have ONE per outfit, but SegFormer fragments their masks at
+# high-contrast prints, belts, sashes, etc. (a graphic-print t-shirt
+# can split into 2-5 disconnected components). Merging keeps the
+# garment whole.
+#
+# Hat / Sunglasses / Belt / Bag / Scarf — usually ONE per outfit. The
+# fragmentation pattern is different (a shoulder-bag strap fragments
+# from the bag body because they cross the torso at different
+# argmax-favoured colours; a long scarf can split where it drapes
+# over the shoulder). Same merge-then-split logic surfaces the
+# accessory as one card. Two genuinely-separate accessories (tote
+# + handbag, hat + bandana) still ship as two — they're > 5 % of
+# the frame's short edge apart and the spatial-groups splitter
+# breaks them.
+#
+# Left-shoe / Right-shoe are intentionally NOT here — they are
+# literally two-instance and need to stay split so the post-pass
+# pair-collapser can union them into a single "Shoes" card.
 _SINGLE_INSTANCE_CLASSES = {
     "Upper-clothes",
     "Dress",
     "Skirt",
     "Pants",
+    "Hat",
+    "Sunglasses",
+    "Belt",
+    "Bag",
+    "Scarf",
 }
 
 
@@ -417,7 +436,18 @@ def _split_into_spatial_groups(class_binary: np.ndarray) -> list[np.ndarray]:
         for frag in minors:
             if _bbox_gap(frag["bbox"], main["bbox"]) <= merge_gap:
                 main["mask"] = np.maximum(main["mask"], frag["mask"])
-        return [main["mask"]]
+        # Bridge disconnected fragments into the main blob (see the
+        # multi-major branch below for the rationale).
+        try:
+            from scipy import ndimage as _ndi
+            k = max(3, (merge_gap * 2 + 1) | 1)
+            structure = np.ones((k, k), dtype=bool)
+            bridged = _ndi.binary_closing(
+                main["mask"] > 0, structure=structure, iterations=1,
+            )
+            return [bridged.astype(np.uint8)]
+        except Exception:  # noqa: BLE001
+            return [main["mask"]]
 
     # Multiple majors — group by spatial proximity. Two majors merge
     # into the same group when their bbox gap is small (within
@@ -456,6 +486,34 @@ def _split_into_spatial_groups(class_binary: np.ndarray) -> list[np.ndarray]:
                 best_gap = gap
         if best is not None and best_gap is not None and best_gap <= absorb_gap:
             best["mask"] = np.maximum(best["mask"], frag["mask"])
+
+    # Bridge disconnected components within each group so the downstream
+    # ``_postprocess_mask`` "keep largest connected component" step
+    # doesn't kill the smaller half. Without this bridging step the
+    # merge above is purely bbox-level — the mask itself still has
+    # two (or more) disconnected blobs and ``_postprocess_mask`` then
+    # discards everything except the largest. The classic failure
+    # mode is a shoulder-bag whose strap and body are argmax-split:
+    # both fragments survive ``_split_into_spatial_groups``, both get
+    # merged into one group's mask, but the largest-component step
+    # drops the strap (or the body) anyway.
+    #
+    # The closing kernel scales with merge_gap × 2 + 1 (just enough
+    # to bridge the natural in-instance gap). Tighter would leave
+    # the components disconnected; looser would consume legitimate
+    # negative-space inside the garment (e.g. the hole between two
+    # halves of an open jacket).
+    for g in groups:
+        try:
+            from scipy import ndimage as _ndi
+            k = max(3, (merge_gap * 2 + 1) | 1)
+            structure = np.ones((k, k), dtype=bool)
+            bridged = _ndi.binary_closing(
+                g["mask"] > 0, structure=structure, iterations=1,
+            )
+            g["mask"] = bridged.astype(np.uint8)
+        except Exception:  # noqa: BLE001
+            pass  # leave un-bridged; will be partially clipped downstream
 
     return [g["mask"] for g in groups]
 
