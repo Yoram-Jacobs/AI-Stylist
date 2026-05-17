@@ -8,6 +8,44 @@ Tags are applied with `git tag -a vX.Y.Z -m "..."` and pushed to `origin`.
 
 ---
 
+## [unreleased] — 2026-05-17 — GarmentVision recovery
+
+Backend-only recovery patch following the 16 May `AddItem.jsx` regression
+(reverted to commit `fe45ba9`). Eight surgical fixes to `garment_vision.py`
+and `clothing_parser.py` that restored and hardened the AddItem pipeline:
+
+- **Mask alignment** — SegFormer mask sliced from the exact `box_px` the JPEG
+  was cut at; no more 5 % shift on asymmetric-padding categories.
+- **Phantom guard** — `_matte_crops` drops detections whose final RGBA
+  solid-alpha coverage is `< 5 %`. No more empty white cards in the closet.
+- **Same-class spatial split** — two layered tops in one SegFormer bbox
+  emerge as two detections via connected-component analysis.
+- **Human-mask subtraction + geometric head-exclusion** — face / hair /
+  limbs no longer leak into top, outerwear, or dress crops.
+- **Category-aware percentage short-edge floor** — replaces the old
+  absolute-pixel floor; shoes / belts / accessories survive at 8 % of
+  source short edge regardless of upload resolution.
+- **Mask-fragment bridging** — bag body + strap re-join into one
+  detection via morphological closing + convex-hull bridging.
+- **Category-aware cap ordering** — `_filter_useful_detections` guarantees
+  one item per kind survives before filling remaining slots by area.
+- **`_fit_crop_to_card`** — every emitted `crop_base64` is scaled to fit
+  a 900×1200 (3:4 portrait) canvas (always preserves aspect, no clipping)
+  and centered. RGBA → transparent PNG; RGB → white-padded JPEG. Applied
+  at all 5 base64-emit sites in `garment_vision.py` so Camera, Single,
+  Batch, streaming and one-pass paths render uniformly.
+
+Two new reference documents accompany this release:
+- `docs/GarmentVision.md` — full pipeline reference (stages, models,
+  config flags, failure modes, code locations).
+- `docs/GarmentVisionWaste.md` — the chronicle of the 16 May regression
+  and its recovery, with a timeline / prompt / action table.
+
+Frontend (`AddItem.jsx`, etc.) and `CONCRETE_FACTS.md` were intentionally
+untouched per user guardrail.
+
+---
+
 ## [v1.1.0] — 2026-05-02
 
 Marketplace Wave 2 (Swap + Donate pipelines) and Wave 3 (listing-level

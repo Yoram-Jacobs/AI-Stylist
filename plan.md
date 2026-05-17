@@ -1,6 +1,40 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Eyes v3 / Gemma 4 E2B self-host LIVE on production VPS)**
+# DressApp — Development Plan (Core-first) **UPDATED (GarmentVision recovery COMPLETE — 17 May 2026)**
 
-> 📌 **Last in-chat session — 14 May 2026.** See
+> 📌 **Last in-chat session — 17 May 2026.** GarmentVision pipeline
+> regression (hard-reset to `fe45ba9`) **fully recovered**. All eight
+> backend fixes shipped surgically; `AddItem.jsx` and the GOLD batched
+> pipeline remained untouched per user guardrail. Full pipeline
+> reference now lives in [`docs/GarmentVision.md`](./docs/GarmentVision.md);
+> the regression chronicle (timeline + prompt + action table) lives in
+> [`docs/GarmentVisionWaste.md`](./docs/GarmentVisionWaste.md). TL;DR:
+>
+> * **Mask alignment** — SegFormer mask now sliced from the exact
+>   `box_px` the JPEG was cut at (no more 5 % shift on asymmetric
+>   padding categories).
+> * **Phantom guard** — 5 % solid-alpha floor in `_matte_crops` drops
+>   empty white cards before they reach the closet.
+> * **Same-class spatial split** — two layered tops in one SegFormer
+>   bbox emerge as two detections.
+> * **Human-mask subtraction + geometric head-exclusion** — face / hair
+>   / limbs no longer leak into top / outerwear / dress crops.
+> * **Category-aware percentage short-edge floor** — resolution-invariant
+>   accessory recall (shoes at 8 % of frame survive on 550 px and 4 K
+>   uploads alike).
+> * **Mask-fragment bridging** — bag body + strap re-join into one item.
+> * **Category-aware cap ordering** — `_filter_useful_detections`
+>   guarantees one item per kind survives the cap before filling
+>   remaining slots by area.
+> * **`_fit_crop_to_card`** — every emitted `crop_base64` is scaled to
+>   fit a 900×1200 (3:4 portrait) canvas and centered, so small
+>   accessories no longer render as tiny dots and oversized rembg
+>   composites no longer overflow the card window. Applied at all 5
+>   base64-emit sites in `garment_vision.py` (Camera, Single, Batch,
+>   streaming, one-pass).
+>
+> **Frontend / `plan.md` / `CONCRETE_FACTS.md` were not bloated** —
+> recovery was strictly backend, code + two new doc files.
+>
+> 📌 **Prior session — 14 May 2026.** See
 > [`docs/SESSION_2026_05_14.md`](./docs/SESSION_2026_05_14.md) for the
 > full patch-by-patch log. TL;DR shipped in that session:
 >
