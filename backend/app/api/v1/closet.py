@@ -326,6 +326,86 @@ def _pick_segformer_mask_for_category(
     return max(candidates, key=_area).get("mask")
 
 
+# Patch 12m (May 2026) — Phantom-region output-quality guard.
+#
+# Companion to Patch 12g (``_MIN_MASK_CONFIDENCE = 0.40`` in
+# ``clothing_parser.apply_alpha_intersection``).
+#
+# Background
+# ----------
+# 12g treats a SegFormer mask covering < 40% of its bbox as
+# "unreliable" and bails out, leaving rembg's untouched output as the
+# final matte. That heuristic is correct for tops / bottoms /
+# dresses on plain backgrounds — rembg's edge-finder usually does the
+# right thing on its own there. But on tight ACCESSORY crops
+# (sunglasses, belts, bag straps, small jewellery) over BUSY or
+# LOW-CONTRAST backgrounds (a brown belt against tan trousers, a
+# beanie against dark hair, a bag strap on a textured top), rembg
+# also fails to find foreground and returns a near-zero alpha.
+#
+# The user-visible symptom: the closet card shows the rembg matte
+# (because ``bestImageUrl`` prefers ``clean_image_url`` over
+# ``original_image_url``), and a near-zero alpha renders as a
+# mostly-transparent "white window" with a faint garment outline.
+# Repro logs (May 2026 6-photo bulk upload):
+#
+#   apply_alpha_intersection: SegFormer mask too patchy
+#     (9.2 % coverage < 40 % threshold) — falling back to rembg-only
+#     (crop 111×96).
+#   apply_alpha_intersection: SegFormer mask too patchy
+#     (6.1 % coverage < 40 % threshold) — falling back to rembg-only
+#     (crop 103×107).
+#
+# User reported "half of 13 cards are white windows" ≈ 7 cards. The
+# matte logs recorded exactly 7 bail-outs that same session.
+#
+# Guard semantics
+# ---------------
+# Only the BAIL-OUT path of 12g enters this check. If
+# ``apply_alpha_intersection`` succeeded (or it wasn't attempted
+# because SegFormer was disabled / produced no mask), rembg's output
+# is trusted — we do NOT second-guess matte primitives that
+# disagreed with no input.
+#
+# When BOTH detectors disagree (SegFormer-mask coverage < 40% AND
+# rembg alpha-channel coverage < ``_PHANTOM_DROP_ALPHA_THRESHOLD``),
+# we treat the detection as a phantom region and DELETE the item
+# entirely. ``_PHANTOM_DROP_ALPHA_THRESHOLD = 0.08`` matches the
+# user's chosen threshold (≈ 8% of pixels showing through). At
+# ≥ 8% there's typically enough garment visible that the user
+# would still find the card useful even with a sub-ideal matte;
+# below that the card is just visual noise.
+#
+# The check does NOT fire when SegFormer is disabled
+# (``USE_LOCAL_CLOTHING_PARSER=false``) — there's no second detector
+# to disagree with rembg in that case, so we keep rembg's verdict
+# even at low alpha (lightweight-deploy compatible).
+_PHANTOM_DROP_ALPHA_THRESHOLD = 0.08
+
+
+def _rembg_alpha_coverage_pct(png_bytes: bytes) -> float | None:
+    """Return the fraction of non-zero alpha pixels in a PNG, or
+    ``None`` when the PNG can't be decoded.
+
+    Used by :func:`_run_background_matte` (and the manual
+    ``/clean-background`` endpoint) as the second leg of the
+    Patch 12m phantom-region guard.
+    """
+    try:
+        import io as _io  # local import — PIL/numpy not needed elsewhere
+
+        from PIL import Image  # type: ignore[import-not-found]
+        import numpy as np  # type: ignore[import-not-found]
+
+        img = Image.open(_io.BytesIO(png_bytes)).convert("RGBA")
+        arr = np.asarray(img)
+        if arr.size == 0:
+            return 0.0
+        return float((arr[:, :, 3] > 0).mean())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _run_background_matte(
     item_id: str,
     raw_bytes: bytes,
@@ -436,7 +516,15 @@ async def _run_background_matte(
     # 3. Alpha intersection (best-effort) — refines edges and trims any
     #    non-garment foreground rembg kept. Skipped silently when the
     #    rembg PNG is missing or the SegFormer mask is unavailable.
+    #
+    # Patch 12m bookkeeping — track whether the bail-out path was hit
+    # so the phantom-region guard below knows whether to second-guess
+    # rembg's output. We only second-guess when both detectors had a
+    # chance to weigh in AND disagreed.
+    alpha_intersection_attempted = False
+    alpha_intersection_refined = False
     if result and seg_mask is not None:
+        alpha_intersection_attempted = True
         try:
             refined = _cp.apply_alpha_intersection(
                 result,
@@ -458,6 +546,7 @@ async def _run_background_matte(
                     item_id, len(result), len(refined),
                 )
                 result = refined
+                alpha_intersection_refined = True
             else:
                 logger.info(
                     "Background matte apply_alpha_intersection returned None "
@@ -468,6 +557,43 @@ async def _run_background_matte(
                 "Background matte alpha intersection skipped for item %s: %s",
                 item_id, repr(exc)[:160],
             )
+
+    # Patch 12m — Phantom-region output-quality guard. ONLY runs when
+    # the 12g bail-out path was taken (both detectors had a chance
+    # and disagreed). See the header comment on
+    # ``_PHANTOM_DROP_ALPHA_THRESHOLD`` for full rationale.
+    if (
+        result
+        and alpha_intersection_attempted
+        and not alpha_intersection_refined
+    ):
+        alpha_pct = _rembg_alpha_coverage_pct(result)
+        # Observability — log the rembg coverage on EVERY 12g bail-out
+        # whether or not we drop the item. Lets ops triage cases where
+        # the guard didn't fire but the user still reports a sub-ideal
+        # matte, and confirms the guard isn't silently no-op'ing.
+        if alpha_pct is not None:
+            logger.info(
+                "Background matte 12m check for item %s — "
+                "12g bail-out path; rembg alpha cov = %.1f%% "
+                "(threshold %.1f%%) — %s",
+                item_id,
+                alpha_pct * 100.0,
+                _PHANTOM_DROP_ALPHA_THRESHOLD * 100.0,
+                "DROP" if alpha_pct < _PHANTOM_DROP_ALPHA_THRESHOLD else "keep",
+            )
+        if alpha_pct is not None and alpha_pct < _PHANTOM_DROP_ALPHA_THRESHOLD:
+            logger.info(
+                "Background matte DROPPING phantom item %s — "
+                "SegFormer mask < 40%% AND rembg alpha cov = %.1f%% "
+                "(threshold %.1f%%; both detectors disagree, item is "
+                "almost certainly a hallucinated region)",
+                item_id,
+                alpha_pct * 100.0,
+                _PHANTOM_DROP_ALPHA_THRESHOLD * 100.0,
+            )
+            await db.closet_items.delete_one({"id": item_id})
+            return
 
     if not result:
         # Distinguish "rembg produced nothing" from "rembg produced
@@ -3765,6 +3891,39 @@ async def clean_item_background(
                     "%s: %s",
                     item_id, repr(exc)[:160],
                 )
+
+    # Patch 12m parity — when the alpha intersection bailed out
+    # (SegFormer mask < 40 % coverage AND rembg alpha < 8 %), reject
+    # the matte rather than persisting a near-blank "white window".
+    # Unlike the bulk-upload flow, here the user EXPLICITLY clicked
+    # "Clean background" on an existing item; deleting the item
+    # outright would be surprising, so we keep the previous state
+    # and return a non-applied response the frontend surfaces as a
+    # toast.
+    if (
+        settings.USE_LOCAL_CLOTHING_PARSER
+        and not intersection_applied
+    ):
+        alpha_pct = _rembg_alpha_coverage_pct(refined_png)
+        if alpha_pct is not None and alpha_pct < _PHANTOM_DROP_ALPHA_THRESHOLD:
+            logger.info(
+                "/clean-background REJECTED low-quality matte for item %s — "
+                "SegFormer mask < 40%% AND rembg alpha cov = %.1f%% "
+                "(threshold %.1f%%; keeping the prior crop)",
+                item_id,
+                alpha_pct * 100.0,
+                _PHANTOM_DROP_ALPHA_THRESHOLD * 100.0,
+            )
+            return {
+                "item": item,
+                "applied": False,
+                "reason": "low_quality_matte",
+                "detail": (
+                    "Background removal didn't find enough garment "
+                    "pixels — keeping the original crop. Try a "
+                    "cleaner photo or a brighter background."
+                ),
+            }
 
     out_b64 = base64.b64encode(refined_png).decode("ascii")
     data_url = f"data:image/png;base64,{out_b64}"
