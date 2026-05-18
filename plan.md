@@ -1,4 +1,3 @@
-# DressApp — Development Plan (Core-first) **UPDATED (Eyes v3 / Gemma 4 E2B self-host LIVE on production VPS)**
 
 ---
 
