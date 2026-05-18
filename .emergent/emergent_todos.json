@@ -1,18 +1,22 @@
 [
   {
-    "content": "Add `_fit_crop_to_card` helper near `_crop_to_bbox` in `garment_vision.py`",
+    "content": "Backend: add post-bail-out alpha-coverage check in `_run_background_matte`. When apply_alpha_intersection bailed out AND rembg-only alpha < 8% → delete item.",
     "status": "completed"
   },
   {
-    "content": "Apply helper at the 5 crop_base64 encoding sites (_build_fullframe_item, _analyse_one_crop, _build_batched_results, analyze_outfit_stream items_meta, analyze_outfit_one_pass)",
+    "content": "Mirror the same check in `clean_background_for_item` (the manual /clean-background endpoint) for parity",
     "status": "completed"
   },
   {
-    "content": "Run python-based unit verification: pad small + large + RGBA + RGB crops; assert canvas size & alpha behaviour",
+    "content": "Frontend: harden workStore polish poll to handle 404 (deleted item) — remove from pending queue + closetStore",
     "status": "completed"
   },
   {
-    "content": "Run ruff lint on garment_vision.py and confirm backend service stays up",
+    "content": "Verify: backend lints + restart, frontend lints, screenshot smoke test",
+    "status": "completed"
+  },
+  {
+    "content": "Update plan.md with the fix details + remove the 'NOT applied this session' caveat",
     "status": "completed"
   }
 ]
